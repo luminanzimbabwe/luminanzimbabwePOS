@@ -1,0 +1,818 @@
+import React, { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  Alert,
+  ActivityIndicator,
+  TextInput,
+  Modal,
+  RefreshControl,
+  FlatList,
+} from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { shopAPI } from '../services/api';
+import { shopStorage } from '../services/storage';
+
+const InventoryAuditTrailScreen = () => {
+  const navigation = useNavigation();
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [auditTrail, setAuditTrail] = useState([]);
+  const [filteredTrail, setFilteredTrail] = useState([]);
+  const [shopCredentials, setShopCredentials] = useState(null);
+
+  // Filter states
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedReasonCode, setSelectedReasonCode] = useState('All');
+  const [dateFilter, setDateFilter] = useState('All');
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Product-specific filter
+  const [selectedProduct, setSelectedProduct] = useState(null);
+
+  useEffect(() => {
+    loadShopCredentials();
+  }, []);
+
+  useEffect(() => {
+    if (shopCredentials) {
+      loadAuditTrail();
+    }
+  }, [shopCredentials]);
+
+  useEffect(() => {
+    filterAuditTrail();
+  }, [auditTrail, searchQuery, selectedReasonCode, dateFilter, selectedProduct]);
+
+  const loadShopCredentials = async () => {
+    try {
+      const credentials = await shopStorage.getCredentials();
+      if (credentials) {
+        setShopCredentials(credentials);
+      } else {
+        navigation.replace('Login');
+      }
+    } catch (error) {
+      console.error('❌ Error loading credentials:', error);
+      navigation.replace('Login');
+    }
+  };
+
+  const loadAuditTrail = async () => {
+    try {
+      const authData = {
+        email: shopCredentials.email,
+        password: shopCredentials.shop_owner_master_password,
+      };
+
+      let endpoint = '/audit-trail/';
+      if (selectedProduct) {
+        endpoint = `/products/${selectedProduct.id}/audit-history/`;
+      }
+
+      const response = await shopAPI.getCustomEndpoint(endpoint, authData);
+      console.log('📋 Audit trail loaded:', response.data);
+      
+      setAuditTrail(response.data || []);
+      
+    } catch (error) {
+      console.error('❌ Error loading audit trail:', error);
+      Alert.alert('Error', 'Failed to load audit trail.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const filterAuditTrail = () => {
+    let filtered = [...auditTrail];
+
+    // Search filter
+    if (searchQuery.trim()) {
+      filtered = filtered.filter(entry =>
+        entry.product_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        entry.action?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        entry.reason_code?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        entry.performed_by?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        entry.notes?.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    }
+
+    // Reason code filter
+    if (selectedReasonCode !== 'All') {
+      filtered = filtered.filter(entry => entry.reason_code === selectedReasonCode);
+    }
+
+    // Date filter
+    if (dateFilter !== 'All') {
+      const now = new Date();
+      const filterDate = new Date();
+      
+      switch (dateFilter) {
+        case 'today':
+          filterDate.setHours(0, 0, 0, 0);
+          break;
+        case 'week':
+          filterDate.setDate(now.getDate() - 7);
+          break;
+        case 'month':
+          filterDate.setMonth(now.getMonth() - 1);
+          break;
+      }
+      
+      filtered = filtered.filter(entry => 
+        new Date(entry.timestamp) >= filterDate
+      );
+    }
+
+    setFilteredTrail(filtered);
+  };
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadAuditTrail();
+  };
+
+  const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+    }).format(amount || 0);
+  };
+
+  const getActionIcon = (action) => {
+    switch (action?.toLowerCase()) {
+      case 'stock_received':
+        return '📦';
+      case 'stock_adjusted':
+        return '⚖️';
+      case 'product_created':
+        return '➕';
+      case 'product_updated':
+        return '✏️';
+      case 'product_deleted':
+        return '🗑️';
+      case 'stock_count':
+        return '📊';
+      default:
+        return '📝';
+    }
+  };
+
+  const getActionColor = (action) => {
+    switch (action?.toLowerCase()) {
+      case 'stock_received':
+        return '#10b981';
+      case 'stock_adjusted':
+        return '#f59e0b';
+      case 'product_created':
+        return '#3b82f6';
+      case 'product_updated':
+        return '#8b5cf6';
+      case 'product_deleted':
+        return '#dc2626';
+      case 'stock_count':
+        return '#6366f1';
+      default:
+        return '#6b7280';
+    }
+  };
+
+  const getReasonCodeColor = (reasonCode) => {
+    switch (reasonCode?.toLowerCase()) {
+      case 'purchase':
+        return '#10b981';
+      case 'adjustment':
+        return '#f59e0b';
+      case 'damage':
+        return '#dc2626';
+      case 'theft':
+        return '#dc2626';
+      case 'count_variance':
+        return '#6366f1';
+      case 'return':
+        return '#8b5cf6';
+      default:
+        return '#6b7280';
+    }
+  };
+
+  const getUniqueReasonCodes = () => {
+    const codes = [...new Set(auditTrail.map(entry => entry.reason_code).filter(Boolean))];
+    return ['All', ...codes];
+  };
+
+  const renderAuditEntry = ({ item: entry }) => (
+    <View style={styles.auditEntryCard}>
+      <View style={styles.auditEntryHeader}>
+        <View style={styles.auditEntryLeft}>
+          <Text style={styles.actionIcon}>{getActionIcon(entry.action)}</Text>
+          <View style={styles.auditEntryInfo}>
+            <Text style={styles.productName}>{entry.product_name || 'Unknown Product'}</Text>
+            <Text style={styles.actionText}>{entry.action?.replace('_', ' ').toUpperCase()}</Text>
+          </View>
+        </View>
+        <View style={styles.auditEntryRight}>
+          <Text style={styles.timestamp}>{formatDate(entry.timestamp)}</Text>
+          {entry.reason_code && (
+            <View style={[
+              styles.reasonCodeBadge,
+              { backgroundColor: getReasonCodeColor(entry.reason_code) }
+            ]}>
+              <Text style={styles.reasonCodeText}>{entry.reason_code}</Text>
+            </View>
+          )}
+        </View>
+      </View>
+
+      {entry.quantity_change && (
+        <View style={styles.quantityChange}>
+          <Text style={styles.quantityChangeText}>
+            Quantity: {entry.quantity_change > 0 ? '+' : ''}{entry.quantity_change}
+          </Text>
+          {entry.new_quantity !== undefined && (
+            <Text style={styles.newQuantityText}>
+              → New: {entry.new_quantity}
+            </Text>
+          )}
+        </View>
+      )}
+
+      {entry.price_change && (
+        <View style={styles.priceChange}>
+          <Text style={styles.priceChangeText}>
+            Price: {formatCurrency(entry.price_change)}
+          </Text>
+          {entry.new_price !== undefined && (
+            <Text style={styles.newPriceText}>
+              → New: {formatCurrency(entry.new_price)}
+            </Text>
+          )}
+        </View>
+      )}
+
+      {entry.performed_by && (
+        <Text style={styles.performedBy}>By: {entry.performed_by}</Text>
+      )}
+
+      {entry.notes && (
+        <Text style={styles.notes}>Note: {entry.notes}</Text>
+      )}
+
+      {entry.supplier_invoice && (
+        <Text style={styles.supplierInfo}>Invoice: {entry.supplier_invoice}</Text>
+      )}
+    </View>
+  );
+
+  const renderFilters = () => (
+    <View style={styles.filtersContainer}>
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search products, actions, notes..."
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholderTextColor="#999"
+        />
+      </View>
+
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
+        {/* Date Filter */}
+        <TouchableOpacity
+          style={[
+            styles.filterButton,
+            dateFilter !== 'All' && styles.filterButtonActive
+          ]}
+          onPress={() => {
+            const filters = ['All', 'today', 'week', 'month'];
+            const currentIndex = filters.indexOf(dateFilter);
+            const nextIndex = (currentIndex + 1) % filters.length;
+            setDateFilter(filters[nextIndex]);
+          }}
+        >
+          <Text style={[
+            styles.filterButtonText,
+            dateFilter !== 'All' && styles.filterButtonTextActive
+          ]}>
+            📅 {dateFilter === 'All' ? 'All Time' : dateFilter.charAt(0).toUpperCase() + dateFilter.slice(1)}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Reason Code Filter */}
+        <TouchableOpacity
+          style={[
+            styles.filterButton,
+            selectedReasonCode !== 'All' && styles.filterButtonActive
+          ]}
+          onPress={() => {
+            const codes = getUniqueReasonCodes();
+            const currentIndex = codes.indexOf(selectedReasonCode);
+            const nextIndex = (currentIndex + 1) % codes.length;
+            setSelectedReasonCode(codes[nextIndex]);
+          }}
+        >
+          <Text style={[
+            styles.filterButtonText,
+            selectedReasonCode !== 'All' && styles.filterButtonTextActive
+          ]}>
+            🏷️ {selectedReasonCode}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Toggle Filters */}
+        <TouchableOpacity
+          style={styles.filterButton}
+          onPress={() => setShowFilters(!showFilters)}
+        >
+          <Text style={styles.filterButtonText}>
+            {showFilters ? '👆 Hide' : '👇 More'}
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
+
+      {/* Advanced Filters */}
+      {showFilters && (
+        <View style={styles.advancedFilters}>
+          <Text style={styles.advancedFiltersTitle}>Filter Results:</Text>
+          <View style={styles.activeFilters}>
+            {searchQuery && (
+              <View style={styles.activeFilter}>
+                <Text style={styles.activeFilterText}>Search: "{searchQuery}"</Text>
+                <TouchableOpacity onPress={() => setSearchQuery('')}>
+                  <Text style={styles.removeFilterText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            {dateFilter !== 'All' && (
+              <View style={styles.activeFilter}>
+                <Text style={styles.activeFilterText}>Date: {dateFilter}</Text>
+                <TouchableOpacity onPress={() => setDateFilter('All')}>
+                  <Text style={styles.removeFilterText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            {selectedReasonCode !== 'All' && (
+              <View style={styles.activeFilter}>
+                <Text style={styles.activeFilterText}>Reason: {selectedReasonCode}</Text>
+                <TouchableOpacity onPress={() => setSelectedReasonCode('All')}>
+                  <Text style={styles.removeFilterText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </View>
+      )}
+    </View>
+  );
+
+  const renderHeader = () => (
+    <View style={styles.header}>
+      <TouchableOpacity onPress={() => navigation.goBack()}>
+        <Text style={styles.backButton}>← Back</Text>
+      </TouchableOpacity>
+      <Text style={styles.headerTitle}>📋 Inventory Audit Trail</Text>
+      <TouchableOpacity onPress={() => setRefreshing(true) || loadAuditTrail()}>
+        <Text style={styles.refreshButton}>🔄</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderStats = () => (
+    <View style={styles.statsContainer}>
+      <View style={styles.statCard}>
+        <Text style={styles.statValue}>{filteredTrail.length}</Text>
+        <Text style={styles.statLabel}>Total Entries</Text>
+      </View>
+      <View style={styles.statCard}>
+        <Text style={styles.statValue}>
+          {filteredTrail.filter(e => e.action === 'stock_received').length}
+        </Text>
+        <Text style={styles.statLabel}>Stock Received</Text>
+      </View>
+      <View style={styles.statCard}>
+        <Text style={styles.statValue}>
+          {filteredTrail.filter(e => e.action === 'product_updated').length}
+        </Text>
+        <Text style={styles.statLabel}>Updates</Text>
+      </View>
+    </View>
+  );
+
+  const renderActionButtons = () => (
+    <View style={styles.actionButtonsContainer}>
+      <TouchableOpacity style={styles.actionButton} onPress={handleReceiveInventory}>
+        <Text style={styles.actionButtonIcon}>📦</Text>
+        <Text style={styles.actionButtonText}>Receive</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.actionButton} onPress={handleStockAdjustment}>
+        <Text style={styles.actionButtonIcon}>⚖️</Text>
+        <Text style={styles.actionButtonText}>Adjust</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.actionButton} onPress={handleStockTake}>
+        <Text style={styles.actionButtonIcon}>📊</Text>
+        <Text style={styles.actionButtonText}>Stock Take</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const handleReceiveInventory = () => {
+    Alert.alert(
+      '📦 Receive Inventory',
+      'This would open a form to record new stock receipts from suppliers.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Proceed', 
+          onPress: () => {
+            // TODO: Navigate to receive inventory screen or open modal
+            console.log('🛒 Navigate to receive inventory screen');
+            Alert.alert('Feature Coming Soon', 'Inventory receiving functionality will be available in the next update.');
+          }
+        }
+      ]
+    );
+  };
+
+  const handleStockAdjustment = () => {
+    Alert.alert(
+      '⚖️ Stock Adjustment',
+      'This would open a form to adjust inventory levels for damaged, lost, or counted items.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Proceed', 
+          onPress: () => {
+            // TODO: Navigate to stock adjustment screen or open modal
+            console.log('📋 Navigate to stock adjustment screen');
+            Alert.alert('Feature Coming Soon', 'Stock adjustment functionality will be available in the next update.');
+          }
+        }
+      ]
+    );
+  };
+
+  const handleStockTake = () => {
+    Alert.alert(
+      '📊 Stock Take',
+      'This would start a physical inventory count to verify current stock levels.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Start', 
+          onPress: () => {
+            // TODO: Navigate to stock take screen or start count mode
+            console.log('🔍 Start stock take process');
+            Alert.alert('Feature Coming Soon', 'Stock take functionality will be available in the next update.');
+          }
+        }
+      ]
+    );
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        {renderHeader()}
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#3b82f6" />
+          <Text style={styles.loadingText}>Loading audit trail...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      {renderHeader()}
+      {renderFilters()}
+      {renderStats()}
+      {renderActionButtons()}
+
+      <FlatList
+        data={filteredTrail}
+        renderItem={renderAuditEntry}
+        keyExtractor={(item, index) => item.id?.toString() || index.toString()}
+        style={styles.content}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>📋 No Audit Trail Found</Text>
+            <Text style={styles.emptyText}>
+              {searchQuery || selectedReasonCode !== 'All' || dateFilter !== 'All'
+                ? 'Try adjusting your search or filter criteria.'
+                : 'No inventory changes have been recorded yet.'
+              }
+            </Text>
+          </View>
+        }
+      />
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#0a0a0a',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    backgroundColor: '#1a1a1a',
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  backButton: {
+    color: '#3b82f6',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  headerTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  refreshButton: {
+    color: '#3b82f6',
+    fontSize: 20,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#fff',
+    marginTop: 16,
+    fontSize: 16,
+  },
+  content: {
+    flex: 1,
+  },
+  filtersContainer: {
+    backgroundColor: '#1a1a1a',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  searchContainer: {
+    marginBottom: 12,
+  },
+  searchInput: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 8,
+    padding: 12,
+    color: '#fff',
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#444',
+  },
+  filterScroll: {
+    marginBottom: 8,
+  },
+  filterButton: {
+    backgroundColor: '#2a2a2a',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#444',
+  },
+  filterButtonActive: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#3b82f6',
+  },
+  filterButtonText: {
+    color: '#ccc',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  filterButtonTextActive: {
+    color: '#fff',
+  },
+  advancedFilters: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 8,
+    padding: 12,
+  },
+  advancedFiltersTitle: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  activeFilters: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  activeFilter: {
+    backgroundColor: '#3b82f6',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    gap: 4,
+  },
+  activeFilterText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  removeFilterText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  statsContainer: {
+    flexDirection: 'row',
+    padding: 16,
+    backgroundColor: '#1a1a1a',
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: '#2a2a2a',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+    marginHorizontal: 4,
+  },
+  statValue: {
+    color: '#3b82f6',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  statLabel: {
+    color: '#ccc',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  actionButtonsContainer: {
+    flexDirection: 'row',
+    padding: 16,
+    backgroundColor: '#1a1a1a',
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+    justifyContent: 'space-around',
+  },
+  actionButton: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    flex: 1,
+    marginHorizontal: 4,
+    borderWidth: 1,
+    borderColor: '#444',
+  },
+  actionButtonIcon: {
+    fontSize: 24,
+    marginBottom: 8,
+  },
+  actionButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  auditEntryCard: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+    padding: 16,
+    margin: 16,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  auditEntryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  auditEntryLeft: {
+    flexDirection: 'row',
+    flex: 1,
+  },
+  actionIcon: {
+    fontSize: 20,
+    marginRight: 12,
+  },
+  auditEntryInfo: {
+    flex: 1,
+  },
+  productName: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 2,
+  },
+  actionText: {
+    color: '#ccc',
+    fontSize: 12,
+  },
+  auditEntryRight: {
+    alignItems: 'flex-end',
+  },
+  timestamp: {
+    color: '#999',
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  reasonCodeBadge: {
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+  },
+  reasonCodeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  quantityChange: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  quantityChangeText: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  newQuantityText: {
+    color: '#ccc',
+    fontSize: 14,
+    marginLeft: 8,
+  },
+  priceChange: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  priceChangeText: {
+    color: '#f59e0b',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  newPriceText: {
+    color: '#ccc',
+    fontSize: 14,
+    marginLeft: 8,
+  },
+  performedBy: {
+    color: '#999',
+    fontSize: 12,
+    marginBottom: 2,
+  },
+  notes: {
+    color: '#ccc',
+    fontSize: 12,
+    marginBottom: 2,
+    fontStyle: 'italic',
+  },
+  supplierInfo: {
+    color: '#6366f1',
+    fontSize: 12,
+  },
+  emptyState: {
+    alignItems: 'center',
+    padding: 40,
+  },
+  emptyTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  emptyText: {
+    color: '#999',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+});
+
+export default InventoryAuditTrailScreen;

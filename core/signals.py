@@ -1,0 +1,1 @@
+# Signals file removed - users will manually add their own entities
