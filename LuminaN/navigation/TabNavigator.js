@@ -10,13 +10,9 @@ import ProductManagementScreen from '../screens/ProductManagementScreen';
 import InventoryReceivingScreen from '../screens/InventoryReceivingScreen';
 import OrderConfirmationScreen from '../screens/OrderConfirmationScreen';
 import InventoryAuditTrailScreen from '../screens/InventoryAuditTrailScreen';
+import SettingsScreen from '../screens/SettingsScreen';
 
-const SettingsScreen = () => (
-  <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0a0a0a' }}>
-    <Text style={{ color: '#fff', fontSize: 18 }}>⚙️ Settings</Text>
-    <Text style={{ color: '#999', marginTop: 8 }}>Coming Soon</Text>
-  </View>
-);
+
 
 const Tab = createBottomTabNavigator();
 

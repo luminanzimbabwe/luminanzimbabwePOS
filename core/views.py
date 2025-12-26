@@ -89,17 +89,26 @@ class CashierListView(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class CashierLoginView(APIView):
     def post(self, request):
+        print(f"🔍 DEBUG: Cashier login attempt with data: {request.data}")
         serializer = CashierLoginSerializer(data=request.data)
         if serializer.is_valid():
             name = serializer.validated_data['name']
             password = serializer.validated_data['password']
-            shop = ShopConfiguration.objects.get()
+            print(f"🔍 DEBUG: Validated data - name: {name}, password_length: {len(password)}")
+            
             try:
+                shop = ShopConfiguration.objects.get()
+                print(f"🔍 DEBUG: Shop found: {shop.name}")
+                
                 # Find active cashier by name and shop
                 cashiers = Cashier.objects.filter(shop=shop, name=name, status='active')
+                print(f"🔍 DEBUG: Found {cashiers.count()} active cashiers with name '{name}'")
+                
                 if not cashiers.exists():
                     # Check if cashier exists but is not active
                     existing_cashier = Cashier.objects.filter(shop=shop, name=name).first()
+                    print(f"🔍 DEBUG: Found cashier with name '{name}': {existing_cashier is not None}, status: {existing_cashier.status if existing_cashier else 'N/A'}")
+                    
                     if existing_cashier:
                         if existing_cashier.status == 'pending':
                             return Response({"error": "Your account is pending approval. Please wait for the shop owner to approve your registration."}, status=status.HTTP_403_FORBIDDEN)
@@ -109,20 +118,38 @@ class CashierLoginView(APIView):
 
                 # Check password for each active cashier with this name
                 for cashier in cashiers:
-                    if cashier.check_password(password):
+                    print(f"🔍 DEBUG: Checking password for cashier: {cashier.name} (id: {cashier.id})")
+                    password_check = cashier.check_password(password)
+                    print(f"🔍 DEBUG: Password check result: {password_check}")
+                    
+                    if password_check:
+                        print(f"🔍 DEBUG: Login successful for {cashier.name}")
                         return Response({
-                            "message": "Cashier login successful", 
-                            "cashier": {
+                            "success": True,
+                            "cashier_info": {
                                 "id": cashier.id, 
                                 "name": cashier.name,
+                                "email": cashier.email,
                                 "role": cashier.role,
-                                "preferred_shift": cashier.preferred_shift
+                                "preferred_shift": cashier.preferred_shift,
+                                "status": cashier.status,
+                                "is_active": cashier.is_active
+                            },
+                            "shop_info": {
+                                "name": shop.name,
+                                "email": shop.email,
+                                "address": shop.address,
+                                "phone": shop.phone
                             }
                         }, status=status.HTTP_200_OK)
 
+                print("🔍 DEBUG: Password check failed for all cashiers")
                 return Response({"error": "Invalid password"}, status=status.HTTP_401_UNAUTHORIZED)
             except Exception as e:
+                print(f"🔍 DEBUG: Exception during login: {str(e)}")
                 return Response({"error": "Login failed"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        else:
+            print(f"🔍 DEBUG: Serializer validation failed: {serializer.errors}")
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -337,102 +364,110 @@ class SaleListView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
+        # First get the cashier_id from request data before serializer validation
+        cashier_id = request.data.get('cashier_id')
+        print(f"DEBUG: Sale request data: {request.data}")
+        print(f"DEBUG: Cashier ID from request: {cashier_id}")
+        
+        if not cashier_id:
+            return Response({"error": "Cashier ID required"}, status=status.HTTP_400_BAD_REQUEST)
+        
         serializer = CreateSaleSerializer(data=request.data)
         if serializer.is_valid():
-            # Get current cashier from session/localStorage (we'll need to pass this)
-            # For now, get the first cashier (this needs to be improved)
+            print(f"DEBUG: Serializer validated successfully: {serializer.validated_data}")
             shop = ShopConfiguration.objects.get()
-            cashier_id = request.data.get('cashier_id')
-            if not cashier_id:
-                return Response({"error": "Cashier ID required"}, status=status.HTTP_400_BAD_REQUEST)
 
             try:
                 cashier = Cashier.objects.get(id=cashier_id, shop=shop)
+                print(f"DEBUG: Cashier found: {cashier.name} (ID: {cashier.id})")
             except Cashier.DoesNotExist:
                 return Response({"error": "Invalid cashier"}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            print(f"DEBUG: Serializer validation failed: {serializer.errors}")
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-            items_data = serializer.validated_data['items']
-            payment_method = serializer.validated_data['payment_method']
-            customer_name = serializer.validated_data.get('customer_name', '')
-            customer_phone = serializer.validated_data.get('customer_phone', '')
+        items_data = serializer.validated_data['items']
+        payment_method = serializer.validated_data['payment_method']
+        customer_name = serializer.validated_data.get('customer_name', '')
+        customer_phone = serializer.validated_data.get('customer_phone', '')
 
-            with transaction.atomic():
-                total_amount = 0
-                currency = None
-                sale_items = []
+        with transaction.atomic():
+            total_amount = 0
+            currency = None
+            sale_items = []
 
-                for item_data in items_data:
-                    product_id = int(item_data['product_id'])
-                    quantity = Decimal(item_data['quantity'])
+            for item_data in items_data:
+                product_id = int(item_data['product_id'])
+                quantity = Decimal(item_data['quantity'])
 
-                    try:
-                        product = Product.objects.get(id=product_id, shop=shop)
-                    except Product.DoesNotExist:
-                        return Response({"error": f"Product {product_id} not found"}, status=status.HTTP_400_BAD_REQUEST)
+                try:
+                    product = Product.objects.get(id=product_id, shop=shop)
+                except Product.DoesNotExist:
+                    return Response({"error": f"Product {product_id} not found"}, status=status.HTTP_400_BAD_REQUEST)
 
-                    if product.price <= 0:
-                        return Response({"error": f"Cannot sell {product.name} - price is zero"}, status=status.HTTP_400_BAD_REQUEST)
+                if product.price <= 0:
+                    return Response({"error": f"Cannot sell {product.name} - price is zero"}, status=status.HTTP_400_BAD_REQUEST)
 
-                    # Allow overselling - no stock quantity check
+                # Allow overselling - no stock quantity check
 
-                    unit_price = product.price
-                    total_price = unit_price * quantity
-                    total_amount += total_price
+                unit_price = product.price
+                total_price = unit_price * quantity
+                total_amount += total_price
 
-                    if currency is None:
-                        currency = product.currency
-                    elif currency != product.currency:
-                        return Response({"error": "All products must be in the same currency"}, status=status.HTTP_400_BAD_REQUEST)
+                if currency is None:
+                    currency = product.currency
+                elif currency != product.currency:
+                    return Response({"error": "All products must be in the same currency"}, status=status.HTTP_400_BAD_REQUEST)
 
-                    sale_items.append({
-                        'product': product,
-                        'quantity': quantity,
-                        'unit_price': unit_price,
-                        'total_price': total_price
-                    })
+                sale_items.append({
+                    'product': product,
+                    'quantity': quantity,
+                    'unit_price': unit_price,
+                    'total_price': total_price
+                })
 
-                # Create sale
-                sale = Sale.objects.create(
-                    shop=shop,
-                    cashier=cashier,
-                    total_amount=total_amount,
-                    currency=currency,
-                    payment_method=payment_method,
-                    customer_name=customer_name,
-                    customer_phone=customer_phone
+            # Create sale
+            sale = Sale.objects.create(
+                shop=shop,
+                cashier=cashier,
+                total_amount=total_amount,
+                currency=currency,
+                payment_method=payment_method,
+                customer_name=customer_name,
+                customer_phone=customer_phone
+            )
+
+            # Create sale items and update stock
+            for item_data in sale_items:
+                SaleItem.objects.create(
+                    sale=sale,
+                    product=item_data['product'],
+                    quantity=item_data['quantity'],
+                    unit_price=item_data['unit_price'],
+                    total_price=item_data['total_price']
                 )
 
-                # Create sale items and update stock
-                for item_data in sale_items:
-                    SaleItem.objects.create(
-                        sale=sale,
-                        product=item_data['product'],
-                        quantity=item_data['quantity'],
-                        unit_price=item_data['unit_price'],
-                        total_price=item_data['total_price']
-                    )
+                # Update stock and create inventory log
+                original_stock_quantity = item_data['product'].stock_quantity
+                item_data['product'].stock_quantity -= item_data['quantity']
+                item_data['product'].save()
 
-                    # Update stock and create inventory log
-                    original_stock_quantity = item_data['product'].stock_quantity
-                    item_data['product'].stock_quantity -= item_data['quantity']
-                    item_data['product'].save()
+                # Create inventory log for sale
+                InventoryLog.objects.create(
+                    shop=shop,
+                    product=item_data['product'],
+                    reason_code='SALE',
+                    quantity_change=-item_data['quantity'],
+                    previous_quantity=original_stock_quantity,
+                    new_quantity=item_data['product'].stock_quantity,
+                    performed_by=cashier,
+                    reference_number=f'Sale #{sale.id}',
+                    notes=f'Sold {item_data["quantity"]} x {item_data["product"].name} to {customer_name or "customer"}',
+                    cost_price=item_data['product'].cost_price
+                )
 
-                    # Create inventory log for sale
-                    InventoryLog.objects.create(
-                        shop=shop,
-                        product=item_data['product'],
-                        reason_code='SALE',
-                        quantity_change=-item_data['quantity'],
-                        previous_quantity=original_stock_quantity,
-                        new_quantity=item_data['product'].stock_quantity,
-                        performed_by=cashier,
-                        reference_number=f'Sale #{sale.id}',
-                        notes=f'Sold {item_data["quantity"]} x {item_data["product"].name} to {customer_name or "customer"}',
-                        cost_price=item_data['product'].cost_price
-                    )
-
-                serializer = SaleSerializer(sale)
-                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            serializer = SaleSerializer(sale)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1614,3 +1649,105 @@ class ProductAuditHistoryView(APIView):
         logs = InventoryLog.objects.filter(shop=shop, product=product).order_by('-created_at')
         serializer = InventoryLogSerializer(logs, many=True)
         return Response(serializer.data)
+
+@method_decorator(csrf_exempt, name='dispatch')
+class CashierTopProductsView(APIView):
+    def get(self, request):
+        """Get top 5 selling products for cashier dashboard"""
+        try:
+            shop = ShopConfiguration.objects.get()
+        except ShopConfiguration.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Get top 5 selling products from last 30 days
+        from datetime import timedelta
+        month_ago = timezone.now() - timedelta(days=30)
+        
+        top_products_data = []
+        sale_items_30_days = SaleItem.objects.filter(
+            sale__shop=shop,
+            sale__created_at__gte=month_ago,
+            sale__status='completed'
+        ).values(
+            'product_id',
+            'product__name',
+            'product__category'
+        ).annotate(
+            total_quantity=Sum('quantity'),
+            total_revenue=Sum(F('quantity') * F('unit_price'))
+        ).order_by('-total_revenue')[:5]
+
+        for item in sale_items_30_days:
+            top_products_data.append({
+                'id': item['product_id'],
+                'name': item['product__name'],
+                'category': item['product__category'],
+                'sold_quantity': int(item['total_quantity']),
+                'revenue': float(item['total_revenue'])
+            })
+        
+        return Response({
+            "success": True,
+            "top_products": top_products_data
+        }, status=status.HTTP_200_OK)
+
+@method_decorator(csrf_exempt, name='dispatch')
+class SalesHistoryView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    
+    """Enhanced sales history view for owner dashboard"""
+    def get(self, request):
+        # Authenticate shop owner from Basic Auth header
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        
+        if not auth_header.startswith('Basic '):
+            return Response({"error": "Owner authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        try:
+            # Decode Basic Auth
+            import base64
+            auth_bytes = base64.b64decode(auth_header[6:])
+            auth_string = auth_bytes.decode('utf-8')
+            email, password = auth_string.split(':', 1)
+        except Exception:
+            return Response({"error": "Invalid authentication format"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        try:
+            shop = ShopConfiguration.objects.get(email=email)
+            if not shop.validate_shop_owner_master_password(password):
+                return Response({"error": "Invalid owner credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+        except ShopConfiguration.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        sales = Sale.objects.filter(shop=shop).order_by('-created_at')
+        
+        # Enhanced serialization with more details for the frontend
+        sales_data = []
+        for sale in sales:
+            sale_data = {
+                'id': sale.id,
+                'receipt_number': f'R{sale.id:03d}',  # Format as R001, R002, etc.
+                'created_at': sale.created_at.isoformat(),
+                'cashier_name': sale.cashier.name if sale.cashier else 'Unknown',
+                'payment_method': sale.payment_method,
+                'customer_name': sale.customer_name or '',
+                'total_amount': float(sale.total_amount),
+                'currency': sale.currency,
+                'status': sale.status,
+                'items': []
+            }
+            
+            # Add sale items with product details
+            for item in sale.items.all():
+                sale_data['items'].append({
+                    'product_id': item.product.id,
+                    'product_name': item.product.name,
+                    'quantity': float(item.quantity),
+                    'unit_price': float(item.unit_price),
+                    'total_price': float(item.total_price)
+                })
+            
+            sales_data.append(sale_data)
+        
+        return Response(sales_data)

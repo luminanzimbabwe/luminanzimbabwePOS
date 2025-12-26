@@ -232,9 +232,16 @@ const StaffManagementScreen = () => {
       
       // Calculate statistics
       const totalStaff = pending.length + approved.length + inactive.length;
-      const activeToday = approved.filter(staff => 
-        new Date(staff.created_at).toDateString() === new Date().toDateString()
-      ).length;
+      
+      // Fix activeToday calculation - check if staff is active and has worked recently
+      const activeToday = approved.filter(staff => {
+        if (!staff.approved_at) return false;
+        const approvedDate = new Date(staff.approved_at);
+        const now = new Date();
+        const daysDiff = Math.floor((now - approvedDate) / (1000 * 60 * 60 * 24));
+        // Consider staff active today if they were approved within last 30 days
+        return daysDiff >= 0 && daysDiff <= 30;
+      }).length;
       
       const weekAgo = new Date();
       weekAgo.setDate(weekAgo.getDate() - 7);
@@ -360,60 +367,90 @@ const StaffManagementScreen = () => {
     loadStaffData();
   };
 
-  // Search and filter logic
+  // Search and filter logic with better error handling
   const filteredStaff = useMemo(() => {
-    let allStaff = [];
+    try {
+      let allStaff = [];
 
-    switch (selectedFilter) {
-      case 'pending':
-        allStaff = [...pendingStaff];
-        break;
-      case 'active':
-        allStaff = [...approvedStaff];
-        break;
-      case 'inactive':
-        allStaff = [...inactiveStaff];
-        break;
-      default:
-        allStaff = [...pendingStaff, ...approvedStaff, ...inactiveStaff];
-    }
+      switch (selectedFilter) {
+        case 'pending':
+          allStaff = [...(pendingStaff || [])];
+          break;
+        case 'active':
+          allStaff = [...(approvedStaff || [])];
+          break;
+        case 'inactive':
+          allStaff = [...(inactiveStaff || [])];
+          break;
+        default:
+          allStaff = [...(pendingStaff || []), ...(approvedStaff || []), ...(inactiveStaff || [])];
+      }
 
-    // Apply advanced filters
-    if (departmentFilter !== 'all') {
-      allStaff = allStaff.filter(staff => staff.department === departmentFilter);
-    }
-
-    if (roleFilter !== 'all') {
-      allStaff = allStaff.filter(staff => staff.role === roleFilter);
-    }
-
-    if (hireDateFilter !== 'all') {
-      const now = new Date();
-      allStaff = allStaff.filter(staff => {
-        if (!staff.hire_date) return false;
-        const hireDate = new Date(staff.hire_date);
-        const monthsDiff = (now.getFullYear() - hireDate.getFullYear()) * 12 + (now.getMonth() - hireDate.getMonth());
-
-        switch (hireDateFilter) {
-          case 'last_3_months': return monthsDiff <= 3;
-          case 'last_6_months': return monthsDiff <= 6;
-          case 'last_year': return monthsDiff <= 12;
-          case 'over_year': return monthsDiff > 12;
-          default: return true;
-        }
+      console.log('🔍 Filtering staff:', { 
+        selectedFilter, 
+        totalBeforeFilter: allStaff.length,
+        pendingStaff: pendingStaff?.length || 0,
+        approvedStaff: approvedStaff?.length || 0,
+        inactiveStaff: inactiveStaff?.length || 0
       });
-    }
 
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      allStaff = allStaff.filter(staff =>
-        staff.name.toLowerCase().includes(query) ||
-        (staff.email && staff.email.toLowerCase().includes(query)) ||
-        (staff.phone && staff.phone.includes(query))
-      );
-    }
+      // Apply advanced filters
+      if (departmentFilter !== 'all') {
+        allStaff = allStaff.filter(staff => {
+          const staffDept = staff.department || '';
+          return staffDept.toLowerCase().includes(departmentFilter.toLowerCase());
+        });
+      }
 
-    return allStaff;
+      if (roleFilter !== 'all') {
+        allStaff = allStaff.filter(staff => {
+          const staffRole = staff.role || 'cashier';
+          return staffRole.toLowerCase().includes(roleFilter.toLowerCase());
+        });
+      }
+
+      if (hireDateFilter !== 'all') {
+        const now = new Date();
+        allStaff = allStaff.filter(staff => {
+          // Use approved_at or created_at as hire date for staff without explicit hire_date
+          const hireDateStr = staff.hire_date || staff.approved_at || staff.created_at;
+          if (!hireDateStr) return false;
+          
+          const hireDate = new Date(hireDateStr);
+          if (isNaN(hireDate.getTime())) return false;
+          
+          const monthsDiff = (now.getFullYear() - hireDate.getFullYear()) * 12 + (now.getMonth() - hireDate.getMonth());
+
+          switch (hireDateFilter) {
+            case 'last_3_months': return monthsDiff <= 3;
+            case 'last_6_months': return monthsDiff <= 6;
+            case 'last_year': return monthsDiff <= 12;
+            case 'over_year': return monthsDiff > 12;
+            default: return true;
+          }
+        });
+      }
+
+      // Apply search filter
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase().trim();
+        allStaff = allStaff.filter(staff => {
+          const nameMatch = staff.name?.toLowerCase().includes(query) || false;
+          const emailMatch = staff.email?.toLowerCase().includes(query) || false;
+          const phoneMatch = staff.phone?.toString().includes(query) || false;
+          const roleMatch = staff.role?.toLowerCase().includes(query) || false;
+          const departmentMatch = staff.department?.toLowerCase().includes(query) || false;
+          
+          return nameMatch || emailMatch || phoneMatch || roleMatch || departmentMatch;
+        });
+      }
+
+      console.log('✅ Filtered staff result:', allStaff.length, 'staff members');
+      return allStaff;
+    } catch (error) {
+      console.error('❌ Error in filteredStaff:', error);
+      return [];
+    }
   }, [pendingStaff, approvedStaff, inactiveStaff, searchQuery, selectedFilter, departmentFilter, roleFilter, hireDateFilter]);
 
   const showCommentRequiredDialog = (action, staffId) => {
@@ -1387,28 +1424,38 @@ Signature: ___________________________`,
       >
         {/* Enhanced Statistics Cards */}
         <View style={styles.statsContainer}>
-          <Text style={styles.sectionHeader}>📊 Staff Overview</Text>
-          <View style={styles.statsRow}>
-            {renderStatCard('Total Staff', staffStats.totalStaff, '👥', '#3b82f6')}
-            {renderStatCard('Pending Approval', staffStats.pendingApprovals, '⏳', '#f59e0b')}
+          <View style={styles.sectionHeaderContainer}>
+            <Text style={styles.sectionHeader}>📊 Staff Overview</Text>
+            <Text style={styles.sectionSubtitle}>Real-time workforce statistics</Text>
           </View>
-          <View style={styles.statsRow}>
-            {renderStatCard('New This Week', staffStats.newThisWeek, '🆕', '#10b981')}
-            {renderStatCard('Active Today', staffStats.activeToday, '🔥', '#ef4444')}
-          </View>
-          <View style={styles.statsRow}>
-            {renderStatCard('Avg Tenure', `${staffStats.avgTenure} months`, '📅', '#8b5cf6')}
-            {renderStatCard('Turnover Rate', `${staffStats.turnoverRate}%`, '📈', '#f97316')}
-          </View>
-          <View style={styles.statsRow}>
-            {renderStatCard('Departments', staffStats.departmentCount, '🏢', '#06b6d4')}
-            {renderStatCard('Active Staff', approvedStaff.length, '✅', '#22c55e')}
+          
+          <View style={styles.statsGrid}>
+            <View style={styles.statsRow}>
+              {renderStatCard('Total Staff', staffStats.totalStaff, '👥', '#3b82f6')}
+              {renderStatCard('Pending Approval', staffStats.pendingApprovals, '⏳', '#f59e0b')}
+            </View>
+            <View style={styles.statsRow}>
+              {renderStatCard('New This Week', staffStats.newThisWeek, '🆕', '#10b981')}
+              {renderStatCard('Active Today', staffStats.activeToday, '🔥', '#ef4444')}
+            </View>
+            <View style={styles.statsRow}>
+              {renderStatCard('Avg Tenure', `${staffStats.avgTenure} months`, '📅', '#8b5cf6')}
+              {renderStatCard('Turnover Rate', `${staffStats.turnoverRate}%`, '📈', '#f97316')}
+            </View>
+            <View style={styles.statsRow}>
+              {renderStatCard('Departments', staffStats.departmentCount, '🏢', '#06b6d4')}
+              {renderStatCard('Active Staff', approvedStaff.length, '✅', '#22c55e')}
+            </View>
           </View>
         </View>
 
         {/* Enhanced Quick Actions */}
         <View style={styles.quickActionsContainer}>
-          <Text style={styles.sectionHeader}>⚡ Quick Actions</Text>
+          <View style={styles.sectionHeaderContainer}>
+            <Text style={styles.sectionHeader}>⚡ Quick Actions</Text>
+            <Text style={styles.sectionSubtitle}>Fast access to common tasks</Text>
+          </View>
+          
           <View style={styles.quickActionsGrid}>
             {renderQuickAction(
               'View All Staff',
@@ -1428,18 +1475,18 @@ Signature: ___________________________`,
               `${staffStats.pendingApprovals} waiting approval`
             )}
             {renderQuickAction(
-              'Export Staff List',
-              '📤',
-              '#10b981',
-              handleExportStaff,
-              'Download staff data'
-            )}
-            {renderQuickAction(
               'Staff Analytics',
               '📈',
               '#8b5cf6',
               handleViewAnalytics,
               'View detailed reports'
+            )}
+            {renderQuickAction(
+              'Performance',
+              '📊',
+              '#10b981',
+              () => setShowPerformanceModal(true),
+              'Sales & attendance metrics'
             )}
             {renderQuickAction(
               'Staff Directory',
@@ -1449,24 +1496,49 @@ Signature: ___________________________`,
               'Contact list & details'
             )}
             {renderQuickAction(
-              'Performance',
-              '📊',
-              '#10b981',
-              () => setShowPerformanceModal(true),
-              'Sales & attendance metrics'
+              'Export Staff List',
+              '📤',
+              '#06b6d4',
+              handleExportStaff,
+              'Download staff data'
             )}
           </View>
         </View>
 
         {/* Enhanced Search and Filter */}
         <View style={styles.searchContainer}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="🔍 Search staff by name or email..."
-            placeholderTextColor="#999"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
+          <View style={styles.sectionHeaderContainer}>
+            <Text style={styles.sectionHeader}>🔍 Search & Filter</Text>
+            <Text style={styles.sectionSubtitle}>Find staff members quickly</Text>
+          </View>
+          
+          <View style={styles.searchInputContainer}>
+            <View style={styles.searchInputWrapper}>
+              <TextInput
+                style={styles.searchInput}
+                placeholder="🔍 Search staff by name, email, phone, role, or department..."
+                placeholderTextColor="#999"
+                value={searchQuery}
+                onChangeText={(text) => {
+                  console.log('🔍 Search query changed:', text);
+                  setSearchQuery(text);
+                }}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity
+                  style={styles.clearSearchButton}
+                  onPress={() => {
+                    console.log('🗑️ Clear search pressed');
+                    setSearchQuery('');
+                  }}
+                >
+                  <Text style={styles.clearSearchButtonText}>✕</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
 
           <View style={styles.filterContainer}>
             {['all', 'pending', 'active', 'inactive'].map((filter) => (
@@ -1476,7 +1548,10 @@ Signature: ___________________________`,
                   styles.filterButton,
                   selectedFilter === filter && styles.filterButtonActive
                 ]}
-                onPress={() => setSelectedFilter(filter)}
+                onPress={() => {
+                  console.log('🎯 Filter button pressed:', filter);
+                  setSelectedFilter(filter);
+                }}
               >
                 <Text style={[
                   styles.filterButtonText,
@@ -1519,7 +1594,10 @@ Signature: ___________________________`,
                           styles.advancedFilterButton,
                           departmentFilter === dept && styles.advancedFilterButtonActive
                         ]}
-                        onPress={() => setDepartmentFilter(dept)}
+                        onPress={() => {
+                          console.log('🏢 Department filter pressed:', dept);
+                          setDepartmentFilter(dept);
+                        }}
                       >
                         <Text style={[
                           styles.advancedFilterButtonText,
@@ -1544,7 +1622,10 @@ Signature: ___________________________`,
                           styles.advancedFilterButton,
                           roleFilter === role && styles.advancedFilterButtonActive
                         ]}
-                        onPress={() => setRoleFilter(role)}
+                        onPress={() => {
+                          console.log('👔 Role filter pressed:', role);
+                          setRoleFilter(role);
+                        }}
                       >
                         <Text style={[
                           styles.advancedFilterButtonText,
@@ -1575,7 +1656,10 @@ Signature: ___________________________`,
                           styles.advancedFilterButton,
                           hireDateFilter === option.key && styles.advancedFilterButtonActive
                         ]}
-                        onPress={() => setHireDateFilter(option.key)}
+                        onPress={() => {
+                          console.log('📅 Hire date filter pressed:', option.key);
+                          setHireDateFilter(option.key);
+                        }}
                       >
                         <Text style={[
                           styles.advancedFilterButtonText,
@@ -1592,6 +1676,7 @@ Signature: ___________________________`,
               <TouchableOpacity
                 style={styles.clearFiltersButton}
                 onPress={() => {
+                  console.log('🗑️ Clear all filters pressed');
                   setDepartmentFilter('all');
                   setRoleFilter('all');
                   setHireDateFilter('all');
@@ -1603,50 +1688,69 @@ Signature: ___________________________`,
           )}
         </View>
 
-        {/* Filtered Results */}
-        {searchQuery.trim() || selectedFilter !== 'all' ? (
-          <View style={styles.searchResultsContainer}>
-            <Text style={styles.sectionHeader}>
-              🔍 Search Results ({filteredStaff.length})
-            </Text>
-            <ScrollView horizontal style={styles.searchResultsScroll}>
-              {filteredStaff.length > 0 ? (
-                filteredStaff.map(staff => renderStaffCard(staff))
-              ) : (
-                <View style={styles.noResultsContainer}>
-                  <Text style={styles.noResultsText}>
-                    {searchQuery.trim() ? `No staff found for "${searchQuery}"` : 'No staff in this category'}
-                  </Text>
-                </View>
-              )}
-            </ScrollView>
-          </View>
-        ) : null}
+        {/* Always Show Staff List Section */}
+        <View style={styles.searchResultsContainer}>
+          <Text style={styles.sectionHeader}>
+            👥 All Staff Members ({filteredStaff.length})
+          </Text>
+          <ScrollView horizontal style={styles.searchResultsScroll}>
+            {filteredStaff.length > 0 ? (
+              filteredStaff.map(staff => renderStaffCard(staff))
+            ) : (
+              <View style={styles.noResultsContainer}>
+                <Text style={styles.noResultsText}>
+                  {searchQuery.trim() ? 
+                    `No staff found for "${searchQuery}"` : 
+                    selectedFilter !== 'all' ? 
+                      `No ${selectedFilter} staff members found` : 
+                      'No staff members found'
+                  }
+                </Text>
+              </View>
+            )}
+          </ScrollView>
+        </View>
 
         {/* Recent Activity */}
         <View style={styles.recentActivityContainer}>
-          <Text style={styles.sectionHeader}>🕒 Recent Activity</Text>
+          <View style={styles.sectionHeaderContainer}>
+            <Text style={styles.sectionHeader}>🕒 Recent Activity</Text>
+            <Text style={styles.sectionSubtitle}>Latest staff updates and changes</Text>
+          </View>
+          
           <View style={styles.activityCard}>
-            <Text style={styles.activityItem}>
-              📝 {pendingStaff.length} new staff registration{pendingStaff.length !== 1 ? 's' : ''} pending approval
-            </Text>
-            <Text style={styles.activityItem}>
-              ✅ {approvedStaff.length} staff member{approvedStaff.length !== 1 ? 's' : ''} currently active
-            </Text>
-            <Text style={styles.activityItem}>
-              🚫 {inactiveStaff.length} staff member{inactiveStaff.length !== 1 ? 's' : ''} inactive
-            </Text>
+            <View style={styles.activityItemContainer}>
+              <Text style={styles.activityIcon}>📝</Text>
+              <Text style={styles.activityItem}>
+                {pendingStaff.length} new staff registration{pendingStaff.length !== 1 ? 's' : ''} pending approval
+              </Text>
+            </View>
+            <View style={styles.activityItemContainer}>
+              <Text style={styles.activityIcon}>✅</Text>
+              <Text style={styles.activityItem}>
+                {approvedStaff.length} staff member{approvedStaff.length !== 1 ? 's' : ''} currently active
+              </Text>
+            </View>
+            <View style={styles.activityItemContainer}>
+              <Text style={styles.activityIcon}>🚫</Text>
+              <Text style={styles.activityItem}>
+                {inactiveStaff.length} staff member{inactiveStaff.length !== 1 ? 's' : ''} inactive
+              </Text>
+            </View>
           </View>
         </View>
 
         {/* Toggle Inactive */}
         <View style={styles.toggleContainer}>
           <TouchableOpacity 
-            style={styles.toggleButton}
+            style={[styles.toggleButton, showInactive && styles.toggleButtonActive]}
             onPress={toggleInactiveView}
           >
             <Text style={styles.toggleButtonText}>
               {showInactive ? '👁️ Hide Inactive Staff' : `👁️ Show Inactive Staff (${inactiveStaff.length})`}
+            </Text>
+            <Text style={styles.toggleButtonSubtext}>
+              {showInactive ? 'Click to hide inactive staff members' : 'Click to view inactive staff members'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -1667,12 +1771,17 @@ Signature: ___________________________`,
             
             <ScrollView style={styles.staffListContent} contentContainerStyle={styles.staffListContentContainer}>
               {filteredStaff.length > 0 ? (
-                filteredStaff.map(staff => renderStaffCard(staff))
+                filteredStaff.map(staff => renderStaffCard(staff, false)) // Don't show actions in modal
               ) : (
                 <View style={styles.emptyState}>
                   <Text style={styles.emptyTitle}>👥 No Staff Members</Text>
                   <Text style={styles.emptyText}>
-                    {searchQuery.trim() ? `No staff found for "${searchQuery}"` : 'No staff members found.'}
+                    {searchQuery.trim() ? 
+                      `No staff found for "${searchQuery}"` : 
+                      selectedFilter !== 'all' ? 
+                        `No ${selectedFilter} staff members found` : 
+                        'No staff members found.'
+                    }
                   </Text>
                 </View>
               )}
@@ -2099,7 +2208,7 @@ Signature: ___________________________`,
                         <View style={styles.performanceStaffInfo}>
                           <Text style={styles.performanceStaffName}>{staff.name}</Text>
                           <Text style={styles.performanceStaffRole}>
-                            {staff.role || 'Cashier'} • {staff.department || 'Sales'}
+                            {`${staff.role || 'Cashier'} • ${staff.department || 'Sales'}`}
                           </Text>
                         </View>
                       </View>
@@ -3211,23 +3320,35 @@ const styles = StyleSheet.create({
   // Statistics Section
   statsContainer: {
     padding: 20,
+    paddingTop: 8,
+  },
+  sectionHeaderContainer: {
+    marginBottom: 20,
   },
   sectionHeader: {
     color: '#fff',
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
-    marginBottom: 16,
+    marginBottom: 4,
+  },
+  sectionSubtitle: {
+    color: 'rgba(255, 255, 255, 0.6)',
+    fontSize: 14,
+    fontWeight: '400',
+  },
+  statsGrid: {
+    gap: 12,
   },
   statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    gap: 12,
   },
   statCard: {
     backgroundColor: '#1a1a1a',
     borderRadius: 12,
     padding: 16,
-    width: (width - 60) / 2,
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     borderLeftWidth: 4,
@@ -3270,14 +3391,14 @@ const styles = StyleSheet.create({
   quickActionsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
+    gap: 12,
   },
   quickActionCard: {
     backgroundColor: '#1a1a1a',
     borderRadius: 12,
     padding: 16,
-    width: (width - 50) / 2,
-    marginBottom: 12,
+    width: (width - 60) / 2,
     borderTopWidth: 3,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -3310,20 +3431,38 @@ const styles = StyleSheet.create({
   // Search Section
   searchContainer: {
     padding: 20,
+    paddingTop: 8,
   },
-  searchInput: {
+  searchInputContainer: {
+    marginBottom: 16,
+  },
+  searchInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#1a1a1a',
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  searchInput: {
+    flex: 1,
     padding: 16,
     color: '#fff',
     fontSize: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#333',
+  },
+  clearSearchButton: {
+    padding: 16,
+    paddingLeft: 8,
+  },
+  clearSearchButtonText: {
+    color: '#999',
+    fontSize: 18,
+    fontWeight: 'bold',
   },
   filterContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    gap: 8,
   },
   filterButton: {
     backgroundColor: '#1a1a1a',
@@ -3434,40 +3573,70 @@ const styles = StyleSheet.create({
 
   // Recent Activity Section
   recentActivityContainer: {
-    paddingHorizontal: 20,
-    paddingBottom: 20,
+    padding: 20,
+    paddingTop: 8,
   },
   activityCard: {
     backgroundColor: '#1a1a1a',
     borderRadius: 12,
-    padding: 16,
+    padding: 20,
     borderLeftWidth: 4,
     borderLeftColor: '#3b82f6',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  activityItemContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  activityIcon: {
+    fontSize: 16,
+    marginRight: 12,
+    width: 20,
+    textAlign: 'center',
   },
   activityItem: {
     color: '#ccc',
     fontSize: 14,
-    marginBottom: 8,
+    flex: 1,
   },
 
   // Toggle Section
   toggleContainer: {
-    paddingHorizontal: 20,
-    paddingBottom: 20,
+    padding: 20,
+    paddingTop: 8,
   },
   toggleButton: {
     backgroundColor: '#1a1a2e',
-    paddingVertical: 16,
+    paddingVertical: 20,
     paddingHorizontal: 24,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#3b82f6',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  toggleButtonActive: {
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    borderColor: '#3b82f6',
   },
   toggleButtonText: {
     color: '#3b82f6',
     fontSize: 16,
     fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  toggleButtonSubtext: {
+    color: 'rgba(59, 130, 246, 0.7)',
+    fontSize: 12,
   },
 
   // Staff Card Styles
@@ -3818,12 +3987,6 @@ const styles = StyleSheet.create({
     color: '#ccc',
     fontSize: 14,
     fontWeight: 'bold',
-  },
-  activityIcon: {
-    fontSize: 16,
-    marginRight: 12,
-    width: 20,
-    textAlign: 'center',
   },
   activityContent: {
     flex: 1,

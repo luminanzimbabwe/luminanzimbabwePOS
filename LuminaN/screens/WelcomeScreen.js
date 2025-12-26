@@ -114,7 +114,13 @@ const WelcomeScreen = () => {
                   style={styles.primaryButton}
                   onPress={() => navigation.replace(ROUTES.LOGIN)}
                 >
-                  <Text style={styles.primaryButtonText}>Sign In</Text>
+                  <Text style={styles.primaryButtonText}>Sign In (Owner)</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.cashierButton}
+                  onPress={() => navigation.navigate(ROUTES.LOGIN, { role: 'cashier' })}
+                >
+                  <Text style={styles.cashierButtonText}>Cashier Login</Text>
                 </TouchableOpacity>
               </>
             ) : (
@@ -174,12 +180,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(20, 20, 20, 0.8)',
   },
   glassCard: {
-    margin: 24,
+    width: '85%',
+    maxWidth: 400,
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 24,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
-    padding: 32,
+    padding: 24,
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 20 },
@@ -188,38 +195,38 @@ const styles = StyleSheet.create({
     elevation: 20,
   },
   logoContainer: {
-    width: 80,
-    height: 80,
+    width: 64,
+    height: 64,
     backgroundColor: 'rgba(59, 130, 246, 0.2)',
-    borderRadius: 20,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 20,
     borderWidth: 1,
     borderColor: 'rgba(59, 130, 246, 0.3)',
   },
   logoText: {
-    fontSize: 32,
+    fontSize: 24,
     fontWeight: 'bold',
     color: '#ffffff',
   },
   title: {
-    fontSize: 36,
+    fontSize: 28,
     fontWeight: 'bold',
     color: '#ffffff',
-    marginBottom: 12,
+    marginBottom: 10,
     textAlign: 'center',
   },
   subtitle: {
-    fontSize: 18,
+    fontSize: 16,
     color: 'rgba(255, 255, 255, 0.7)',
     textAlign: 'center',
-    marginBottom: 48,
-    lineHeight: 24,
+    marginBottom: 24,
+    lineHeight: 22,
   },
   buttonContainer: {
     width: '100%',
-    gap: 24,
+    gap: 16,
   },
   primaryButton: {
     backgroundColor: 'rgba(59, 130, 246, 0.2)',
@@ -246,6 +253,20 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 16,
     fontWeight: '500',
+  },
+  cashierButton: {
+    backgroundColor: 'rgba(34, 197, 94, 0.2)',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(34, 197, 94, 0.4)',
+  },
+  cashierButtonText: {
+    color: '#22c55e',
+    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '600',
   },
   shopExistsText: {
     color: 'rgba(255, 255, 255, 0.8)',

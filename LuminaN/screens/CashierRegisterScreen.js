@@ -9,7 +9,8 @@ import {
   Platform,
   ActivityIndicator,
   StyleSheet,
-  Alert
+  Alert,
+  Dimensions
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { shopAPI } from '../services/api';
@@ -61,6 +62,8 @@ const InputField = ({
 
 const CashierRegisterScreen = () => {
   const navigation = useNavigation();
+  const { width } = Dimensions.get('window');
+  const isWeb = Platform.OS === 'web';
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -243,10 +246,17 @@ const CashierRegisterScreen = () => {
       >
         <ScrollView
           style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            isWeb && width > 768 && { maxWidth: 450, alignSelf: 'center', width: '100%' }
+          ]}
           keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          <View style={styles.glassCard}>
+          <View style={[
+            styles.glassCard,
+            isWeb && { maxHeight: '90vh', overflow: 'auto' }
+          ]}>
             <View style={styles.header}>
               <CheckCircle size={64} color="#10b981" />
               <Text style={styles.title}>Registration Submitted!</Text>
@@ -278,10 +288,17 @@ const CashierRegisterScreen = () => {
     >
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          isWeb && width > 768 && { maxWidth: 450, alignSelf: 'center', width: '100%' }
+        ]}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.glassCard}>
+        <View style={[
+          styles.glassCard,
+          isWeb && { maxHeight: '90vh', overflow: 'auto' }
+        ]}>
           <View style={styles.header}>
             <Text style={styles.title}>Staff Registration</Text>
             <Text style={styles.subtitle}>Apply to join this shop's team</Text>
@@ -389,85 +406,116 @@ const CashierRegisterScreen = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f0f0f' },
   scrollView: { flex: 1 },
-  scrollContent: { flexGrow: 1, padding: 16 },
+  scrollContent: { 
+    flexGrow: 1, 
+    padding: Platform.OS === 'web' ? 12 : 16,
+    paddingHorizontal: Platform.OS === 'web' ? 8 : 16
+  },
   glassCard: {
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 16,
+    borderRadius: Platform.OS === 'web' ? 12 : 16,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
-    padding: 16,
+    padding: Platform.OS === 'web' ? 12 : 16,
+    marginVertical: Platform.OS === 'web' ? 8 : 0,
+    maxWidth: '100%',
   },
-  header: { marginBottom: 20, alignItems: 'center' },
-  title: { fontSize: 24, fontWeight: 'bold', color: '#ffffff', marginBottom: 6 },
-  subtitle: { fontSize: 14, color: 'rgba(255, 255, 255, 0.7)' },
+  header: { 
+    marginBottom: Platform.OS === 'web' ? 16 : 20, 
+    alignItems: 'center' 
+  },
+  title: { 
+    fontSize: Platform.OS === 'web' ? 20 : 24, 
+    fontWeight: 'bold', 
+    color: '#ffffff', 
+    marginBottom: 6,
+    textAlign: 'center'
+  },
+  subtitle: { 
+    fontSize: Platform.OS === 'web' ? 12 : 14, 
+    color: 'rgba(255, 255, 255, 0.7)',
+    textAlign: 'center'
+  },
   errorBanner: {
     backgroundColor: 'rgba(239, 68, 68, 0.1)',
     borderWidth: 1,
     borderColor: 'rgba(239, 68, 68, 0.3)',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 16,
+    borderRadius: Platform.OS === 'web' ? 8 : 10,
+    padding: Platform.OS === 'web' ? 10 : 12,
+    marginBottom: Platform.OS === 'web' ? 12 : 16,
     flexDirection: 'row',
     alignItems: 'center',
   },
   errorBannerText: { 
     color: '#ef4444', 
-    fontSize: 14, 
+    fontSize: Platform.OS === 'web' ? 12 : 14, 
     textAlign: 'center',
     marginLeft: 8,
     flex: 1,
   },
   successBox: {
     backgroundColor: 'rgba(16, 185, 129, 0.1)',
-    borderRadius: 10,
-    padding: 16,
-    marginBottom: 20,
+    borderRadius: Platform.OS === 'web' ? 8 : 10,
+    padding: Platform.OS === 'web' ? 12 : 16,
+    marginBottom: Platform.OS === 'web' ? 16 : 20,
     borderWidth: 1,
     borderColor: 'rgba(16, 185, 129, 0.3)',
     alignItems: 'center',
   },
   successBoxText: {
     color: '#10b981',
-    fontSize: 16,
+    fontSize: Platform.OS === 'web' ? 14 : 16,
     fontWeight: '600',
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: Platform.OS === 'web' ? 6 : 8,
   },
   successBoxSubText: {
     color: 'rgba(16, 185, 129, 0.8)',
-    fontSize: 14,
+    fontSize: Platform.OS === 'web' ? 12 : 14,
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: Platform.OS === 'web' ? 18 : 20,
   },
   infoBox: {
     backgroundColor: 'rgba(59, 130, 246, 0.1)',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 16,
+    borderRadius: Platform.OS === 'web' ? 8 : 10,
+    padding: Platform.OS === 'web' ? 10 : 12,
+    marginBottom: Platform.OS === 'web' ? 12 : 16,
     borderWidth: 1,
     borderColor: 'rgba(59, 130, 246, 0.3)',
   },
   infoBoxText: {
     color: '#3b82f6',
-    fontSize: 13,
+    fontSize: Platform.OS === 'web' ? 11 : 13,
     textAlign: 'center',
-    lineHeight: 18,
+    lineHeight: Platform.OS === 'web' ? 16 : 18,
   },
-  inputContainer: { marginBottom: 12 },
-  inputLabel: { fontSize: 13, fontWeight: '600', color: '#fff', marginBottom: 6 },
+  inputContainer: { 
+    marginBottom: Platform.OS === 'web' ? 10 : 12 
+  },
+  inputLabel: { 
+    fontSize: Platform.OS === 'web' ? 11 : 13, 
+    fontWeight: '600', 
+    color: '#fff', 
+    marginBottom: Platform.OS === 'web' ? 4 : 6 
+  },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    height: 44,
+    borderRadius: Platform.OS === 'web' ? 8 : 10,
+    paddingHorizontal: Platform.OS === 'web' ? 8 : 10,
+    height: Platform.OS === 'web' ? 40 : 44,
   },
   inputError: { borderColor: '#ef4444' },
   inputIcon: { marginRight: 8 },
-  input: { flex: 1, color: '#ffffff', fontSize: 15 },
+  input: { 
+    flex: 1, 
+    color: '#ffffff', 
+    fontSize: Platform.OS === 'web' ? 13 : 15,
+    paddingVertical: Platform.OS === 'web' ? 10 : 0
+  },
   errorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -476,21 +524,31 @@ const styles = StyleSheet.create({
   },
   errorText: { 
     color: '#ef4444', 
-    fontSize: 11, 
+    fontSize: Platform.OS === 'web' ? 10 : 11, 
     marginLeft: 4,
     flex: 1,
   },
   submitButton: {
     backgroundColor: '#10b981',
-    borderRadius: 10,
-    paddingVertical: 12,
-    marginTop: 16,
+    borderRadius: Platform.OS === 'web' ? 8 : 10,
+    paddingVertical: Platform.OS === 'web' ? 10 : 12,
+    marginTop: Platform.OS === 'web' ? 12 : 16,
     alignItems: 'center',
   },
   submitButtonDisabled: { opacity: 0.5 },
-  submitButtonText: { color: '#ffffff', fontSize: 15, fontWeight: 'bold' },
-  backButton: { marginTop: 16, alignSelf: 'center' },
-  backButtonText: { color: 'rgba(255, 255, 255, 0.5)', fontSize: 14 },
+  submitButtonText: { 
+    color: '#ffffff', 
+    fontSize: Platform.OS === 'web' ? 13 : 15, 
+    fontWeight: 'bold' 
+  },
+  backButton: { 
+    marginTop: Platform.OS === 'web' ? 12 : 16, 
+    alignSelf: 'center' 
+  },
+  backButtonText: { 
+    color: 'rgba(255, 255, 255, 0.5)', 
+    fontSize: Platform.OS === 'web' ? 12 : 14 
+  },
 });
 
 export default CashierRegisterScreen;

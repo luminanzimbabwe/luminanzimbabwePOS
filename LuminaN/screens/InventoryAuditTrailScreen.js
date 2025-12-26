@@ -11,10 +11,13 @@ import {
   Modal,
   RefreshControl,
   FlatList,
-} from 'react-native';
+  Platform
+} 
+from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { shopAPI } from '../services/api';
 import { shopStorage } from '../services/storage';
+import presenceService from '../services/presenceService';
 
 const InventoryAuditTrailScreen = () => {
   const navigation = useNavigation();
@@ -30,8 +33,14 @@ const InventoryAuditTrailScreen = () => {
   const [dateFilter, setDateFilter] = useState('All');
   const [showFilters, setShowFilters] = useState(false);
 
-  // Product-specific filter
   const [selectedProduct, setSelectedProduct] = useState(null);
+
+  // Presence tracking state
+  const [activeTab, setActiveTab] = useState('inventory'); // 'inventory' or 'presence'
+  const [presenceLogs, setPresenceLogs] = useState([]);
+  const [filteredPresenceLogs, setFilteredPresenceLogs] = useState([]);
+  const [presenceSearchQuery, setPresenceSearchQuery] = useState('');
+  const [presenceDateFilter, setPresenceDateFilter] = useState('All');
 
   useEffect(() => {
     loadShopCredentials();
@@ -46,6 +55,17 @@ const InventoryAuditTrailScreen = () => {
   useEffect(() => {
     filterAuditTrail();
   }, [auditTrail, searchQuery, selectedReasonCode, dateFilter, selectedProduct]);
+
+  // Presence tracking effects
+  useEffect(() => {
+    if (activeTab === 'presence') {
+      loadPresenceLogs();
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    filterPresenceLogs();
+  }, [presenceLogs, presenceSearchQuery, presenceDateFilter]);
 
   const loadShopCredentials = async () => {
     try {
@@ -129,6 +149,54 @@ const InventoryAuditTrailScreen = () => {
     }
 
     setFilteredTrail(filtered);
+  };
+
+  // Presence tracking functions
+  const loadPresenceLogs = () => {
+    try {
+      const logs = presenceService.getPresenceLogs();
+      setPresenceLogs(logs);
+    } catch (error) {
+      console.error('Error loading presence logs:', error);
+    }
+  };
+
+  const filterPresenceLogs = () => {
+    let filtered = [...presenceLogs];
+
+    // Search filter
+    if (presenceSearchQuery.trim()) {
+      filtered = filtered.filter(entry =>
+        entry.user_name?.toLowerCase().includes(presenceSearchQuery.toLowerCase()) ||
+        entry.user_type?.toLowerCase().includes(presenceSearchQuery.toLowerCase()) ||
+        entry.status?.toLowerCase().includes(presenceSearchQuery.toLowerCase()) ||
+        entry.reason?.toLowerCase().includes(presenceSearchQuery.toLowerCase())
+      );
+    }
+
+    // Date filter
+    if (presenceDateFilter !== 'All') {
+      const now = new Date();
+      const filterDate = new Date();
+      
+      switch (presenceDateFilter) {
+        case 'today':
+          filterDate.setHours(0, 0, 0, 0);
+          break;
+        case 'week':
+          filterDate.setDate(now.getDate() - 7);
+          break;
+        case 'month':
+          filterDate.setMonth(now.getMonth() - 1);
+          break;
+      }
+      
+      filtered = filtered.filter(entry => 
+        new Date(entry.timestamp) >= filterDate
+      );
+    }
+
+    setFilteredPresenceLogs(filtered);
   };
 
   const onRefresh = () => {
@@ -221,6 +289,102 @@ const InventoryAuditTrailScreen = () => {
     return ['All', ...codes];
   };
 
+  // Presence tracking functions
+  const getPresenceStatusIcon = (status) => {
+    switch (status?.toLowerCase()) {
+      case 'online':
+        return '🟢';
+      case 'offline':
+        return '🔴';
+      case 'inactive':
+        return '🟡';
+      default:
+        return '⚪';
+    }
+  };
+
+  const getPresenceStatusColor = (status) => {
+    switch (status?.toLowerCase()) {
+      case 'online':
+        return '#10b981';
+      case 'offline':
+        return '#ef4444';
+      case 'inactive':
+        return '#f59e0b';
+      default:
+        return '#6b7280';
+    }
+  };
+
+  const getPresenceReasonIcon = (reason) => {
+    switch (reason?.toLowerCase()) {
+      case 'manual_logout':
+        return '🚪';
+      case 'window_blur':
+        return '⬜';
+      case 'page_hidden':
+        return '⬇️';
+      case 'inactivity_timeout':
+        return '😴';
+      case 'window_focused':
+        return '⬆️';
+      case 'page_unload':
+        return '🔄';
+      default:
+        return '⚡';
+    }
+  };
+
+  const renderPresenceEntry = ({ item: entry }) => (
+    <View style={styles.presenceEntryCard}>
+      <View style={styles.presenceEntryHeader}>
+        <View style={styles.presenceEntryLeft}>
+          <Text style={styles.presenceStatusIcon}>
+            {getPresenceStatusIcon(entry.status)}
+          </Text>
+          <View style={styles.presenceEntryInfo}>
+            <Text style={styles.presenceUserName}>{entry.user_name || 'Unknown User'}</Text>
+            <Text style={styles.presenceUserType}>
+              {entry.user_type?.toUpperCase() || 'USER'}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.presenceEntryRight}>
+          <Text style={styles.presenceTimestamp}>
+            {formatDate(entry.timestamp)}
+          </Text>
+          <View style={[
+            styles.presenceStatusBadge,
+            { backgroundColor: getPresenceStatusColor(entry.status) }
+          ]}>
+            <Text style={styles.presenceStatusText}>{entry.status?.toUpperCase()}</Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.presenceDetailsContainer}>
+        <View style={styles.presenceReason}>
+          <Text style={styles.presenceReasonIcon}>
+            {getPresenceReasonIcon(entry.reason)}
+          </Text>
+          <Text style={styles.presenceReasonText}>
+            Reason: {entry.reason?.replace('_', ' ') || 'Unknown'}
+          </Text>
+        </View>
+
+        {entry.ip_address && (
+          <Text style={styles.presenceInfo}>IP: {entry.ip_address}</Text>
+        )}
+
+        {entry.user_agent && (
+          <Text style={styles.presenceInfo}>
+            Device: {entry.user_agent.substring(0, 50)}...
+          </Text>
+        )}
+      </View>
+    </View>
+  );
+
   const renderAuditEntry = ({ item: entry }) => {
     if (entry.reason_code?.toLowerCase() === 'receipt') {
       return renderReceiptEntry(entry);
@@ -252,14 +416,14 @@ const InventoryAuditTrailScreen = () => {
 
         {entry.supplier_invoice && (
           <View style={styles.receiptInfo}>
-            <Text style={styles.receiptInfoLabel}>Invoice:</Text>
+            <Text style={styles.receiptInfoLabel}>📋 Invoice:</Text>
             <Text style={styles.receiptInfoValue}>{entry.supplier_invoice}</Text>
           </View>
         )}
 
         {entry.performed_by && (
           <View style={styles.receiptInfo}>
-            <Text style={styles.receiptInfoLabel}>Received By:</Text>
+            <Text style={styles.receiptInfoLabel}>👤 Received By:</Text>
             <Text style={styles.receiptInfoValue}>{entry.performed_by}</Text>
           </View>
         )}
@@ -332,29 +496,103 @@ const InventoryAuditTrailScreen = () => {
         )}
 
         {entry.performed_by && (
-          <Text style={styles.performedBy}>By: {entry.performed_by}</Text>
+          <Text style={styles.performedBy}>👤 By: {entry.performed_by}</Text>
         )}
 
         {entry.notes && (
-          <Text style={styles.notes}>Note: {entry.notes}</Text>
+          <Text style={styles.notes}>💬 Note: {entry.notes}</Text>
         )}
 
         {entry.supplier_invoice && (
-          <Text style={styles.supplierInfo}>Invoice: {entry.supplier_invoice}</Text>
+          <Text style={styles.supplierInfo}>📋 Invoice: {entry.supplier_invoice}</Text>
         )}
 
         {entry.cost_price && (
-          <Text style={styles.costPrice}>Cost: ${entry.cost_price}</Text>
+          <Text style={styles.costPrice}>💰 Cost: ${entry.cost_price}</Text>
         )}
 
         {entry.reference_number && (
-          <Text style={styles.reference}>Ref: {entry.reference_number}</Text>
+          <Text style={styles.reference}>🔗 Ref: {entry.reference_number}</Text>
         )}
       </View>
     </View>
   );
 
-  const renderFilters = () => (
+  const renderFilters = () => {
+    if (activeTab === 'presence') {
+      return renderPresenceFilters();
+    }
+    return renderInventoryFilters();
+  };
+
+  const renderPresenceFilters = () => (
+    <View style={styles.filtersContainer}>
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search users, status, reasons..."
+          value={presenceSearchQuery}
+          onChangeText={setPresenceSearchQuery}
+          placeholderTextColor="#999"
+        />
+      </View>
+
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
+        {/* Date Filter */}
+        <TouchableOpacity
+          style={[
+            styles.filterButton,
+            presenceDateFilter !== 'All' && styles.filterButtonActive
+          ]}
+          onPress={() => {
+            const filters = ['All', 'today', 'week', 'month'];
+            const currentIndex = filters.indexOf(presenceDateFilter);
+            const nextIndex = (currentIndex + 1) % filters.length;
+            setPresenceDateFilter(filters[nextIndex]);
+          }}
+        >
+          <Text style={[
+            styles.filterButtonText,
+            presenceDateFilter !== 'All' && styles.filterButtonTextActive
+          ]}>
+            📅 {presenceDateFilter === 'All' ? 'All Time' : presenceDateFilter.charAt(0).toUpperCase() + presenceDateFilter.slice(1)}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Refresh Presence Logs */}
+        <TouchableOpacity
+          style={styles.filterButton}
+          onPress={loadPresenceLogs}
+        >
+          <Text style={styles.filterButtonText}>🔄 Refresh</Text>
+        </TouchableOpacity>
+      </ScrollView>
+
+      {/* Active Filters */}
+      {(presenceSearchQuery || presenceDateFilter !== 'All') && (
+        <View style={styles.activeFilters}>
+          {presenceSearchQuery && (
+            <View style={styles.activeFilter}>
+              <Text style={styles.activeFilterText}>Search: "{presenceSearchQuery}"</Text>
+              <TouchableOpacity onPress={() => setPresenceSearchQuery('')}>
+                <Text style={styles.removeFilterText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          {presenceDateFilter !== 'All' && (
+            <View style={styles.activeFilter}>
+              <Text style={styles.activeFilterText}>Date: {presenceDateFilter}</Text>
+              <TouchableOpacity onPress={() => setPresenceDateFilter('All')}>
+                <Text style={styles.removeFilterText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      )}
+    </View>
+  );
+
+  const renderInventoryFilters = () => (
     <View style={styles.filtersContainer}>
       <View style={styles.searchContainer}>
         <TextInput
@@ -460,14 +698,95 @@ const InventoryAuditTrailScreen = () => {
       <TouchableOpacity onPress={() => navigation.goBack()}>
         <Text style={styles.backButton}>← Back</Text>
       </TouchableOpacity>
-      <Text style={styles.headerTitle}>📋 Inventory Audit Trail</Text>
-      <TouchableOpacity onPress={() => setRefreshing(true) || loadAuditTrail()}>
+      <Text style={styles.headerTitle}>
+        {activeTab === 'inventory' ? '📋 Inventory Audit Trail' : '🟢 User Presence Logs'}
+      </Text>
+      <TouchableOpacity onPress={() => {
+        if (activeTab === 'inventory') {
+          setRefreshing(true);
+          loadAuditTrail();
+        } else {
+          loadPresenceLogs();
+        }
+      }}>
         <Text style={styles.refreshButton}>🔄</Text>
       </TouchableOpacity>
     </View>
   );
 
-  const renderStats = () => (
+  const renderTabNavigation = () => (
+    <View style={styles.tabNavigation}>
+      <TouchableOpacity
+        style={[
+          styles.tabButton,
+          activeTab === 'inventory' && styles.tabButtonActive
+        ]}
+        onPress={() => setActiveTab('inventory')}
+      >
+        <Text style={[
+          styles.tabButtonText,
+          activeTab === 'inventory' && styles.tabButtonTextActive
+        ]}>
+          📦 Inventory
+        </Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[
+          styles.tabButton,
+          activeTab === 'presence' && styles.tabButtonActive
+        ]}
+        onPress={() => setActiveTab('presence')}
+      >
+        <Text style={[
+          styles.tabButtonText,
+          activeTab === 'presence' && styles.tabButtonTextActive
+        ]}>
+          🟢 Presence
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderStats = () => {
+    if (activeTab === 'presence') {
+      return renderPresenceStats();
+    }
+    return renderInventoryStats();
+  };
+
+  const renderPresenceStats = () => {
+    const onlineUsers = filteredPresenceLogs.filter(log => log.status === 'online').length;
+    const offlineUsers = filteredPresenceLogs.filter(log => log.status === 'offline').length;
+    const inactiveUsers = filteredPresenceLogs.filter(log => log.status === 'inactive').length;
+    const uniqueUsers = [...new Set(filteredPresenceLogs.map(log => log.user_name))].length;
+
+    return (
+      <View style={styles.statsContainer}>
+        <View style={styles.statCard}>
+          <Text style={styles.statIcon}>🟢</Text>
+          <Text style={styles.statValue}>{onlineUsers}</Text>
+          <Text style={styles.statLabel}>Currently Online</Text>
+        </View>
+        <View style={styles.statCard}>
+          <Text style={styles.statIcon}>🔴</Text>
+          <Text style={styles.statValue}>{offlineUsers}</Text>
+          <Text style={styles.statLabel}>Offline</Text>
+        </View>
+        <View style={styles.statCard}>
+          <Text style={styles.statIcon}>👥</Text>
+          <Text style={styles.statValue}>{uniqueUsers}</Text>
+          <Text style={styles.statLabel}>Unique Users</Text>
+        </View>
+        <View style={styles.statCard}>
+          <Text style={styles.statIcon}>📊</Text>
+          <Text style={styles.statValue}>{filteredPresenceLogs.length}</Text>
+          <Text style={styles.statLabel}>Total Events</Text>
+        </View>
+      </View>
+    );
+  };
+
+  const renderInventoryStats = () => (
     <View style={styles.statsContainer}>
       <View style={styles.statCard}>
         <Text style={styles.statIcon}>📊</Text>
@@ -493,16 +812,25 @@ const InventoryAuditTrailScreen = () => {
 
   const renderActionButtons = () => (
     <View style={styles.actionButtonsContainer}>
-      <TouchableOpacity style={styles.actionButton} onPress={handleReceiveInventory}>
-        <Text style={styles.actionButtonIcon}>📦</Text>
-        <Text style={styles.actionButtonText}>Receive</Text>
+      <TouchableOpacity 
+        style={[styles.actionButton, { borderColor: '#10b981', backgroundColor: '#065f46' }]} 
+        onPress={handleReceiveInventory}
+      >
+        <Text style={[styles.actionButtonIcon, { color: '#10b981' }]}>📦</Text>
+        <Text style={styles.actionButtonText}>Receive Stock</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={styles.actionButton} onPress={handleStockAdjustment}>
-        <Text style={styles.actionButtonIcon}>⚖️</Text>
-        <Text style={styles.actionButtonText}>Adjust</Text>
+      <TouchableOpacity 
+        style={[styles.actionButton, { borderColor: '#f59e0b', backgroundColor: '#78350f' }]} 
+        onPress={handleStockAdjustment}
+      >
+        <Text style={[styles.actionButtonIcon, { color: '#f59e0b' }]}>⚖️</Text>
+        <Text style={styles.actionButtonText}>Adjust Stock</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={styles.actionButton} onPress={handleStockTake}>
-        <Text style={styles.actionButtonIcon}>📊</Text>
+      <TouchableOpacity 
+        style={[styles.actionButton, { borderColor: '#3b82f6', backgroundColor: '#1e3a8a' }]} 
+        onPress={handleStockTake}
+      >
+        <Text style={[styles.actionButtonIcon, { color: '#3b82f6' }]}>📊</Text>
         <Text style={styles.actionButtonText}>Stock Take</Text>
       </TouchableOpacity>
     </View>
@@ -559,23 +887,36 @@ const InventoryAuditTrailScreen = () => {
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView 
+      style={[styles.container, Platform.OS === 'web' && styles.webContainer]}
+      contentContainerStyle={styles.scrollContentContainer}
+      showsVerticalScrollIndicator={true}
+      scrollEventThrottle={16}
+      nestedScrollEnabled={Platform.OS === 'web'}
+      removeClippedSubviews={false}
+      onScroll={(event) => {
+        if (Platform.OS === 'web') {
+          const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+          const isAtBottom = contentOffset.y >= (contentSize.height - layoutMeasurement.height - 10);
+        }
+      }}
+    >
       {renderHeader()}
+      {renderTabNavigation()}
       {renderFilters()}
       {renderStats()}
-      {renderActionButtons()}
+      {activeTab === 'inventory' && renderActionButtons()}
 
-      <FlatList
-        data={filteredTrail}
-        renderItem={renderAuditEntry}
-        keyExtractor={(item, index) => item.id?.toString() || index.toString()}
-        style={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        ListEmptyComponent={
+      {activeTab === 'inventory' ? (
+        filteredTrail.length > 0 ? (
+          filteredTrail.map((entry, index) => (
+            <View key={entry.id?.toString() || index.toString()}>
+              {renderAuditEntry({ item: entry, index })}
+            </View>
+          ))
+        ) : (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>📋 No Audit Trail Found</Text>
+            <Text style={styles.emptyTitle}>📦 No Inventory Records Found</Text>
             <Text style={styles.emptyText}>
               {searchQuery || selectedReasonCode !== 'All' || dateFilter !== 'All'
                 ? 'Try adjusting your search or filter criteria.'
@@ -583,9 +924,33 @@ const InventoryAuditTrailScreen = () => {
               }
             </Text>
           </View>
-        }
-      />
-    </View>
+        )
+      ) : (
+        filteredPresenceLogs.length > 0 ? (
+          filteredPresenceLogs.map((entry, index) => (
+            <View key={entry.timestamp + index.toString()}>
+              {renderPresenceEntry({ item: entry, index })}
+            </View>
+          ))
+        ) : (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>🟢 No Presence Records Found</Text>
+            <Text style={styles.emptyText}>
+              {presenceSearchQuery || presenceDateFilter !== 'All'
+                ? 'Try adjusting your search or filter criteria.'
+                : 'No user presence activity has been recorded yet.'
+              }
+            </Text>
+          </View>
+        )
+      )}
+      
+      {/* Bottom padding for web scrolling */}
+      <View style={{ 
+        height: Platform.OS === 'web' ? 100 : 20,
+        minHeight: Platform.OS === 'web' ? 100 : 0
+      }} />
+    </ScrollView>
   );
 };
 
@@ -593,6 +958,25 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0a0a0a',
+    ...Platform.select({
+      web: {
+        height: '100vh',
+        overflow: 'auto',
+        WebkitOverflowScrolling: 'auto',
+        scrollBehavior: 'smooth',
+      },
+    }),
+  },
+  webContainer: {
+    ...Platform.select({
+      web: {
+        height: '100vh',
+        maxHeight: '100vh',
+        overflow: 'auto',
+        WebkitOverflowScrolling: 'auto',
+        scrollBehavior: 'smooth',
+      },
+    }),
   },
   header: {
     flexDirection: 'row',
@@ -635,6 +1019,30 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
+  contentScrollView: {
+    flex: 1,
+    height: '100vh',
+    // Web-specific scroll behavior
+    ...Platform.select({
+      web: {
+        overflow: 'auto',
+        WebkitOverflowScrolling: 'auto',
+        maxHeight: '100vh',
+        height: 'calc(100vh - 120px)',
+      }
+    })
+  },
+  scrollContentContainer: {
+    flexGrow: 1,
+    paddingBottom: Platform.OS === 'web' ? 100 : 40,
+    ...Platform.select({
+      web: {
+        minHeight: '100vh',
+        width: '100%',
+        flexGrow: 1,
+      },
+    }),
+  },
   filtersContainer: {
     backgroundColor: '#1a1a1a',
     padding: 16,
@@ -655,6 +1063,15 @@ const styles = StyleSheet.create({
   },
   filterScroll: {
     marginBottom: 8,
+    // Web-specific scroll behavior
+    ...Platform.select({
+      web: {
+        overflowX: 'auto',
+        overflowY: 'hidden',
+        scrollBehavior: 'smooth',
+        WebkitOverflowScrolling: 'auto',
+      }
+    })
   },
   filterButton: {
     backgroundColor: '#2a2a2a',
@@ -669,6 +1086,14 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 1,
+    // Web-specific styles
+    ...Platform.select({
+      web: {
+        cursor: 'pointer',
+        userSelect: 'none',
+        transition: 'all 0.2s ease',
+      }
+    })
   },
   filterButtonActive: {
     backgroundColor: '#3b82f6',
@@ -755,171 +1180,393 @@ const styles = StyleSheet.create({
   },
   actionButtonsContainer: {
     flexDirection: 'row',
-    padding: 16,
+    padding: 20,
     backgroundColor: '#1a1a1a',
     borderBottomWidth: 1,
     borderBottomColor: '#333',
-    justifyContent: 'space-around',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   actionButton: {
     backgroundColor: '#2a2a2a',
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: 16,
+    padding: 20,
     alignItems: 'center',
-    marginLeft: 8,
+    marginHorizontal: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-    borderWidth: 1,
-    borderColor: '#444',
-  },
-  // Receipt-specific styles
-  receiptCard: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    margin: 16,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
     borderWidth: 2,
-    borderColor: '#dee2e6',
+    borderColor: '#374151',
+    minHeight: 80,
+    justifyContent: 'center',
+    // Web-specific styles
+    ...Platform.select({
+      web: {
+        cursor: 'pointer',
+        userSelect: 'none',
+        transition: 'all 0.3s ease',
+      }
+    })
+  },
+  actionButtonIcon: {
+    fontSize: 32,
+    marginBottom: 8,
+  },
+  actionButtonText: {
+    color: '#e5e7eb',
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  // Enhanced Standard Audit Entry Styles
+  auditEntryCard: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 16,
+    margin: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#333333',
+  },
+  auditEntryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 2,
+    borderBottomColor: '#374151',
+  },
+  auditEntryLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  actionIcon: {
+    fontSize: 28,
+    marginRight: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#374151',
+    textAlign: 'center',
+    lineHeight: 40,
+  },
+  auditEntryInfo: {
+    flex: 1,
+  },
+  productName: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  actionText: {
+    color: '#9ca3af',
+    fontSize: 14,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  auditEntryRight: {
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  timestamp: {
+    color: '#9ca3af',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  reasonCodeBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  reasonCodeText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  detailsContainer: {
+    gap: 12,
+  },
+  quantityChange: {
+    backgroundColor: '#374151',
+    padding: 12,
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#10b981',
+  },
+  quantityChangeText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  newQuantityText: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  priceChange: {
+    backgroundColor: '#374151',
+    padding: 12,
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#f59e0b',
+  },
+  priceChangeText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  newPriceText: {
+    color: '#f59e0b',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
+  // Enhanced Receipt Card Styles - Modern Dark Theme
+  receiptCard: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 16,
+    margin: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: '#333333',
+    position: 'relative',
+    overflow: 'hidden',
   },
   receiptHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
+    alignItems: 'flex-start',
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 2,
+    borderBottomColor: '#3b82f6',
   },
   receiptTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    letterSpacing: 1,
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#3b82f6',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
   },
   receiptHeaderRight: {
     alignItems: 'flex-end',
+    gap: 4,
   },
   receiptDate: {
-    fontSize: 12,
-    color: '#6c757d',
+    fontSize: 14,
+    color: '#e5e7eb',
+    fontWeight: '600',
     marginBottom: 2,
   },
   receiptId: {
-    fontSize: 10,
-    color: '#6c757d',
-    fontWeight: '600',
+    fontSize: 12,
+    color: '#9ca3af',
+    fontWeight: '700',
+    backgroundColor: '#374151',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
   },
   receiptDivider: {
-    height: 1,
-    backgroundColor: '#dee2e6',
-    marginVertical: 8,
+    height: 2,
+    backgroundColor: 'linear-gradient(90deg, transparent 0%, #3b82f6 50%, transparent 100%)',
+    marginVertical: 16,
+    borderRadius: 1,
   },
   receiptBody: {
-    marginVertical: 4,
+    marginVertical: 8,
   },
   receiptItem: {
-    marginBottom: 8,
+    backgroundColor: '#2a2a2a',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#404040',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   receiptProductName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#2c3e50',
-    marginBottom: 4,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginBottom: 8,
   },
   receiptItemDetails: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    backgroundColor: '#374151',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginTop: 8,
   },
   receiptQty: {
-    fontSize: 12,
-    color: '#495057',
-    fontWeight: '500',
+    fontSize: 14,
+    color: '#10b981',
+    fontWeight: '700',
   },
   receiptUnitPrice: {
-    fontSize: 12,
-    color: '#6c757d',
+    fontSize: 14,
+    color: '#e5e7eb',
+    fontWeight: '600',
   },
   receiptTotal: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#28a745',
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#10b981',
   },
   receiptInfo: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 4,
+    alignItems: 'center',
+    backgroundColor: '#374151',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginBottom: 8,
   },
   receiptInfoLabel: {
     fontSize: 12,
-    color: '#6c757d',
-    fontWeight: '500',
+    color: '#9ca3af',
+    fontWeight: '600',
   },
   receiptInfoValue: {
-    fontSize: 12,
-    color: '#2c3e50',
-    fontWeight: '600',
+    fontSize: 14,
+    color: '#ffffff',
+    fontWeight: '700',
   },
   receiptFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#404040',
   },
   receiptStatus: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#28a745',
-    letterSpacing: 0.5,
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#10b981',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    backgroundColor: '#065f46',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
   },
   receiptTimestamp: {
-    fontSize: 10,
-    color: '#6c757d',
+    fontSize: 12,
+    color: '#9ca3af',
+    fontWeight: '600',
   },
   receiptNotes: {
-    marginTop: 8,
-    padding: 8,
-    backgroundColor: '#f1f3f4',
-    borderRadius: 4,
+    marginTop: 16,
+    padding: 16,
+    backgroundColor: '#374151',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#4b5563',
   },
   receiptNotesLabel: {
-    fontSize: 11,
-    color: '#6c757d',
-    marginBottom: 2,
+    fontSize: 12,
+    color: '#e5e7eb',
+    fontWeight: '700',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   receiptNotesText: {
-    fontSize: 12,
-    color: '#2c3e50',
+    fontSize: 14,
+    color: '#d1d5db',
     fontStyle: 'italic',
+    lineHeight: 20,
   },
   performedBy: {
-    color: '#999',
-    fontSize: 12,
-    marginBottom: 2,
+    color: '#9ca3af',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+    backgroundColor: '#374151',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
   },
   notes: {
-    color: '#ccc',
-    fontSize: 12,
-    marginBottom: 2,
+    color: '#d1d5db',
+    fontSize: 14,
+    marginBottom: 8,
     fontStyle: 'italic',
+    lineHeight: 20,
+    backgroundColor: '#374151',
+    padding: 12,
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#3b82f6',
   },
   supplierInfo: {
-    color: '#6366f1',
-    fontSize: 12,
+    color: '#8b5cf6',
+    fontSize: 14,
+    fontWeight: '600',
+    backgroundColor: '#5b21b6',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+    marginBottom: 8,
   },
   costPrice: {
-    color: '#999',
-    fontSize: 12,
-    marginBottom: 2,
+    color: '#10b981',
+    fontSize: 16,
+    fontWeight: '700',
+    backgroundColor: '#065f46',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+    marginBottom: 8,
   },
   reference: {
-    color: '#999',
-    fontSize: 12,
+    color: '#e5e7eb',
+    fontSize: 14,
+    fontWeight: '600',
+    backgroundColor: '#374151',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
   },
   emptyState: {
     alignItems: 'center',
@@ -932,6 +1579,15 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 2,
+    // Web-specific styles
+    ...Platform.select({
+      web: {
+        minHeight: 300,
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+      }
+    })
   },
   emptyTitle: {
     color: '#fff',
@@ -944,6 +1600,119 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 20,
+  },
+
+  // Tab Navigation Styles
+  tabNavigation: {
+    flexDirection: 'row',
+    backgroundColor: '#1a1a1a',
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  tabButton: {
+    flex: 1,
+    paddingVertical: 16,
+    alignItems: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  tabButtonActive: {
+    borderBottomColor: '#3b82f6',
+    backgroundColor: '#2a2a2a',
+  },
+  tabButtonText: {
+    color: '#9ca3af',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  tabButtonTextActive: {
+    color: '#3b82f6',
+  },
+
+  // Presence Entry Styles
+  presenceEntryCard: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 12,
+    margin: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: '#404040',
+  },
+  presenceEntryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  presenceEntryLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  presenceStatusIcon: {
+    fontSize: 20,
+    marginRight: 12,
+  },
+  presenceEntryInfo: {
+    flex: 1,
+  },
+  presenceUserName: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  presenceUserType: {
+    color: '#9ca3af',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  presenceEntryRight: {
+    alignItems: 'flex-end',
+  },
+  presenceTimestamp: {
+    color: '#9ca3af',
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  presenceStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  presenceStatusText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  presenceDetailsContainer: {
+    borderTopWidth: 1,
+    borderTopColor: '#404040',
+    paddingTop: 12,
+  },
+  presenceReason: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  presenceReasonIcon: {
+    fontSize: 16,
+    marginRight: 8,
+  },
+  presenceReasonText: {
+    color: '#e5e7eb',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  presenceInfo: {
+    color: '#9ca3af',
+    fontSize: 12,
+    marginBottom: 4,
   },
 });
 

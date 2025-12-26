@@ -182,7 +182,7 @@ const StaffManagementSimple = () => {
       {/* Status Info */}
       <View style={styles.statusBar}>
         <Text style={styles.statusText}>
-          Pending: {pendingStaff.length} | Approved: {approvedStaff.length}
+          {`Pending: ${pendingStaff.length} | Approved: ${approvedStaff.length}`}
         </Text>
       </View>
 

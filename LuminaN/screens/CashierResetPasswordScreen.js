@@ -8,7 +8,8 @@ import {
   ActivityIndicator, 
   KeyboardAvoidingView, 
   Platform, 
-  ScrollView 
+  ScrollView,
+  Dimensions 
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { shopAPI } from '../services/api';
@@ -67,6 +68,8 @@ const CashierResetPasswordScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
   const cashierName = route.params?.cashierName || '';
+  const { width } = Dimensions.get('window');
+  const isWeb = Platform.OS === 'web';
   
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
@@ -160,10 +163,18 @@ const CashierResetPasswordScreen = () => {
         <View style={styles.gradient} />
 
         <ScrollView 
-          contentContainerStyle={styles.scrollContent}
+          style={styles.scrollView}
+          contentContainerStyle={[
+            styles.scrollContent,
+            isWeb && width > 768 && { maxWidth: 500, alignSelf: 'center', width: '100%' }
+          ]}
           keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          <View style={styles.glassCard}>
+          <View style={[
+            styles.glassCard,
+            isWeb && { maxHeight: '90vh', overflow: 'auto' }
+          ]}>
             <View style={styles.header}>
               <Text style={styles.successIcon}>✅</Text>
               <Text style={styles.title}>Password Reset Successful</Text>
@@ -201,10 +212,18 @@ const CashierResetPasswordScreen = () => {
       <View style={styles.gradient} />
 
       <ScrollView 
-        contentContainerStyle={styles.scrollContent}
+        style={styles.scrollView}
+        contentContainerStyle={[
+          styles.scrollContent,
+          isWeb && width > 768 && { maxWidth: 500, alignSelf: 'center', width: '100%' }
+        ]}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.glassCard}>
+        <View style={[
+          styles.glassCard,
+          isWeb && { maxHeight: '90vh', overflow: 'auto' }
+        ]}>
           <View style={styles.header}>
             <Text style={styles.title}>Reset Cashier Password</Text>
             <Text style={styles.subtitle}>Owner authorization required</Text>
@@ -310,19 +329,40 @@ const CashierResetPasswordScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000000' },
-  scrollContent: { flexGrow: 1, justifyContent: 'center', padding: 20 },
+  scrollView: { flex: 1 },
+  scrollContent: { 
+    flexGrow: 1, 
+    justifyContent: 'center', 
+    padding: 16,
+    paddingHorizontal: Platform.OS === 'web' ? 10 : 20
+  },
   background: { ...StyleSheet.absoluteFillObject, backgroundColor: '#0f0f0f' },
   gradient: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(20, 20, 20, 0.8)' },
   glassCard: {
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 24,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
-    padding: 24,
+    padding: Platform.OS === 'web' ? 16 : 20,
+    marginVertical: Platform.OS === 'web' ? 10 : 0,
+    maxWidth: '100%',
   },
-  header: { alignItems: 'center', marginBottom: 24 },
-  title: { fontSize: 30, fontWeight: 'bold', color: '#ffffff', marginBottom: 8 },
-  subtitle: { fontSize: 16, color: 'rgba(255, 255, 255, 0.7)', textAlign: 'center' },
+  header: { 
+    alignItems: 'center', 
+    marginBottom: Platform.OS === 'web' ? 16 : 24 
+  },
+  title: { 
+    fontSize: Platform.OS === 'web' ? 24 : 30, 
+    fontWeight: 'bold', 
+    color: '#ffffff', 
+    marginBottom: 8,
+    textAlign: 'center'
+  },
+  subtitle: { 
+    fontSize: Platform.OS === 'web' ? 14 : 16, 
+    color: 'rgba(255, 255, 255, 0.7)', 
+    textAlign: 'center' 
+  },
   successIcon: { fontSize: 48, marginBottom: 16 },
   errorBanner: {
     backgroundColor: 'rgba(239, 68, 68, 0.1)',
@@ -333,35 +373,47 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(239, 68, 68, 0.3)',
   },
   errorBannerText: { color: '#ef4444', fontSize: 14, textAlign: 'center' },
-  formContainer: { marginTop: 24 },
-  inputContainer: { marginBottom: 16 },
+  formContainer: { 
+    marginTop: Platform.OS === 'web' ? 16 : 24 
+  },
+  inputContainer: { 
+    marginBottom: Platform.OS === 'web' ? 12 : 16 
+  },
   inputLabel: { fontSize: 14, color: '#fff', marginBottom: 8 },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    height: 50,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    height: Platform.OS === 'web' ? 44 : 50,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   inputError: { borderColor: '#ef4444' },
   inputIcon: { marginRight: 10 },
-  input: { flex: 1, color: '#ffffff', fontSize: 16 },
+  input: { 
+    flex: 1, 
+    color: '#ffffff', 
+    fontSize: Platform.OS === 'web' ? 14 : 16,
+    paddingVertical: Platform.OS === 'web' ? 12 : 0
+  },
   eyeButton: { padding: 5 },
   eyeIcon: { fontSize: 18 },
   errorText: { color: '#ef4444', fontSize: 12, marginTop: 4 },
   resetButton: {
     backgroundColor: '#3b82f6',
-    borderRadius: 12,
-    paddingVertical: 14,
+    borderRadius: 8,
+    paddingVertical: Platform.OS === 'web' ? 12 : 14,
     alignItems: 'center',
-    marginTop: 10,
+    marginTop: 8,
   },
   resetButtonDisabled: { opacity: 0.5 },
   resetButtonText: { color: '#ffffff', fontSize: 16, fontWeight: 'bold' },
-  backButton: { marginTop: 20, alignSelf: 'center' },
+  backButton: { 
+    marginTop: Platform.OS === 'web' ? 16 : 20, 
+    alignSelf: 'center' 
+  },
   backButtonText: { color: 'rgba(255, 255, 255, 0.5)' },
   iconText: { fontSize: 16 },
   // Success screen styles

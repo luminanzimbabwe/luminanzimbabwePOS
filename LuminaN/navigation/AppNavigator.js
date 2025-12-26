@@ -6,6 +6,7 @@ import { ROUTES } from '../constants/navigation';
 import WelcomeScreen from '../screens/WelcomeScreen';
 import RegisterScreen from '../screens/RegisterScreen';
 import LoginScreen from '../screens/LoginScreen';
+import CashierDashboardScreen from '../screens/CashierDashboardScreen';
 import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
 import CashierResetPasswordScreen from '../screens/CashierResetPasswordScreen';
 import RegistrationDetailsScreen from '../screens/RegistrationDetailsScreen';
@@ -14,6 +15,10 @@ import StaffContractScreen from '../screens/StaffContractScreen';
 import CashierRegisterScreen from '../screens/CashierRegisterScreen';
 import InventoryAuditTrailScreen from '../screens/InventoryAuditTrailScreen';
 import OrderConfirmationScreen from '../screens/OrderConfirmationScreen';
+import SettingsScreen from '../screens/SettingsScreen';
+import StockValuationScreen from '../screens/StockValuationScreen';
+import POSPriceScreen from '../screens/POSPriceScreen';
+import SalesAndRefundsScreen from '../screens/SalesAndRefundsScreen';
 
 // Import Tab Navigator
 import TabNavigator from './TabNavigator';
@@ -32,6 +37,7 @@ const AppNavigator = () => {
       <Stack.Screen name={ROUTES.WELCOME} component={WelcomeScreen} />
       <Stack.Screen name={ROUTES.REGISTER} component={RegisterScreen} />
       <Stack.Screen name={ROUTES.LOGIN} component={LoginScreen} />
+      <Stack.Screen name={ROUTES.CASHIER_DASHBOARD} component={CashierDashboardScreen} />
       <Stack.Screen name={ROUTES.FORGOT_PASSWORD} component={ForgotPasswordScreen} />
       <Stack.Screen name={ROUTES.CASHIER_RESET_PASSWORD} component={CashierResetPasswordScreen} />
       
@@ -47,9 +53,13 @@ const AppNavigator = () => {
       {/* Additional Screens */}
       <Stack.Screen name={ROUTES.REGISTRATION_DETAILS} component={RegistrationDetailsScreen} />
       <Stack.Screen name={ROUTES.SUCCESS} component={SuccessScreen} />
+      <Stack.Screen name={ROUTES.SETTINGS} component={SettingsScreen} />
       <Stack.Screen name={ROUTES.STAFF_CONTRACT} component={StaffContractScreen} />
       <Stack.Screen name={ROUTES.CASHIER_REGISTER} component={CashierRegisterScreen} />
       <Stack.Screen name={ROUTES.INVENTORY_AUDIT_TRAIL} component={InventoryAuditTrailScreen} />
+      <Stack.Screen name={ROUTES.STOCK_VALUATION} component={StockValuationScreen} />
+      <Stack.Screen name={ROUTES.POS_PRICE} component={POSPriceScreen} />
+      <Stack.Screen name={ROUTES.SALES_AND_REFUNDS} component={SalesAndRefundsScreen} />
       <Stack.Screen name="OrderConfirmation" component={OrderConfirmationScreen} />
 
     </Stack.Navigator>

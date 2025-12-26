@@ -482,7 +482,7 @@ const InventoryReceivingScreen = () => {
               <View>
                 <Text style={styles.selectedProductName}>{selectedProduct.name}</Text>
                 <Text style={styles.selectedProductDetails}>
-                  Current Stock: {selectedProduct.stock_quantity || 0} • Cost: ${selectedProduct.cost_price || '0.00'}
+                  {`Current Stock: ${selectedProduct.stock_quantity || 0} • Cost: ${selectedProduct.cost_price || '0.00'}`}
                 </Text>
               </View>
             ) : (
@@ -867,7 +867,7 @@ const InventoryReceivingScreen = () => {
             >
               <Text style={styles.supplierName}>{item.name}</Text>
               <Text style={styles.supplierDetails}>
-                {item.contact || 'No contact info'} • {item.location || 'No location'}
+                {`${item.contact || 'No contact info'} • ${item.location || 'No location'}`}
               </Text>
             </TouchableOpacity>
           )}
@@ -914,7 +914,7 @@ const InventoryReceivingScreen = () => {
             >
               <Text style={styles.productName}>{item.name}</Text>
               <Text style={styles.productDetails}>
-                {item.category} • Current Cost: ${item.cost_price || '0.00'} • Stock: {item.stock_quantity || 0}
+                {`${item.category} • Current Cost: ${item.cost_price || '0.00'} • Stock: ${item.stock_quantity || 0}`}
               </Text>
             </TouchableOpacity>
           )}

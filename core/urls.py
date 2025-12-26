@@ -16,6 +16,8 @@ urlpatterns = [
     path('cashiers/login/', views.CashierLoginView.as_view(), name='cashier-login'),
     path('cashiers/logout/', views.CashierLogoutView.as_view(), name='cashier-logout'),
     path('cashiers/register/', CashierSelfRegistrationView.as_view(), name='cashier-self-registration'),
+    path('cashiers/reset-password/', views.CashierResetPasswordView.as_view(), name='cashier-reset-password'),
+    path('cashiers/top-products/', views.CashierTopProductsView.as_view(), name='cashier-top-products'),
     
     # Staff Management endpoints
     path('staff/pending/', PendingStaffListView.as_view(), name='pending-staff-list'),
@@ -34,6 +36,7 @@ urlpatterns = [
     path('audit-trail/', views.InventoryAuditTrailView.as_view(), name='inventory-audit-trail'),
     path('products/<int:product_id>/audit-history/', views.ProductAuditHistoryView.as_view(), name='product-audit-history'),
     path('sales/', views.SaleListView.as_view(), name='sale-list'),
+    path('sales-history/', views.SalesHistoryView.as_view(), name='sales-history'),
     path('sales/<int:sale_id>/', views.SaleDetailView.as_view(), name='sale-detail'),
     path('sale-items/<int:item_id>/', views.SaleItemDetailView.as_view(), name='sale-item-detail'),
     path('customers/', views.CustomerListView.as_view(), name='customer-list'),

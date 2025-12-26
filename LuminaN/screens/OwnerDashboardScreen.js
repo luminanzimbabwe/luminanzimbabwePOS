@@ -6,11 +6,14 @@ import {
   ScrollView,
   TouchableOpacity,
   Dimensions,
-  Alert
+  Alert,
+  PanResponder,
+  Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { shopStorage } from '../services/storage';
 import { shopAPI } from '../services/api';
+import FeatureSidebar from '../components/FeatureSidebar';
 
 const { width } = Dimensions.get('window');
 
@@ -18,6 +21,24 @@ const OwnerDashboardScreen = () => {
   const navigation = useNavigation();
   const [shopData, setShopData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [sidebarVisible, setSidebarVisible] = useState(false);
+
+  // Pan responder for swipe gestures
+  const panResponder = React.useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: (evt, gestureState) => {
+        return evt.nativeEvent.locationX < 50; // Only respond to touches near the left edge
+      },
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        return evt.nativeEvent.locationX < 50;
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        if (gestureState.dx > 100) {
+          setSidebarVisible(true);
+        }
+      },
+    })
+  ).current;
 
   useEffect(() => {
     loadShopData();
@@ -33,9 +54,27 @@ const OwnerDashboardScreen = () => {
         const shopInfo = credentials.shop_info || credentials;
         console.log('✅ Extracted shop info:', shopInfo);
         
+        // Merge with any additional data from credentials
+        const fullShopData = {
+          ...shopInfo,
+          // Ensure all registration data is included
+          register_id: credentials.register_id || shopInfo.register_id,
+          device_id: credentials.device_id || shopInfo.device_id,
+          shop_id: credentials.shop_id || shopInfo.shop_id,
+          owner_id: credentials.owner_id || shopInfo.owner_id,
+          api_key: credentials.api_key || shopInfo.api_key,
+          master_password: credentials.master_password || shopInfo.master_password,
+          recovery_codes: credentials.recovery_codes || shopInfo.recovery_codes,
+          registration_time: credentials.registration_time || shopInfo.registration_time,
+          version: credentials.version || shopInfo.version,
+          checksum: credentials.checksum || shopInfo.checksum,
+        };
+        
+        console.log('🔧 Full shop data with registration details:', fullShopData);
+        
         // Validate that we have the essential data
-        if (shopInfo.name || shopInfo.email) {
-          setShopData(shopInfo);
+        if (fullShopData.name || fullShopData.email) {
+          setShopData(fullShopData);
         } else {
           console.log('⚠️ Shop info missing essential data, trying API fallback');
           await fetchFromAPI();
@@ -126,7 +165,15 @@ const OwnerDashboardScreen = () => {
   return (
     <ScrollView style={styles.container}>
       {/* Top Section with Shop Info */}
-      <View style={styles.topSection}>
+      <View style={styles.topSection} {...panResponder.panHandlers}>
+        {/* Sidebar Toggle Button */}
+        <TouchableOpacity
+          style={styles.sidebarToggle}
+          onPress={() => setSidebarVisible(true)}
+        >
+          <Text style={styles.sidebarToggleIcon}>☰</Text>
+        </TouchableOpacity>
+
         {/* Shop Details on Top Right */}
         <View style={styles.shopDetailsRight}>
           <Text style={styles.shopIdText}>Shop ID: {shopData.shop_id || 'N/A'}</Text>
@@ -146,7 +193,7 @@ const OwnerDashboardScreen = () => {
             {shopData.address || 'Address not set'}
           </Text>
           <Text style={styles.shopType}>
-            {shopData.business_type || 'Business'} • {shopData.industry || 'Industry'}
+            {`${shopData.business_type || 'Business'} • ${shopData.industry || 'Industry'}`}
           </Text>
           <Text style={styles.shopDescription}>
             {shopData.description || 'No description available'}
@@ -180,10 +227,22 @@ const OwnerDashboardScreen = () => {
             <Text style={styles.actionSubtitle}>Manage cashiers</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.actionCard}>
+          <TouchableOpacity 
+            style={styles.actionCard}
+            onPress={() => navigation.navigate('Reports')}
+          >
             <Text style={styles.actionEmoji}>📊</Text>
             <Text style={styles.actionTitle}>Reports</Text>
             <Text style={styles.actionSubtitle}>View analytics</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.actionCard}
+            onPress={() => navigation.navigate('StockValuation')}
+          >
+            <Text style={styles.actionEmoji}>💰</Text>
+            <Text style={styles.actionTitle}>Stock Valuation</Text>
+            <Text style={styles.actionSubtitle}>Calculate inventory value</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -210,6 +269,8 @@ const OwnerDashboardScreen = () => {
         </View>
       </View>
 
+
+
       {/* Debug Info (Development only) */}
       {__DEV__ && (
         <View style={styles.debugSection}>
@@ -226,6 +287,12 @@ const OwnerDashboardScreen = () => {
 
       {/* Bottom Padding */}
       <View style={styles.bottomPadding} />
+
+      {/* Feature Sidebar */}
+      <FeatureSidebar
+        isVisible={sidebarVisible}
+        onClose={() => setSidebarVisible(false)}
+      />
     </ScrollView>
   );
 };
@@ -300,6 +367,29 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     backgroundColor: 'rgba(59, 130, 246, 0.1)',
   },
+  sidebarToggle: {
+    position: 'absolute',
+    top: 20,
+    left: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+    ...Platform.select({
+      web: {
+        cursor: 'pointer',
+        transition: 'all 0.2s ease',
+      }
+    })
+  },
+  sidebarToggleIcon: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
   shopDetailsRight: {
     position: 'absolute',
     top: 20,
@@ -367,7 +457,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 12,
     padding: 16,
-    width: (width - 60) / 2,
+    width: (width - 50) / 2, // Keep 2 columns for better layout
     alignItems: 'center',
     marginBottom: 12,
     borderWidth: 1,
@@ -444,6 +534,8 @@ const styles = StyleSheet.create({
   bottomPadding: {
     height: 40,
   },
+  
+
 });
 
 export default OwnerDashboardScreen;

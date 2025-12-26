@@ -382,7 +382,14 @@ class Cashier(models.Model):
         self.password = make_password(raw_password)
 
     def check_password(self, raw_password):
-        return check_password(self.password, raw_password)
+        # Direct call to Django's check_password to avoid any method resolution issues
+        from django.contrib.auth.hashers import check_password as django_check_password
+        return django_check_password(raw_password, self.password)
+    
+    @property
+    def is_active(self):
+        """Return True if cashier status is active"""
+        return self.status == 'active'
     
     def approve(self, approved_by=None, role='cashier'):
         """Approve this cashier and activate their account"""

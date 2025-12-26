@@ -1,17 +1,24 @@
 import axios from 'axios';
 
-// API Configuration - Make this configurable for different environments
+// API Configuration - Production ready
 const getApiBaseUrl = () => {
-  // For development, you can set this manually or detect the environment
-  const devServerIP = '192.168.1.100'; // Replace with your actual IP
-  const port = '8000';
+  // Detect the environment and use appropriate API URL
+  if (typeof window !== 'undefined') {
+    // Web environment
+    const hostname = window.location.hostname;
+    const protocol = window.location.protocol;
+    
+    // Use current host for development
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return `${protocol}//${hostname}:8000/api/v1/shop`;
+    }
+    
+    // Use current host for production
+    return `${protocol}//${hostname}/api/v1/shop`;
+  }
   
-  // For now, use localhost for development (you can change this to your IP)
-  // TODO: Replace with your actual local network IP address
-  return `http://localhost:${port}/api/v1/shop`;
-  
-  // Example for mobile device testing:
-  // return `http://${devServerIP}:${port}/api/v1/shop`;
+  // Fallback for other environments
+  return 'http://localhost:8000/api/v1/shop';
 };
 
 const api = axios.create({
@@ -72,6 +79,11 @@ export const shopAPI = {
   }),
   getProductsByCategory: (category) => api.get(`/products/bulk/?category=${encodeURIComponent(category)}`),
   
+  // Sales methods
+  createSale: (data) => api.post('/sales/', data),
+  getSales: () => api.get('/sales/'),
+  getSale: (saleId) => api.get(`/sales/${saleId}/`),
+  
   // Inventory audit trail methods
   getAuditTrail: () => api.get('/audit-trail/'),
   getProductAuditHistory: (productId) => api.get(`/products/${productId}/audit-history/`),
@@ -109,6 +121,26 @@ export const shopAPI = {
       return { success: true, data: response.data };
     } catch (error) {
       return { success: false, error: error.message };
+    }
+  },
+  
+  // Debug method to test cashier login endpoint
+  testCashierLogin: async (data) => {
+    try {
+      const response = await api.post('/cashiers/login/', data);
+      return { success: true, data: response.data };
+    } catch (error) {
+      return { success: false, error: error.message, status: error.response?.status, details: error.response?.data };
+    }
+  },
+  
+  // Debug method to test cashier reset endpoint
+  testCashierReset: async (data) => {
+    try {
+      const response = await api.post('/cashiers/reset-password/', data);
+      return { success: true, data: response.data };
+    } catch (error) {
+      return { success: false, error: error.message, status: error.response?.status, details: error.response?.data };
     }
   }
 };

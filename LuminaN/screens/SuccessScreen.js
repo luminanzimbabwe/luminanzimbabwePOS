@@ -42,7 +42,7 @@ const SuccessScreen = ({ navigation, route }) => {
     } else {
       navigation.reset({
         index: 0,
-        routes: [{ name: ROUTES.OWNER_DASHBOARD }],
+        routes: [{ name: 'MainApp' }],
       });
     }
   };

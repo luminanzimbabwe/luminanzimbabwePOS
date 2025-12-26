@@ -14,10 +14,11 @@
     "@react-navigation/native": "^7.1.25",
     "@react-navigation/stack": "^7.6.12",
     "axios": "^1.13.2",
-    "expo": "~54.0.29",
+    "expo": "~54.0.30",
     "expo-barcode-scanner": "^13.0.1",
     "expo-camera": "^17.0.10",
     "expo-status-bar": "~3.0.9",
+    "fbjs": "^1.0.0",
     "lucide-react-native": "^0.561.0",
     "nativewind": "^4.2.1",
     "react": "19.1.0",
@@ -30,6 +31,6 @@
   },
   "private": true,
   "devDependencies": {
-    "babel-preset-expo": "^54.0.8"
+    "babel-preset-expo": "~54.0.9"
   }
 }
