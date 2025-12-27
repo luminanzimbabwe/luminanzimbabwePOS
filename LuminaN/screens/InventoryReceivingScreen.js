@@ -14,6 +14,7 @@ import {
   Switch,
   RefreshControl,
   Dimensions,
+  Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { shopAPI } from '../services/api';
@@ -42,6 +43,7 @@ const InventoryReceivingScreen = () => {
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [notes, setNotes] = useState('');
   const [updateBaseCost, setUpdateBaseCost] = useState(false);
+  const [batchBarcode, setBatchBarcode] = useState(''); // New barcode for this batch/supplier
 
   // Purchase Order states
   const [showPurchaseOrder, setShowPurchaseOrder] = useState(false);
@@ -159,6 +161,16 @@ const InventoryReceivingScreen = () => {
     setSelectedProduct(product);
     setCostPrice(product.cost_price?.toString() || '');
     setShowProductSelector(false);
+    
+    // Check for negative stock and show special messaging
+    const currentStock = parseFloat(product.stock_quantity) || 0;
+    if (currentStock < 0) {
+      Alert.alert(
+        '🚨 Oversold Item Detected',
+        `${product.name} is currently oversold by ${Math.abs(currentStock)} units.\n\nThis restock will clear the oversell and add ${Math.abs(currentStock)} units to bring stock to 0, plus any additional quantity you specify.`,
+        [{ text: 'OK', style: 'default' }]
+      );
+    }
   };
 
   const handleBarcodeScanned = async ({ data }) => {
@@ -207,32 +219,77 @@ const InventoryReceivingScreen = () => {
       return;
     }
 
+    // Check for negative stock transition
+    const currentStock = parseFloat(selectedProduct.stock_quantity) || 0;
+    const newQuantity = parseFloat(receivingQuantity);
+    const willClearOversell = currentStock < 0 && (currentStock + newQuantity) >= 0;
+    const willTransitionToPositive = currentStock < 0 && (currentStock + newQuantity) > 0;
+    
+    // Enhanced item with transition tracking
     const newItem = {
       id: Date.now(),
       product: selectedProduct,
-      quantity: parseFloat(receivingQuantity),
+      quantity: newQuantity,
       costPrice: parseFloat(costPrice),
       totalCost: parseFloat(receivingQuantity) * parseFloat(costPrice),
       updateBaseCost: updateBaseCost,
       qualityRating: qualityRating,
       damageCount: damageCount ? parseInt(damageCount) : 0,
       damageNotes: damageNotes,
+      batchBarcode: batchBarcode.trim(), // Store barcode for this batch/supplier
+      supplierName: supplierName.trim(), // Store supplier for this batch
+      receivingDate: receivingDate,
+      // Enhanced tracking for negative stock transitions
+      currentStock: currentStock,
+      willClearOversell: willClearOversell,
+      willTransitionToPositive: willTransitionToPositive,
+      oversellAmount: currentStock < 0 ? Math.abs(currentStock) : 0,
+      newStockAfterReceiving: currentStock + newQuantity,
+      transitionType: willTransitionToPositive ? 'NEGATIVE_TO_POSITIVE' : 
+                     willClearOversell ? 'CLEAR_OVERSELL' : 'NORMAL',
+      inventoryValueChange: calculateInventoryValueChange(currentStock, newQuantity, parseFloat(costPrice))
     };
 
-    console.log('✅ New item created:', newItem);
+    console.log('✅ New item created with transition tracking:', newItem);
     setReceivingItems([...receivingItems, newItem]);
     console.log('📋 Updated items list:', [...receivingItems, newItem]);
+    
+    // Show transition success message
+    if (willTransitionToPositive) {
+      Alert.alert(
+        '🎉 Negative Stock Cleared!',
+        `${selectedProduct.name} transition: ${currentStock} → ${currentStock + newQuantity}\n\n` +
+        `✅ Oversell cleared: ${Math.abs(currentStock)} units\n` +
+        `✅ New stock added: ${newQuantity} units\n` +
+        `✅ Final stock: ${currentStock + newQuantity} units`,
+        [{ text: 'Great!', style: 'default' }]
+      );
+    } else if (willClearOversell) {
+      Alert.alert(
+        '✅ Oversell Cleared',
+        `${selectedProduct.name} will go from ${currentStock} to 0.\n\n` +
+        `This clears the oversell of ${Math.abs(currentStock)} units.`,
+        [{ text: 'OK', style: 'default' }]
+      );
+    }
     
     // Reset form
     setSelectedProduct(null);
     setReceivingQuantity('');
     setCostPrice('');
+    setBatchBarcode(''); // Reset barcode field
     setDamageNotes('');
     setDamageCount('');
     setQualityRating(5);
     setUpdateBaseCost(false);
     
     console.log('🔄 Form reset complete');
+  };
+
+  const calculateInventoryValueChange = (currentStock, newQuantity, costPrice) => {
+    const previousInventoryValue = Math.max(0, currentStock) * costPrice;
+    const newInventoryValue = Math.max(0, currentStock + newQuantity) * costPrice;
+    return newInventoryValue - previousInventoryValue;
   };
 
   const removeReceivingItem = (itemId) => {
@@ -258,7 +315,22 @@ const InventoryReceivingScreen = () => {
     const totalValue = receivingItems.reduce((sum, item) => sum + item.totalCost, 0);
     const totalDamage = receivingItems.reduce((sum, item) => sum + item.damageCount, 0);
     
-    return { totalItems, totalQuantity, totalValue, totalDamage };
+    // Enhanced totals for negative stock transitions
+    const oversoldItems = receivingItems.filter(item => item.currentStock < 0);
+    const oversellClearing = oversoldItems.reduce((sum, item) => sum + item.oversellAmount, 0);
+    const negativeToPositiveTransitions = receivingItems.filter(item => item.willTransitionToPositive).length;
+    const totalInventoryValueChange = receivingItems.reduce((sum, item) => sum + (item.inventoryValueChange || 0), 0);
+    
+    return { 
+      totalItems, 
+      totalQuantity, 
+      totalValue, 
+      totalDamage,
+      oversoldItems: oversoldItems.length,
+      oversellClearing,
+      negativeToPositiveTransitions,
+      totalInventoryValueChange
+    };
   };
 
   const saveOrderLocally = async () => {
@@ -444,6 +516,7 @@ const InventoryReceivingScreen = () => {
     setSelectedProduct(null);
     setReceivingQuantity('');
     setCostPrice('');
+    setBatchBarcode(''); // Reset barcode field
     setSupplierName('');
     setInvoiceNumber('');
     setNotes('');
@@ -456,6 +529,9 @@ const InventoryReceivingScreen = () => {
 
   const renderHeader = () => (
     <View style={styles.header}>
+      <TouchableOpacity onPress={() => navigation.goBack()}>
+        <Text style={styles.backButton}>← Back to Restock</Text>
+      </TouchableOpacity>
       <Text style={styles.headerTitle}>📦 Batch Receiving</Text>
       <TouchableOpacity onPress={() => setShowReceivingHistory(true)}>
         <Text style={styles.historyButton}>📋 History</Text>
@@ -497,6 +573,20 @@ const InventoryReceivingScreen = () => {
             <Text style={styles.barcodeButtonText}>📷</Text>
           </TouchableOpacity>
         </View>
+      </View>
+
+      {/* Barcode Input for this Batch */}
+      <View style={styles.formGroup}>
+        <Text style={styles.label}>Batch Barcode (Optional)</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Enter barcode for this batch/supplier"
+          value={batchBarcode}
+          onChangeText={setBatchBarcode}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        <Text style={styles.helpText}>💡 Leave empty to use product's default barcode</Text>
       </View>
 
       {/* Quantity and Cost Price Row */}
@@ -609,6 +699,22 @@ const InventoryReceivingScreen = () => {
           </TouchableOpacity>
         </View>
 
+        {/* Enhanced transition info for negative stock */}
+        {totals.oversoldItems > 0 && (
+          <View style={styles.negativeStockAlert}>
+            <Text style={styles.negativeStockAlertTitle}>🚨 Negative Stock Transitions</Text>
+            <Text style={styles.negativeStockAlertText}>
+              {totals.oversoldItems} item(s) will clear oversell conditions
+            </Text>
+            <Text style={styles.negativeStockAlertText}>
+              {totals.negativeToPositiveTransitions} will transition from negative to positive stock
+            </Text>
+            <Text style={styles.negativeStockAlertValue}>
+              Total Inventory Value Change: ${totals.totalInventoryValueChange.toFixed(2)}
+            </Text>
+          </View>
+        )}
+
         {receivingItems.length === 0 ? (
           <Text style={styles.emptyText}>No items added yet</Text>
         ) : (
@@ -617,9 +723,18 @@ const InventoryReceivingScreen = () => {
               data={receivingItems}
               keyExtractor={(item) => item.id.toString()}
               renderItem={({ item }) => (
-                <View style={styles.receivingItem}>
+                <View style={[
+                  styles.receivingItem,
+                  item.currentStock < 0 && styles.negativeStockItem
+                ]}>
                   <View style={styles.itemHeader}>
-                    <Text style={styles.itemName}>{item.product.name}</Text>
+                    <Text style={[
+                      styles.itemName,
+                      item.currentStock < 0 && styles.negativeStockItemName
+                    ]}>
+                      {item.product.name}
+                      {item.currentStock < 0 && ' ⚠️'}
+                    </Text>
                     <TouchableOpacity
                       style={styles.removeItemButton}
                       onPress={() => removeReceivingItem(item.id)}
@@ -628,11 +743,49 @@ const InventoryReceivingScreen = () => {
                     </TouchableOpacity>
                   </View>
                   
+                  {/* Stock transition info */}
+                  {item.currentStock < 0 && (
+                    <View style={styles.stockTransitionInfo}>
+                      <Text style={styles.stockTransitionText}>
+                        Stock Transition: {item.currentStock} → {item.newStockAfterReceiving}
+                      </Text>
+                      <Text style={styles.stockTransitionDetail}>
+                        Will clear oversell of {item.oversellAmount} units
+                      </Text>
+                      {item.willTransitionToPositive && (
+                        <Text style={styles.positiveTransitionText}>
+                          🎉 Will transition to positive stock!
+                        </Text>
+                      )}
+                    </View>
+                  )}
+                  
                   <View style={styles.itemDetails}>
                     <Text style={styles.itemDetail}>Qty: {item.quantity}</Text>
                     <Text style={styles.itemDetail}>Cost: ${item.costPrice.toFixed(2)}</Text>
                     <Text style={styles.itemDetail}>Total: ${item.totalCost.toFixed(2)}</Text>
                   </View>
+                  
+                  {/* Enhanced inventory value info */}
+                  {item.inventoryValueChange > 0 && (
+                    <View style={styles.inventoryValueChange}>
+                      <Text style={styles.inventoryValueChangeText}>
+                        📈 Inventory Value: +${item.inventoryValueChange.toFixed(2)}
+                      </Text>
+                    </View>
+                  )}
+                  
+                  {/* Barcode and Supplier Info */}
+                  {(item.batchBarcode || item.supplierName) && (
+                    <View style={styles.batchInfo}>
+                      {item.batchBarcode && (
+                        <Text style={styles.batchBarcode}>🔖 Barcode: {item.batchBarcode}</Text>
+                      )}
+                      {item.supplierName && (
+                        <Text style={styles.batchSupplier}>🏢 Supplier: {item.supplierName}</Text>
+                      )}
+                    </View>
+                  )}
 
                   {item.damageCount > 0 && (
                     <Text style={styles.damageBadge}>⚠️ {item.damageCount} damaged</Text>
@@ -653,7 +806,7 @@ const InventoryReceivingScreen = () => {
               scrollEnabled={false}
             />
 
-            {/* Totals Summary */}
+            {/* Enhanced Totals Summary */}
             <View style={styles.totalsCard}>
               <Text style={styles.totalsTitle}>Receiving Summary</Text>
               <View style={styles.totalsRow}>
@@ -672,6 +825,43 @@ const InventoryReceivingScreen = () => {
                 <Text style={styles.totalsLabel}>Total Damaged:</Text>
                 <Text style={styles.totalsValue}>{totals.totalDamage}</Text>
               </View>
+              
+              {/* Enhanced totals for negative stock transitions */}
+              {totals.oversoldItems > 0 && (
+                <>
+                  <View style={styles.totalsDivider} />
+                  <View style={styles.totalsRow}>
+                    <Text style={styles.totalsLabel}>Oversold Items:</Text>
+                    <Text style={[
+                      styles.totalsValue, 
+                      styles.negativeStockValue
+                    ]}>{totals.oversoldItems}</Text>
+                  </View>
+                  <View style={styles.totalsRow}>
+                    <Text style={styles.totalsLabel}>Oversell Being Cleared:</Text>
+                    <Text style={[
+                      styles.totalsValue, 
+                      styles.negativeStockValue
+                    ]}>{totals.oversellClearing}</Text>
+                  </View>
+                  <View style={styles.totalsRow}>
+                    <Text style={styles.totalsLabel}>Neg→Pos Transitions:</Text>
+                    <Text style={[
+                      styles.totalsValue, 
+                      styles.positiveTransitionValue
+                    ]}>{totals.negativeToPositiveTransitions}</Text>
+                  </View>
+                  <View style={styles.totalsRow}>
+                    <Text style={styles.totalsLabel}>Inventory Value Change:</Text>
+                    <Text style={[
+                      styles.totalsValue, 
+                      totals.totalInventoryValueChange >= 0 ? styles.positiveTransitionValue : styles.negativeStockValue
+                    ]}>
+                      {totals.totalInventoryValueChange >= 0 ? '+' : ''}${totals.totalInventoryValueChange.toFixed(2)}
+                    </Text>
+                  </View>
+                </>
+              )}
             </View>
           </>
         )}
@@ -1039,18 +1229,37 @@ const InventoryReceivingScreen = () => {
   }
 
   return (
-    <View style={styles.container}>
-      <ScrollView 
-        style={styles.content} 
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+    <ScrollView 
+      style={[styles.container, Platform.OS === 'web' && styles.webContainer]}
+      contentContainerStyle={styles.scrollContentContainer}
+      showsVerticalScrollIndicator={true}
+      scrollEventThrottle={16}
+      nestedScrollEnabled={Platform.OS === 'web'}
+      removeClippedSubviews={false}
+      onScroll={(event) => {
+        if (Platform.OS === 'web') {
+          const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+          const isAtBottom = contentOffset.y >= (contentSize.height - layoutMeasurement.height - 10);
         }
-      >
-        {renderReceivingForm()}
-        {renderReceivingItems()}
-        {renderReceivingDetails()}
-      </ScrollView>
+      }}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          colors={['#06b6d4']}
+          tintColor="#06b6d4"
+        />
+      }
+    >
+      {renderReceivingForm()}
+      {renderReceivingItems()}
+      {renderReceivingDetails()}
+      
+      {/* Bottom padding for web scrolling */}
+      <View style={{ 
+        height: Platform.OS === 'web' ? 100 : 20,
+        minHeight: Platform.OS === 'web' ? 100 : 0
+      }} />
 
       {/* Modals */}
       {renderProductSelectorModal()}
@@ -1060,7 +1269,7 @@ const InventoryReceivingScreen = () => {
       {renderBarcodeScannerModal()}
       {renderReceivingReportsModal()}
       {renderSuccessModal()}
-    </View>
+    </ScrollView>
   );
 };
 
@@ -1068,6 +1277,36 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0a0a0a',
+    ...Platform.select({
+      web: {
+        height: '100vh',
+        overflow: 'auto',
+        WebkitOverflowScrolling: 'auto',
+        scrollBehavior: 'smooth',
+      },
+    }),
+  },
+  webContainer: {
+    ...Platform.select({
+      web: {
+        height: '100vh',
+        maxHeight: '100vh',
+        overflow: 'auto',
+        WebkitOverflowScrolling: 'auto',
+        scrollBehavior: 'smooth',
+      },
+    }),
+  },
+  scrollContentContainer: {
+    flexGrow: 1,
+    paddingBottom: Platform.OS === 'web' ? 100 : 40,
+    ...Platform.select({
+      web: {
+        minHeight: '100vh',
+        width: '100%',
+        flexGrow: 1,
+      },
+    }),
   },
   header: {
     flexDirection: 'row',
@@ -1602,6 +1841,115 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  // Help text style
+  helpText: {
+    color: '#999',
+    fontSize: 12,
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  // Batch information styles
+  batchInfo: {
+    backgroundColor: '#374151',
+    borderRadius: 6,
+    padding: 8,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  batchBarcode: {
+    color: '#10b981',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  batchSupplier: {
+    color: '#3b82f6',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+
+  // Enhanced negative stock transition styles
+  negativeStockAlert: {
+    backgroundColor: 'rgba(220, 38, 38, 0.1)',
+    borderWidth: 1,
+    borderColor: '#dc2626',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 16,
+  },
+  negativeStockAlertTitle: {
+    color: '#dc2626',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  negativeStockAlertText: {
+    color: '#fca5a5',
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  negativeStockAlertValue: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 8,
+  },
+  negativeStockItem: {
+    borderColor: '#dc2626',
+    borderWidth: 2,
+    backgroundColor: 'rgba(220, 38, 38, 0.05)',
+  },
+  negativeStockItemName: {
+    color: '#fca5a5',
+  },
+  stockTransitionInfo: {
+    backgroundColor: '#374151',
+    borderRadius: 6,
+    padding: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  stockTransitionText: {
+    color: '#fbbf24',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  stockTransitionDetail: {
+    color: '#fca5a5',
+    fontSize: 11,
+    marginBottom: 2,
+  },
+  positiveTransitionText: {
+    color: '#10b981',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  inventoryValueChange: {
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderRadius: 4,
+    padding: 4,
+    marginTop: 4,
+    alignSelf: 'flex-start',
+  },
+  inventoryValueChangeText: {
+    color: '#10b981',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  totalsDivider: {
+    height: 1,
+    backgroundColor: '#444',
+    marginVertical: 8,
+  },
+  negativeStockValue: {
+    color: '#dc2626',
+  },
+  positiveTransitionValue: {
+    color: '#10b981',
   },
 
 });

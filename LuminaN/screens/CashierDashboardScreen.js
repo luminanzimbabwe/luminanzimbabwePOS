@@ -36,6 +36,8 @@ const CashierDashboardScreen = () => {
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorModalData, setErrorModalData] = useState({ title: '', message: '', type: 'error' });
   const [presenceStatus, setPresenceStatus] = useState({ isOnline: false, lastActivity: null });
+  const [barcodeInput, setBarcodeInput] = useState('');
+  const [barcodeValidation, setBarcodeValidation] = useState(null); // Track validation state
 
 
   useEffect(() => {
@@ -228,18 +230,9 @@ const CashierDashboardScreen = () => {
   const addToCart = (product) => {
     const existingItem = cart.find(item => item.id === product.id);
     const currentQuantity = existingItem ? existingItem.quantity : 0;
-    const availableStock = product.stock_quantity || 0;
     const newQuantity = currentQuantity + 1;
     
-    // Stock validation: Prevent adding more than available stock
-    if (newQuantity > availableStock) {
-      showError(
-        '⚠️ INSUFFICIENT STOCK', 
-        `Cannot add ${product.name} to cart.\n\nAvailable stock: ${availableStock}\nCurrently in cart: ${currentQuantity}\nRequested: ${newQuantity}\n\nPlease reduce quantity or restock item.`,
-        'warning'
-      );
-      return;
-    }
+    // Allow negative stock sales - no stock validation
     
     if (existingItem) {
       setCart(cart.map(item => 
@@ -262,20 +255,7 @@ const CashierDashboardScreen = () => {
       return;
     }
     
-    // Stock validation: Check if new quantity exceeds available stock
-    const cartItem = cart.find(item => item.id === productId);
-    if (cartItem) {
-      const availableStock = cartItem.stock_quantity || 0;
-      if (quantity > availableStock) {
-        showError(
-          '⚠️ INSUFFICIENT STOCK', 
-          `Cannot increase quantity to ${quantity}.\n\nAvailable stock: ${availableStock}\nCurrent quantity: ${cartItem.quantity}\n\nPlease reduce quantity or restock item.`,
-          'warning'
-        );
-        return;
-      }
-    }
-    
+    // Allow negative stock sales - no stock validation
     setCart(cart.map(item => 
       item.id === productId 
         ? { ...item, quantity }
@@ -317,6 +297,92 @@ const CashierDashboardScreen = () => {
       );
     }
     setShowScanner(false);
+  };
+
+  // Handle barcode input (validation only, no auto-add)
+  const handleBarcodeInput = (input) => {
+    setBarcodeInput(input);
+    
+    // Clear previous validation state when input changes
+    if (input.length === 0) {
+      setBarcodeValidation(null);
+    }
+  };
+
+  // Validate barcode when button is pressed
+  const validateAndAddBarcode = () => {
+    const barcode = barcodeInput.trim();
+    
+    if (barcode.length < 6) {
+      showError(
+        '❌ INVALID BARCODE', 
+        'Barcode must be at least 6 characters long.\n\nPlease enter a complete barcode.',
+        'error'
+      );
+      return;
+    }
+    
+    // Check if product exists (support multiple barcodes per product)
+    const product = products.find(p => {
+      // Check primary barcode
+      if (p.barcode === barcode) return true;
+      // Check line code
+      if (p.line_code === barcode) return true;
+      // Check additional barcodes (if stored as array or comma-separated string)
+      if (p.additional_barcodes) {
+        if (Array.isArray(p.additional_barcodes)) {
+          return p.additional_barcodes.includes(barcode);
+        } else if (typeof p.additional_barcodes === 'string') {
+          const barcodes = p.additional_barcodes.split(',').map(b => b.trim());
+          return barcodes.includes(barcode);
+        }
+      }
+      return false;
+    });
+    
+    if (!product) {
+      showError(
+        '❌ PRODUCT NOT FOUND', 
+        `No product found with barcode: ${barcode}\n\nPlease check the barcode or add the product manually.`,
+        'error'
+      );
+      return;
+    }
+    
+    // Product exists - add to cart (SILENT - no modal)
+    setBarcodeInput('');
+    setBarcodeValidation(null);
+    addToCart(product);
+    
+    // NO SUCCESS MESSAGE - let cashier continue working
+  };
+
+  // Clear barcode input
+  const clearBarcodeInput = () => {
+    setBarcodeInput('');
+  };
+
+  // Handle manual barcode submission via button click
+  const handleBarcodeSubmit = () => {
+    const barcode = barcodeInput.trim();
+    
+    // Only process if barcode has sufficient length (6+ characters)
+    if (barcode.length < 6) {
+      return; // Don't process short barcodes
+    }
+    
+    // Check for exact barcode match
+    const product = products.find(p => 
+      p.barcode === barcode || p.line_code === barcode
+    );
+    
+    if (product) {
+      // Clear the barcode input and silently add to cart
+      setBarcodeInput('');
+      addToCart(product);
+      // NO SUCCESS MESSAGE - completely silent operation
+    }
+    // If barcode doesn't exist, do nothing silently
   };
 
   // Handle scan button press
@@ -736,34 +802,7 @@ const CashierDashboardScreen = () => {
       return;
     }
 
-    // CRITICAL: Stock validation before processing sale
-    const stockIssues = [];
-    for (const item of cart) {
-      const availableStock = item.stock_quantity || 0;
-      const requestedQuantity = item.quantity;
-      
-      if (requestedQuantity > availableStock) {
-        stockIssues.push({
-          name: item.name,
-          requested: requestedQuantity,
-          available: availableStock,
-          shortfall: requestedQuantity - availableStock
-        });
-      }
-    }
-    
-    if (stockIssues.length > 0) {
-      const issueText = stockIssues.map(issue => 
-        `• ${issue.name}: Requested ${issue.requested}, Available ${issue.available} (Short by ${issue.shortfall})`
-      ).join('\n');
-      
-      showError(
-        '⚠️ INSUFFICIENT STOCK', 
-        `Cannot complete sale - insufficient stock:\n\n${issueText}\n\nPlease reduce quantities or restock items before proceeding.`,
-        'warning'
-      );
-      return;
-    }
+    // Allow negative stock sales - no stock validation needed
 
     // Get cashier ID with proper fallback handling
     const cashierId = cashierData?.id || 
@@ -1098,6 +1137,47 @@ const CashierDashboardScreen = () => {
               </View>
             </View>
             
+            {/* Barcode Input with Validation */}
+            <View style={styles.barcodeContainer}>
+              <Text style={styles.barcodeLabel}>📱 BARCODE INPUT (Multiple Barcodes Supported):</Text>
+              <View style={styles.barcodeInputContainer}>
+                <TextInput
+                  style={styles.barcodeInput}
+                  value={barcodeInput}
+                  onChangeText={handleBarcodeInput}
+                  placeholder="Enter barcode, then click ADD TO CART..."
+                  placeholderTextColor="#10b981"
+                  keyboardType="default"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TouchableOpacity
+                  style={[
+                    styles.addBarcodeButton,
+                    barcodeInput.length < 6 && styles.addBarcodeButtonDisabled
+                  ]}
+                  onPress={validateAndAddBarcode}
+                  disabled={barcodeInput.length < 6}
+                >
+                  <Text style={styles.addBarcodeButtonText}>ADD TO CART</Text>
+                </TouchableOpacity>
+                {barcodeInput.length > 0 && (
+                  <TouchableOpacity
+                    style={styles.clearBarcodeButton}
+                    onPress={() => {
+                      setBarcodeInput('');
+                      setBarcodeValidation(null);
+                    }}
+                  >
+                    <Text style={styles.clearBarcodeButtonText}>✕</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              <Text style={styles.barcodeHelpText}>
+                💡 Type any barcode for the product (supports multiple barcodes per product), then click "ADD TO CART"
+              </Text>
+            </View>
+            
             {/* Category Filter */}
             <View style={styles.categoryContainer}>
               <Text style={styles.categoryLabel}>📁 FILTER BY CATEGORY:</Text>
@@ -1163,43 +1243,52 @@ const CashierDashboardScreen = () => {
                           <View style={styles.stockIndicator}>
                             <View style={[
                               styles.stockDot,
+                              (product.stock_quantity || 0) < 0 && styles.stockDotNegative,
                               (product.stock_quantity || 0) === 0 && styles.stockDotOut,
                               (product.stock_quantity || 0) > 0 && (product.stock_quantity || 0) <= 5 && styles.stockDotLow,
                               (product.stock_quantity || 0) > 5 && styles.stockDotActive
                             ]} />
                             <Text style={[
                               styles.productStock,
+                              (product.stock_quantity || 0) < 0 && styles.negativeStock,
                               (product.stock_quantity || 0) === 0 && styles.outOfStock,
                               (product.stock_quantity || 0) > 0 && (product.stock_quantity || 0) <= 5 && styles.lowStock
                             ]}>
                               📦 {product.stock_quantity || 0} units
+                              {(product.stock_quantity || 0) < 0 && ' - NEGATIVE STOCK (SELLING)'}
                               {(product.stock_quantity || 0) === 0 && ' - OUT OF STOCK'}
                               {(product.stock_quantity || 0) > 0 && (product.stock_quantity || 0) <= 5 && ' - LOW STOCK'}
                               {(product.stock_quantity || 0) > 5 && ' - IN STOCK'}
                             </Text>
                           </View>
-                          {product.barcode && (
-                            <Text style={styles.productBarcode}>
-                              🔖 Barcode: {product.barcode}
-                            </Text>
+                          {/* Display all barcodes for the product */}
+                          {((product.barcode || product.line_code) || product.additional_barcodes) && (
+                            <View style={styles.productBarcodes}>
+                              <Text style={styles.productBarcodeLabel}>🔖 Barcodes:</Text>
+                              <Text style={styles.productBarcode}>
+                                {product.barcode && `Primary: ${product.barcode}`}
+                                {product.line_code && ` | Code: ${product.line_code}`}
+                              </Text>
+                              {product.additional_barcodes && (
+                                <Text style={styles.productBarcode}>
+                                  {Array.isArray(product.additional_barcodes) 
+                                    ? `Additional: ${product.additional_barcodes.join(', ')}`
+                                    : `Additional: ${product.additional_barcodes}`
+                                  }
+                                </Text>
+                              )}
+                            </View>
                           )}
                         </View>
                         
                         <View style={styles.productPriceSection}>
                           <Text style={styles.priceText}>{formatCurrency(product.price)}</Text>
                           <TouchableOpacity
-                            style={[
-                              styles.addButton,
-                              (product.stock_quantity || 0) === 0 && styles.addButtonDisabled
-                            ]}
+                            style={styles.addButton}
                             onPress={() => addToCart(product)}
-                            disabled={(product.stock_quantity || 0) === 0}
                           >
-                            <Text style={[
-                              styles.addButtonText,
-                              (product.stock_quantity || 0) === 0 && styles.addButtonTextDisabled
-                            ]}>
-                              {(product.stock_quantity || 0) === 0 ? '❌ OUT' : '➕ ADD'}
+                            <Text style={styles.addButtonText}>
+                              ➕ ADD
                             </Text>
                           </TouchableOpacity>
                         </View>
@@ -1805,6 +1894,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     padding: 20,
     backgroundColor: '#0a0a0a',
+    alignItems: 'flex-start',
   },
   productsSection: {
     flex: 3,
@@ -1851,6 +1941,82 @@ const styles = StyleSheet.create({
   searchInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  barcodeContainer: {
+    marginBottom: 15,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#374151',
+  },
+  barcodeLabel: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    marginBottom: 8,
+  },
+  barcodeInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  barcodeInput: {
+    backgroundColor: '#065f46',
+    borderWidth: 2,
+    borderColor: '#10b981',
+    padding: 12,
+    fontSize: 16,
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    color: '#ffffff',
+    borderRadius: 8,
+    flex: 1,
+    marginRight: 8,
+  },
+  addBarcodeButton: {
+    backgroundColor: '#10b981',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 120,
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  addBarcodeButtonDisabled: {
+    backgroundColor: '#6b7280',
+    opacity: 0.6,
+    shadowOpacity: 0,
+  },
+  addBarcodeButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textAlign: 'center',
+  },
+  clearBarcodeButton: {
+    backgroundColor: '#dc2626',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginLeft: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  clearBarcodeButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+  },
+  barcodeHelpText: {
+    color: '#10b981',
+    fontSize: 11,
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    marginTop: 6,
+    fontStyle: 'italic',
   },
   scanButton: {
     backgroundColor: '#3b82f6',
@@ -1909,12 +2075,12 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   summarySection: {
-    flex: 2,
+    flex: 1.2,
     backgroundColor: '#1a1a1a',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#374151',
-    padding: 20,
+    padding: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -1923,14 +2089,14 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: '#ffffff',
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '600',
     fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
     textAlign: 'center',
-    marginBottom: 20,
-    borderBottomWidth: 2,
+    marginBottom: 12,
+    borderBottomWidth: 1,
     borderBottomColor: '#3b82f6',
-    paddingBottom: 12,
+    paddingBottom: 8,
   },
   productsList: {
     flex: 1,
@@ -2004,15 +2170,26 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     fontWeight: '600',
   },
-  lowStock: {
-    color: '#f59e0b',
+  negativeStock: {
+    color: '#dc2626',
     fontWeight: '600',
+  },
+  productBarcodes: {
+    marginTop: 6,
+  },
+  productBarcodeLabel: {
+    color: '#9ca3af',
+    fontSize: 12,
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    fontWeight: '600',
+    marginBottom: 2,
   },
   productBarcode: {
     color: '#6b7280',
-    fontSize: 12,
+    fontSize: 11,
     fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
-    marginTop: 4,
+    marginBottom: 1,
+    lineHeight: 14,
   },
   productPriceSection: {
     alignItems: 'center',
@@ -2083,6 +2260,9 @@ const styles = StyleSheet.create({
   stockDotActive: {
     backgroundColor: '#10b981',
   },
+  stockDotNegative: {
+    backgroundColor: '#dc2626',
+  },
   stockDotLow: {
     backgroundColor: '#f59e0b',
   },
@@ -2101,7 +2281,7 @@ const styles = StyleSheet.create({
   },
   cartItems: {
     flex: 1,
-    marginBottom: 20,
+    marginBottom: 16,
   },
   emptyCartText: {
     color: '#9ca3af',
@@ -2112,9 +2292,9 @@ const styles = StyleSheet.create({
   },
   cartItem: {
     backgroundColor: '#374151',
-    marginBottom: 12,
-    padding: 16,
-    borderRadius: 10,
+    marginBottom: 8,
+    padding: 12,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: '#4b5563',
   },
@@ -2177,7 +2357,7 @@ const styles = StyleSheet.create({
   totalSection: {
     backgroundColor: '#1f2937',
     padding: 16,
-    marginBottom: 20,
+    marginBottom: 16,
     borderRadius: 10,
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -2187,18 +2367,18 @@ const styles = StyleSheet.create({
   },
   totalLabel: {
     color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '600',
     fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
   },
   totalAmount: {
     color: '#10b981',
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '600',
     fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
   },
   paymentSection: {
-    marginBottom: 20,
+    marginBottom: 8,
   },
   paymentLabel: {
     color: '#e5e7eb',
@@ -2232,7 +2412,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   amountSection: {
-    marginBottom: 20,
+    marginBottom: 12,
   },
   amountLabel: {
     color: '#e5e7eb',
@@ -2294,17 +2474,17 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     width: '31%',
-    paddingVertical: 14,
-    marginBottom: 10,
-    borderRadius: 8,
+    paddingVertical: 10,
+    marginBottom: 8,
+    borderRadius: 6,
     borderWidth: 0,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowRadius: 3,
+    elevation: 1,
   },
   refreshButton: {
     backgroundColor: '#3b82f6',
@@ -2325,7 +2505,7 @@ const styles = StyleSheet.create({
   },
   actionButtonText: {
     color: '#ffffff',
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: '600',
     fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
   },
@@ -2334,52 +2514,54 @@ const styles = StyleSheet.create({
   },
   automaticPrintIndicator: {
     backgroundColor: '#059669',
-    padding: 12,
-    marginBottom: 12,
-    borderRadius: 8,
+    padding: 8,
+    marginBottom: 8,
+    borderRadius: 6,
     borderWidth: 0,
     alignItems: 'center',
   },
   automaticPrintText: {
     color: '#ffffff',
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: '600',
     fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
   },
   automaticPrintSubtext: {
     color: '#ffffff',
-    fontSize: 10,
+    fontSize: 8,
     fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
-    marginTop: 2,
+    marginTop: 1,
     textAlign: 'center',
   },
 
-  // Error Modal Styles
+  // Error Modal Styles - FIXED CENTERING
   modalOverlay: {
-    position: 'absolute',
+    position: 'fixed',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
     justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 1000,
+    zIndex: 9999,
+    padding: 20,
   },
   errorModalContainer: {
     backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 20,
-    margin: 20,
-    maxWidth: 400,
-    width: '90%',
+    borderRadius: 16,
+    padding: 24,
+    maxWidth: 420,
+    width: '100%',
+    maxHeight: '80%',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-    borderWidth: 2,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 12,
+    borderWidth: 3,
     borderColor: '#dc2626',
+    alignSelf: 'center',
   },
   warningModal: {
     borderColor: '#f59e0b',
@@ -2390,11 +2572,14 @@ const styles = StyleSheet.create({
   errorModalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 15,
+    marginBottom: 20,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
   },
   errorModalIcon: {
-    fontSize: 24,
-    marginRight: 10,
+    fontSize: 28,
+    marginRight: 12,
   },
   warningIcon: {
     color: '#f59e0b',
@@ -2403,10 +2588,11 @@ const styles = StyleSheet.create({
     color: '#22c55e',
   },
   errorModalTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#dc2626',
     flex: 1,
+    textAlign: 'left',
   },
   warningTitle: {
     color: '#f59e0b',
@@ -2415,30 +2601,43 @@ const styles = StyleSheet.create({
     color: '#22c55e',
   },
   errorModalBody: {
-    marginBottom: 20,
+    marginBottom: 24,
   },
   errorModalMessage: {
-    fontSize: 14,
+    fontSize: 16,
     color: '#374151',
-    lineHeight: 20,
+    lineHeight: 24,
+    textAlign: 'left',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
   },
   errorModalButton: {
     backgroundColor: '#dc2626',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 10,
     alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 120,
+    shadowColor: '#dc2626',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 4,
   },
   warningButton: {
     backgroundColor: '#f59e0b',
+    shadowColor: '#f59e0b',
   },
   successButton: {
     backgroundColor: '#22c55e',
+    shadowColor: '#22c55e',
   },
   errorModalButtonText: {
     color: '#ffffff',
     fontSize: 16,
     fontWeight: 'bold',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textAlign: 'center',
   },
 });
 

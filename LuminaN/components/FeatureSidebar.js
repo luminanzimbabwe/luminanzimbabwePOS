@@ -65,6 +65,14 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
 
   const features = [
     {
+      id: 'today-sales',
+      title: '📊 Today\'s Sales',
+      description: 'View today\'s sales by category & personnel',
+      icon: '📊',
+      screen: 'OwnerSales',
+      color: '#06b6d4',
+    },
+    {
       id: 'sales-refunds',
       title: '💰 Sales & Refunds',
       description: 'View sales history & manage refunds',
@@ -87,6 +95,30 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
       icon: '💎',
       screen: 'StockValuation',
       color: '#22c55e',
+    },
+    {
+      id: 'restock-manager',
+      title: '📦 Restock Manager',
+      description: 'Manage negative stock transitions',
+      icon: '📦',
+      screen: 'RestockManager',
+      color: '#f59e0b',
+    },
+    {
+      id: 'stock-transfer',
+      title: '🔄 Stock Transfer',
+      description: 'Transfer & convert stock between products',
+      icon: '🔄',
+      screen: 'StockTransfer',
+      color: '#8b5cf6',
+    },
+    {
+      id: 'stock-transfer-history',
+      title: '📊 Transfer History',
+      description: 'View financial impact & analysis',
+      icon: '📊',
+      screen: 'StockTransferHistory',
+      color: '#06b6d4',
     },
     {
       id: 'inventory-audit',
@@ -150,7 +182,9 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
     onClose(); // Close sidebar first
     
     // Navigate to the feature screen
-    if (feature.screen === 'StockValuation') {
+    if (feature.screen === 'OwnerSales') {
+      navigation.navigate('OwnerSales');
+    } else if (feature.screen === 'StockValuation') {
       navigation.navigate('StockValuation');
     } else if (feature.screen === 'InventoryAuditTrail') {
       navigation.navigate('Reports'); // This navigates to the reports tab
@@ -158,6 +192,12 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
       navigation.navigate('POSPrice');
     } else if (feature.screen === 'SalesAndRefunds') {
       navigation.navigate('SalesAndRefunds');
+    } else if (feature.screen === 'RestockManager') {
+      navigation.navigate('RestockManager');
+    } else if (feature.screen === 'StockTransfer') {
+      navigation.navigate('StockTransfer');
+    } else if (feature.screen === 'StockTransferHistory') {
+      navigation.navigate('StockTransferHistory');
     } else {
       // For other features, show a placeholder message
       console.log(`🚀 Feature "${feature.title}" pressed - Coming soon!`);

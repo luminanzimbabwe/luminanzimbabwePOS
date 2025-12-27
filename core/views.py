@@ -2,6 +2,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
+from rest_framework import viewsets
+from rest_framework.decorators import action
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.utils import timezone
@@ -9,9 +11,13 @@ from django.db import models, IntegrityError
 from django.db.models import Sum, F
 from datetime import timedelta
 from decimal import Decimal
-from .models import ShopConfiguration, Cashier, Product, Sale, SaleItem, Customer, Discount, Shift, Expense, StaffLunch, StockTake, StockTakeItem, InventoryLog
-from .serializers import ShopConfigurationSerializer, ShopLoginSerializer, ResetPasswordSerializer, CashierSerializer, CashierLoginSerializer, ProductSerializer, SaleSerializer, CreateSaleSerializer, ExpenseSerializer, StockValuationSerializer, StaffLunchSerializer, BulkProductSerializer, CustomerSerializer, DiscountSerializer, StockTakeSerializer, StockTakeItemSerializer, CreateStockTakeSerializer, AddStockTakeItemSerializer, BulkAddStockTakeItemsSerializer, CashierResetPasswordSerializer, InventoryLogSerializer
+from .models import ShopConfiguration, Cashier, Product, Sale, SaleItem, Customer, Discount, Shift, Expense, StaffLunch, StockTake, StockTakeItem, InventoryLog, StockTransfer, Waste
+from .serializers import ShopConfigurationSerializer, ShopLoginSerializer, ResetPasswordSerializer, CashierSerializer, CashierLoginSerializer, ProductSerializer, SaleSerializer, CreateSaleSerializer, ExpenseSerializer, StockValuationSerializer, StaffLunchSerializer, BulkProductSerializer, CustomerSerializer, DiscountSerializer, StockTakeSerializer, StockTakeItemSerializer, CreateStockTakeSerializer, AddStockTakeItemSerializer, BulkAddStockTakeItemsSerializer, CashierResetPasswordSerializer, InventoryLogSerializer, StockTransferSerializer
 from django.db import transaction
+from django.shortcuts import get_object_or_404
+
+# Import waste views
+from .waste_views import WasteListView, WasteSummaryView, WasteProductSearchView
 
 class ShopStatusView(APIView):
     def get(self, request):
@@ -136,10 +142,12 @@ class CashierLoginView(APIView):
                                 "is_active": cashier.is_active
                             },
                             "shop_info": {
+                                "id": shop.id,
                                 "name": shop.name,
                                 "email": shop.email,
                                 "address": shop.address,
-                                "phone": shop.phone
+                                "phone": shop.phone,
+                                "shop_id": shop.shop_id  # Add shop_id for API authentication
                             }
                         }, status=status.HTTP_200_OK)
 
@@ -296,8 +304,22 @@ class ProductDetailView(APIView):
             for field, value in request.data.items():
                 if hasattr(product, field):
                     try:
-                        setattr(product, field, value)
-                    except:
+                        # Special handling for additional_barcodes field
+                        if field == 'additional_barcodes':
+                            if isinstance(value, str):
+                                # Convert comma-separated string to list
+                                barcodes = [b.strip() for b in value.split(',') if b.strip()]
+                                setattr(product, field, barcodes)
+                            elif isinstance(value, list):
+                                # Already a list, use as is
+                                setattr(product, field, value)
+                            else:
+                                # Other format, try to set directly
+                                setattr(product, field, value)
+                        else:
+                            setattr(product, field, value)
+                    except Exception as e:
+                        print(f"Error setting field {field}: {e}")
                         # If setting field fails, continue with other fields
                         pass
             product.save()
@@ -881,8 +903,9 @@ class StaffLunchListView(APIView):
         if product.price <= 0:
             return Response({"error": f"Cannot record staff lunch for {product.name} - price is not set or zero"}, status=status.HTTP_400_BAD_REQUEST)
 
-        if product.stock_quantity < int(quantity):
-            return Response({"error": f"Insufficient stock for {product.name}. Available: {product.stock_quantity}"}, status=status.HTTP_400_BAD_REQUEST)
+        # Allow negative stock - no stock validation needed for staff lunch
+        # if product.stock_quantity < int(quantity):
+        #     return Response({"error": f"Insufficient stock for {product.name}. Available: {product.stock_quantity}"}, status=status.HTTP_400_BAD_REQUEST)
 
         # Calculate total cost
         total_cost = product.price * int(quantity)
@@ -1130,6 +1153,7 @@ class StockTakeProductSearchView(APIView):
         ).filter(
             models.Q(name__icontains=query) |
             models.Q(line_code__icontains=query) |
+            models.Q(barcode__icontains=query) |
             models.Q(category__icontains=query)
         )[:10]  # Limit to 10 results
 
@@ -1139,6 +1163,7 @@ class StockTakeProductSearchView(APIView):
                 'id': product.id,
                 'name': product.name,
                 'line_code': product.line_code,
+                'barcode': product.barcode,
                 'category': product.category,
                 'current_stock': product.stock_quantity,
                 'cost_price': product.cost_price,
@@ -1202,9 +1227,9 @@ class OwnerDashboardView(APIView):
         products = Product.objects.filter(shop=shop)
         total_products = products.count()
         low_stock_items = products.filter(models.Q(stock_quantity__lte=models.F('min_stock_level'))).count()
-        total_inventory_value = products.aggregate(
-            total_value=Sum(F('stock_quantity') * F('cost_price'))
-        )['total_value'] or 0
+        negative_stock_items = products.filter(stock_quantity__lt=0).count()
+        # FIXED: Stock value never negative - if oversold, value is $0 (no physical assets)
+        total_inventory_value = sum(max(0, p.stock_quantity) * p.cost_price for p in products)
 
         # Employee Data
         total_cashiers = Cashier.objects.filter(shop=shop).count()
@@ -1258,10 +1283,10 @@ class OwnerDashboardView(APIView):
         alerts = []
         
         # Low stock alerts
-        if low_stock_items > 0:
+        if (low_stock_items + negative_stock_items) > 0:
             alerts.append({
                 'type': 'low_stock',
-                'message': f'{low_stock_items} products are running low on stock'
+                'message': f'{low_stock_items} products are running low on stock, {negative_stock_items} products have negative stock'
             })
         
         # Zero sales alert
@@ -1307,6 +1332,7 @@ class OwnerDashboardView(APIView):
             'inventory': {
                 'totalProducts': total_products,
                 'lowStockItems': low_stock_items,
+                'negativeStockItems': negative_stock_items,
                 'totalValue': float(total_inventory_value)
             },
             'employees': {
@@ -1444,9 +1470,9 @@ class FounderShopDashboardView(APIView):
         products = Product.objects.filter(shop=shop)
         total_products = products.count()
         low_stock_items = products.filter(models.Q(stock_quantity__lte=models.F('min_stock_level'))).count()
-        total_inventory_value = products.aggregate(
-            total_value=Sum(F('stock_quantity') * F('cost_price'))
-        )['total_value'] or 0
+        negative_stock_items = products.filter(stock_quantity__lt=0).count()
+        # FIXED: Stock value never negative - if oversold, value is $0 (no physical assets)
+        total_inventory_value = sum(max(0, p.stock_quantity) * p.cost_price for p in products)
 
         # Employee Data
         total_cashiers = Cashier.objects.filter(shop=shop).count()
@@ -1500,10 +1526,10 @@ class FounderShopDashboardView(APIView):
         alerts = []
         
         # Low stock alerts
-        if low_stock_items > 0:
+        if (low_stock_items + negative_stock_items) > 0:
             alerts.append({
                 'type': 'low_stock',
-                'message': f'{low_stock_items} products are running low on stock'
+                'message': f'{low_stock_items} products are running low on stock, {negative_stock_items} products have negative stock'
             })
         
         # Zero sales alert
@@ -1560,6 +1586,7 @@ class FounderShopDashboardView(APIView):
             'inventory': {
                 'totalProducts': total_products,
                 'lowStockItems': low_stock_items,
+                'negativeStockItems': negative_stock_items,
                 'totalValue': float(total_inventory_value)
             },
             'employees': {
@@ -1692,6 +1719,53 @@ class CashierTopProductsView(APIView):
         }, status=status.HTTP_200_OK)
 
 @method_decorator(csrf_exempt, name='dispatch')
+class BarcodeLookupView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    
+    """Quick barcode lookup for cashier POS"""
+    def get(self, request):
+        barcode = request.query_params.get('barcode', '').strip()
+        
+        if not barcode:
+            return Response({"error": "Barcode parameter is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            shop = ShopConfiguration.objects.get()
+        except ShopConfiguration.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Search for product by barcode, line code, or additional barcodes
+        product = Product.objects.filter(
+            shop=shop
+        ).filter(
+            models.Q(barcode=barcode) | 
+            models.Q(line_code=barcode) |
+            models.Q(additional_barcodes__contains=barcode)
+        ).first()
+        
+        if product:
+            return Response({
+                "found": True,
+                "product": {
+                    "id": product.id,
+                    "name": product.name,
+                    "price": float(product.price),
+                    "barcode": product.barcode,
+                    "line_code": product.line_code,
+                    "additional_barcodes": product.additional_barcodes or [],
+                    "category": product.category,
+                    "stock_quantity": product.stock_quantity,
+                    "currency": product.currency
+                }
+            })
+        else:
+            return Response({
+                "found": False,
+                "message": f"No product found with barcode: {barcode}"
+            })
+
+@method_decorator(csrf_exempt, name='dispatch')
 class SalesHistoryView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
@@ -1751,3 +1825,269 @@ class SalesHistoryView(APIView):
             sales_data.append(sale_data)
         
         return Response(sales_data)
+
+
+class StockTransferViewSet(viewsets.ViewSet):
+    """ViewSet for Stock Transfer operations"""
+    
+    def list(self, request):
+        """List all stock transfers for the shop"""
+        try:
+            # Get shop credentials from request headers
+            shop_id = request.META.get('HTTP_X_SHOP_ID')
+            if not shop_id:
+                return Response({'error': 'Shop ID required in X-Shop-ID header'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            print(f"🔍 DEBUG: Looking for shop with shop_id: {shop_id}")
+            shop = get_object_or_404(ShopConfiguration, shop_id=shop_id)
+            transfers = StockTransfer.objects.filter(shop=shop).order_by('-created_at')
+            
+            serializer = StockTransferSerializer(transfers, many=True)
+            return Response({
+                'success': True,
+                'data': serializer.data
+            })
+            
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def create(self, request):
+        """Create a new stock transfer"""
+        try:
+            print(f"🔍 DEBUG: StockTransferViewSet.create called")
+            print(f"🔍 DEBUG: Request data: {request.data}")
+            print(f"🔍 DEBUG: Request headers: {dict(request.META)}")
+            
+            # Get shop credentials from request headers
+            shop_id = request.META.get('HTTP_X_SHOP_ID')
+            print(f"🔍 DEBUG: Shop ID from header: {shop_id}")
+            
+            if not shop_id:
+                print(f"❌ DEBUG: No shop ID provided")
+                return Response({'error': 'Shop ID required in X-Shop-ID header'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            shop = get_object_or_404(ShopConfiguration, shop_id=shop_id)
+            print(f"🔍 DEBUG: Shop found: {shop.name}")
+            
+            # Get cashier from request - optional for shop owner
+            cashier_id = request.META.get('HTTP_X_CASHIER_ID')
+            cashier = None
+            if cashier_id:
+                print(f"🔍 DEBUG: Looking for cashier with id: {cashier_id}")
+                try:
+                    cashier = Cashier.objects.get(id=cashier_id, shop=shop)
+                    print(f"🔍 DEBUG: Cashier found: {cashier.name}")
+                except Cashier.DoesNotExist:
+                    print(f"❌ DEBUG: Cashier not found with id: {cashier_id}")
+                    return Response({'error': 'Invalid cashier ID'}, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                print(f"🔍 DEBUG: No cashier ID provided, assuming shop owner operation")
+            
+            # Extract transfer data from request
+            data = request.data.copy()
+            print(f"🔍 DEBUG: Transfer data: {data}")
+            
+            # Create transfer instance
+            transfer = StockTransfer(
+                shop=shop,
+                transfer_type=data.get('transfer_type', 'CONVERSION'),
+                from_line_code=data.get('from_line_code', ''),
+                from_barcode=data.get('from_barcode', ''),
+                from_quantity=float(data.get('from_quantity', 0)),
+                to_line_code=data.get('to_line_code', ''),
+                to_barcode=data.get('to_barcode', ''),
+                to_quantity=float(data.get('to_quantity', 0)),
+                reason=data.get('reason', ''),
+                performed_by=cashier,  # Can be None for shop owner operations
+                notes=data.get('notes', '')
+            )
+            
+            print(f"🔍 DEBUG: StockTransfer instance created")
+            
+            # Validate transfer
+            errors = transfer.validate_transfer()
+            print(f"🔍 DEBUG: Validation errors: {errors}")
+            if errors:
+                print(f"❌ DEBUG: Validation failed")
+                return Response({
+                    'success': False,
+                    'error': 'Validation failed',
+                    'details': errors
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Find products if identifiers provided
+            if transfer.from_line_code or transfer.from_barcode:
+                identifier = transfer.from_line_code or transfer.from_barcode
+                print(f"🔍 DEBUG: Finding from_product with identifier: {identifier}")
+                transfer.from_product = transfer._find_product_by_identifier(identifier)
+                print(f"🔍 DEBUG: from_product found: {transfer.from_product.name if transfer.from_product else 'Not found'}")
+            
+            if transfer.to_line_code or transfer.to_barcode:
+                identifier = transfer.to_line_code or transfer.to_barcode
+                print(f"🔍 DEBUG: Finding to_product with identifier: {identifier}")
+                transfer.to_product = transfer._find_product_by_identifier(identifier)
+                print(f"🔍 DEBUG: to_product found: {transfer.to_product.name if transfer.to_product else 'Not found'}")
+            
+            # Process the transfer
+            print(f"🔍 DEBUG: About to call process_transfer()")
+            success, messages = transfer.process_transfer()
+            print(f"🔍 DEBUG: process_transfer returned - success: {success}, messages: {messages}")
+            
+            if success:
+                print(f"✅ DEBUG: Transfer successful, serializing data...")
+                serializer = StockTransferSerializer(transfer)
+                print(f"✅ DEBUG: Serialization complete, returning success response")
+                return Response({
+                    'success': True,
+                    'message': 'Stock transfer completed successfully',
+                    'data': serializer.data
+                }, status=status.HTTP_201_CREATED)
+            else:
+                print(f"❌ DEBUG: Transfer failed")
+                return Response({
+                    'success': False,
+                    'error': 'Transfer failed',
+                    'details': messages
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
+        except Exception as e:
+            print(f"❌ DEBUG: Exception in create method: {str(e)}")
+            print(f"❌ DEBUG: Exception type: {type(e)}")
+            import traceback
+            print(f"❌ DEBUG: Traceback: {traceback.format_exc()}")
+            return Response({
+                'success': False,
+                'error': f'Internal server error: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=False, methods=['post'])
+    def find_product(self, request):
+        """Find a product by line code or barcode"""
+        try:
+            # Get shop credentials from request headers
+            shop_id = request.META.get('HTTP_X_SHOP_ID')
+            if not shop_id:
+                return Response({'error': 'Shop ID required in X-Shop-ID header'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            print(f"🔍 DEBUG: Finding product for shop_id: {shop_id}")
+            shop = get_object_or_404(ShopConfiguration, shop_id=shop_id)
+            
+            # Get search identifier
+            identifier = request.data.get('identifier', '').strip()
+            if not identifier:
+                return Response({
+                    'success': False,
+                    'error': 'Identifier (line code or barcode) required'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Search for product
+            product = None
+            search_method = ''
+            
+            try:
+                product = Product.objects.get(line_code=identifier, shop=shop)
+                search_method = 'line_code'
+            except Product.DoesNotExist:
+                try:
+                    product = Product.objects.get(barcode=identifier, shop=shop)
+                    search_method = 'barcode'
+                except Product.DoesNotExist:
+                    # Check additional barcodes
+                    product = Product.objects.filter(
+                        shop=shop,
+                        additional_barcodes__icontains=identifier
+                    ).first()
+                    if product:
+                        search_method = 'additional_barcode'
+            
+            if product:
+                serializer = ProductSerializer(product)
+                return Response({
+                    'success': True,
+                    'data': {
+                        'product': serializer.data,
+                        'search_method': search_method,
+                        'current_stock': float(product.stock_quantity or 0),
+                        'stock_status': product.stock_status
+                    }
+                })
+            else:
+                return Response({
+                    'success': False,
+                    'error': f'Product not found with identifier: {identifier}'
+                }, status=status.HTTP_404_NOT_FOUND)
+                
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': f'Internal server error: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=False, methods=['post'])
+    def validate_transfer(self, request):
+        """Validate a transfer without executing it"""
+        try:
+            # Get shop credentials from request headers
+            shop_id = request.META.get('HTTP_X_SHOP_ID')
+            if not shop_id:
+                return Response({'error': 'Shop ID required in X-Shop-ID header'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            print(f"🔍 DEBUG: Validating transfer for shop_id: {shop_id}")
+            shop = get_object_or_404(ShopConfiguration, shop_id=shop_id)
+            
+            # Create temporary transfer for validation
+            data = request.data.copy()
+            transfer = StockTransfer(
+                shop=shop,
+                transfer_type=data.get('transfer_type', 'CONVERSION'),
+                from_line_code=data.get('from_line_code', ''),
+                from_barcode=data.get('from_barcode', ''),
+                from_quantity=float(data.get('from_quantity', 0)),
+                to_line_code=data.get('to_line_code', ''),
+                to_barcode=data.get('to_barcode', ''),
+                to_quantity=float(data.get('to_quantity', 0)),
+                reason=data.get('reason', ''),
+            )
+            
+            # Find products if identifiers provided
+            if transfer.from_line_code or transfer.from_barcode:
+                identifier = transfer.from_line_code or transfer.from_barcode
+                transfer.from_product = transfer._find_product_by_identifier(identifier)
+            
+            if transfer.to_line_code or transfer.to_barcode:
+                identifier = transfer.to_line_code or transfer.to_barcode
+                transfer.to_product = transfer._find_product_by_identifier(identifier)
+            
+            # Validate transfer
+            errors = transfer.validate_transfer()
+            
+            # Calculate conversion ratio
+            conversion_ratio = transfer.calculate_conversion_ratio()
+            
+            return Response({
+                'success': True,
+                'is_valid': len(errors) == 0,
+                'errors': errors,
+                'conversion_ratio': float(conversion_ratio),
+                'from_product_info': {
+                    'name': transfer.from_product.name if transfer.from_product else 'Not found',
+                    'current_stock': float(transfer.from_product.stock_quantity or 0) if transfer.from_product else 0,
+                    'line_code': transfer.from_line_code,
+                    'barcode': transfer.from_barcode
+                } if transfer.from_product or transfer.from_line_code or transfer.from_barcode else None,
+                'to_product_info': {
+                    'name': transfer.to_product.name if transfer.to_product else 'Not found',
+                    'current_stock': float(transfer.to_product.stock_quantity or 0) if transfer.to_product else 0,
+                    'line_code': transfer.to_line_code,
+                    'barcode': transfer.to_barcode
+                } if transfer.to_product or transfer.to_line_code or transfer.to_barcode else None
+            })
+            
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': f'Internal server error: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

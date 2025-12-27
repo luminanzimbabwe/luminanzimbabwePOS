@@ -147,8 +147,24 @@ const OrderConfirmationScreen = () => {
   };
 
   const onRefresh = () => {
+    console.log('🔄 Manual refresh triggered by user');
     setRefreshing(true);
     loadOrders();
+  };
+
+  // Helper function to update additional barcodes
+  const updateAdditionalBarcodes = (currentProduct, newBarcode) => {
+    if (!newBarcode) return currentProduct.additional_barcodes || [];
+    
+    const existingBarcodes = currentProduct.additional_barcodes || [];
+    
+    // Don't add duplicate barcodes
+    if (existingBarcodes.includes(newBarcode)) {
+      return existingBarcodes;
+    }
+    
+    // Add new barcode to the list
+    return [...existingBarcodes, newBarcode];
   };
 
   const handleConfirmOrder = async (order) => {
@@ -287,7 +303,7 @@ const OrderConfirmationScreen = () => {
           console.log(`   Received: ${receivedQuantity}`);
           console.log(`   New stock: ${newStock}`);
           
-          // Prepare update data (matching ProductManagementScreen pattern)
+          // Prepare update data with enhanced barcode and supplier tracking
           const updateData = {
             email: credentials.email,
             password: credentials.shop_owner_master_password,
@@ -298,11 +314,16 @@ const OrderConfirmationScreen = () => {
             category: currentProduct.category || 'Other',
             stock_quantity: newStock,
             min_stock_level: currentProduct.min_stock_level || 5,
-            supplier: currentProduct.supplier || '',
+            supplier: item.supplierName || currentProduct.supplier || '',
             currency: currentProduct.currency || 'USD',
             price_type: currentProduct.price_type || 'unit',
-            line_code: currentProduct.line_code
+            line_code: currentProduct.line_code,
+            // Enhanced barcode tracking
+            barcode: currentProduct.barcode || item.batchBarcode || '',
+            additional_barcodes: updateAdditionalBarcodes(currentProduct, item.batchBarcode)
           };
+          
+          console.log(`📤 Enhanced update data for ${product.name}:`, updateData);
           
           console.log(`📤 Sending update request for ${product.name} (ID: ${product.id})`);
           console.log('📤 Update data:', updateData);
@@ -482,7 +503,9 @@ const OrderConfirmationScreen = () => {
             <Text style={styles.backButton}>← Back</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>✅ Order Confirmations</Text>
-          <View style={styles.placeholder} />
+          <TouchableOpacity onPress={onRefresh} style={styles.refreshButton} disabled={refreshing}>
+            <Text style={styles.refreshButtonText}>{refreshing ? '⏳' : '🔄'}</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Tab Switcher */}
@@ -573,7 +596,9 @@ const OrderConfirmationScreen = () => {
             <Text style={styles.backButton}>← Back to {viewingOrder ? 'List' : 'Orders'}</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>📋 Order Details</Text>
-          <View style={styles.placeholder} />
+          <TouchableOpacity onPress={onRefresh} style={styles.refreshButton} disabled={refreshing}>
+            <Text style={styles.refreshButtonText}>{refreshing ? '⏳' : '🔄'}</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Order Summary Card */}
@@ -760,8 +785,17 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
-  placeholder: {
-    width: 50,
+  refreshButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#374151',
+  },
+  refreshButtonDisabled: {
+    backgroundColor: '#2a2a2a',
+    opacity: 0.6,
+  },
+  refreshButtonText: {
+    fontSize: 18,
   },
   content: {
     flex: 1,

@@ -1,10 +1,28 @@
-from django.urls import path
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
 from . import views
 from .retrieve_credentials_view import RetrieveCredentialsView
 from .staff_views import PendingStaffListView, ApprovedStaffListView, ApproveStaffView, RejectStaffView, DeactivateCashierView, DeleteCashierView, InactiveStaffListView, ReactivateCashierView, CashierDetailsView, EditCashierView
 from .cashier_registration_view import CashierSelfRegistrationView
+from .waste_batch_views import WasteBatchListView, WasteBatchDetailView
+
+# Setup router for ViewSets
+router = DefaultRouter()
+router.register(r'stock-transfers', views.StockTransferViewSet, basename='stocktransfer')
 
 urlpatterns = [
+    # Include router URLs
+    path('', include(router.urls)),
+    
+    # Waste management endpoints
+    path('wastes/', views.WasteListView.as_view(), name='waste-list'),
+    path('wastes/summary/', views.WasteSummaryView.as_view(), name='waste-summary'),
+    path('wastes/product-search/', views.WasteProductSearchView.as_view(), name='waste-search'),
+    
+    # Waste batch management endpoints
+    path('waste-batches/', WasteBatchListView.as_view(), name='waste-batch-list'),
+    path('waste-batches/<int:batch_id>/', WasteBatchDetailView.as_view(), name='waste-batch-detail'),
+    
     path('status/', views.ShopStatusView.as_view(), name='shop-status'),
     path('register/', views.ShopRegisterView.as_view(), name='shop-register'),
     path('dashboard/', views.OwnerDashboardView.as_view(), name='owner-dashboard'),
@@ -33,6 +51,7 @@ urlpatterns = [
     path('products/', views.ProductListView.as_view(), name='product-list'),
     path('products/<int:product_id>/', views.ProductDetailView.as_view(), name='product-detail'),
     path('products/bulk/', views.BulkProductView.as_view(), name='bulk-product'),
+    path('products/barcode-lookup/', views.BarcodeLookupView.as_view(), name='barcode-lookup'),
     path('audit-trail/', views.InventoryAuditTrailView.as_view(), name='inventory-audit-trail'),
     path('products/<int:product_id>/audit-history/', views.ProductAuditHistoryView.as_view(), name='product-audit-history'),
     path('sales/', views.SaleListView.as_view(), name='sale-list'),

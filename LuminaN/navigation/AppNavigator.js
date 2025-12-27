@@ -14,11 +14,16 @@ import SuccessScreen from '../screens/SuccessScreen';
 import StaffContractScreen from '../screens/StaffContractScreen';
 import CashierRegisterScreen from '../screens/CashierRegisterScreen';
 import InventoryAuditTrailScreen from '../screens/InventoryAuditTrailScreen';
+import InventoryReceivingScreen from '../screens/InventoryReceivingScreen';
+import RestockManagerScreen from '../screens/RestockManagerScreen';
+import StockTransferScreen from '../screens/StockTransferScreen';
+import StockTransferHistoryScreen from '../screens/StockTransferHistoryScreen';
 import OrderConfirmationScreen from '../screens/OrderConfirmationScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import StockValuationScreen from '../screens/StockValuationScreen';
 import POSPriceScreen from '../screens/POSPriceScreen';
 import SalesAndRefundsScreen from '../screens/SalesAndRefundsScreen';
+import OwnerSalesScreen from '../screens/OwnerSalesScreen';
 
 // Import Tab Navigator
 import TabNavigator from './TabNavigator';
@@ -57,9 +62,14 @@ const AppNavigator = () => {
       <Stack.Screen name={ROUTES.STAFF_CONTRACT} component={StaffContractScreen} />
       <Stack.Screen name={ROUTES.CASHIER_REGISTER} component={CashierRegisterScreen} />
       <Stack.Screen name={ROUTES.INVENTORY_AUDIT_TRAIL} component={InventoryAuditTrailScreen} />
+      <Stack.Screen name={ROUTES.INVENTORY_RECEIVING} component={InventoryReceivingScreen} />
+      <Stack.Screen name={ROUTES.RESTOCK_MANAGER} component={RestockManagerScreen} />
+      <Stack.Screen name={ROUTES.STOCK_TRANSFER} component={StockTransferScreen} />
+      <Stack.Screen name={ROUTES.STOCK_TRANSFER_HISTORY} component={StockTransferHistoryScreen} />
       <Stack.Screen name={ROUTES.STOCK_VALUATION} component={StockValuationScreen} />
       <Stack.Screen name={ROUTES.POS_PRICE} component={POSPriceScreen} />
       <Stack.Screen name={ROUTES.SALES_AND_REFUNDS} component={SalesAndRefundsScreen} />
+      <Stack.Screen name={ROUTES.OWNER_SALES} component={OwnerSalesScreen} />
       <Stack.Screen name="OrderConfirmation" component={OrderConfirmationScreen} />
 
     </Stack.Navigator>

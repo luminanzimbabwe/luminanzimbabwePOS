@@ -14,6 +14,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { shopAPI } from '../services/api';
 import { shopStorage } from '../services/storage';
+import ProductDetailsModal from '../components/ProductDetailsModal';
 
 const { width } = Dimensions.get('window');
 
@@ -33,6 +34,20 @@ const StockValuationScreen = () => {
     totalUnits: 0,
     totalItems: 0
   });
+  
+  // Real-world financial impacts
+  const [financialImpacts, setFinancialImpacts] = useState({
+    wastages: { totalCost: 0, totalItems: 0 },
+    negativeStocks: { totalCost: 0, totalUnits: 0 },
+    stockTransfers: { totalCost: 0, totalItems: 0 },
+    adjustedGP: 0,
+    netProfitMargin: 0,
+    shrinkageRate: 0
+  });
+  
+  // Product Details Modal State
+  const [showProductModal, setShowProductModal] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
 
   useEffect(() => {
     loadShopCredentials();
@@ -113,8 +128,13 @@ const StockValuationScreen = () => {
                            product.unit_type || 
                            'Per Unit';
           
-          const stockValue = unitCost * stockUnits;
-          const grossProfit = (sellingPrice - unitCost) * stockUnits;
+          // BUSINESS LOGIC FIX: Stock value never negative - if oversold, value is $0
+          const stockValue = unitCost * Math.max(0, stockUnits);
+          
+          // BUSINESS LOGIC FIX: Gross Profit based on actual sales performance, not current stock
+          // For now, we'll calculate based on potential profit if current stock was sold
+          // In a real implementation, this would come from actual sales data
+          const grossProfit = (sellingPrice - unitCost) * Math.max(0, stockUnits);
           const gpMargin = unitCost > 0 ? ((sellingPrice - unitCost) / unitCost * 100) : 0;
 
           return {
@@ -140,6 +160,9 @@ const StockValuationScreen = () => {
 
         setProducts(processedProducts);
         calculateTotals(processedProducts);
+        
+        // Load financial impacts after products are loaded
+        await loadFinancialImpacts();
       } else {
         setProducts([]);
         calculateTotals([]);
@@ -153,6 +176,90 @@ const StockValuationScreen = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadFinancialImpacts = async () => {
+    try {
+      console.log('💰 Loading financial impacts...');
+      
+      // Load wastages data
+      const wasteSummaryResponse = await shopAPI.getWasteSummary();
+      console.log('💰 Wastage summary API response:', wasteSummaryResponse);
+      const wastagesData = wasteSummaryResponse.data || {};
+      console.log('💰 Parsed wastages data:', wastagesData);
+      
+      // Load all wastages for more detailed analysis
+      const allWastesResponse = await shopAPI.getWastes();
+      console.log('💰 All wastages API response:', allWastesResponse);
+      const allWastes = allWastesResponse.data || {};
+      console.log('💰 Parsed all wastages data:', allWastes);
+      
+      // Calculate wastages impact
+      const wastagesImpact = {
+        totalCost: wastagesData.summary?.total_waste_value || 0,
+        totalItems: wastagesData.summary?.waste_count || 0,
+        details: allWastes.wastes ? allWastes.wastes.slice(0, 5) : [] // Show top 5 wastages for details
+      };
+      
+      console.log('💰 Calculated wastages impact:', wastagesImpact);
+      
+      // Calculate negative stock impact (products with negative quantities)
+      const negativeStocks = products.filter(product => product.stockUnits < 0);
+      const negativeStockImpact = {
+        totalCost: negativeStocks.reduce((sum, product) => 
+          sum + (Math.abs(product.stockUnits) * parseFloat(product.unitCost)), 0
+        ),
+        totalUnits: negativeStocks.reduce((sum, product) => sum + Math.abs(product.stockUnits), 0),
+        products: negativeStocks.length
+      };
+      
+      // Calculate shrinkage rate
+      const totalPotentialStockValue = products.reduce((sum, product) => 
+        sum + (Math.max(0, product.stockUnits) * parseFloat(product.unitCost)), 0
+      );
+      const shrinkageRate = totalPotentialStockValue > 0 ? 
+        (wastagesImpact.totalCost / totalPotentialStockValue) * 100 : 0;
+      
+      // Calculate adjusted gross profit (potential GP minus wastages)
+      const potentialGP = totals.totalGP;
+      const adjustedGP = potentialGP - wastagesImpact.totalCost;
+      const netProfitMargin = totals.totalCost > 0 ? 
+        ((adjustedGP / totals.totalCost) * 100) : 0;
+      
+      setFinancialImpacts({
+        wastages: wastagesImpact,
+        negativeStocks: negativeStockImpact,
+        stockTransfers: { totalCost: 0, totalItems: 0 }, // Will implement stock transfer impact later
+        adjustedGP,
+        netProfitMargin,
+        shrinkageRate
+      });
+      
+      console.log('💰 Financial impacts loaded:', { wastagesImpact, negativeStockImpact });
+      
+    } catch (error) {
+      console.error('❌ Error loading financial impacts:', error);
+      console.error('❌ Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
+      // Set default values on error
+      setFinancialImpacts({
+        wastages: { totalCost: 0, totalItems: 0 },
+        negativeStocks: { totalCost: 0, totalUnits: 0, products: 0 },
+        stockTransfers: { totalCost: 0, totalItems: 0 },
+        adjustedGP: totals.totalGP,
+        netProfitMargin: totals.totalGPMargin,
+        shrinkageRate: 0
+      });
+    }
+  };
+
+  // Refresh both products and financial impacts
+  const handleRefresh = async () => {
+    await loadProducts();
+    await loadFinancialImpacts();
   };
 
   const filterProducts = () => {
@@ -178,13 +285,14 @@ const StockValuationScreen = () => {
     let totalPotentialGP = 0; // GP if all stock was sold
     
     productList.forEach(product => {
-      const cost = parseFloat(product.unitCost) * product.stockUnits;
-      const selling = parseFloat(product.sellingPrice) * product.stockUnits;
-      const potentialGP = (parseFloat(product.sellingPrice) - parseFloat(product.unitCost)) * product.stockUnits;
+      // BUSINESS LOGIC FIX: Use Math.max(0, stockUnits) to prevent negative stock values
+      const cost = parseFloat(product.unitCost) * Math.max(0, product.stockUnits);
+      const selling = parseFloat(product.sellingPrice) * Math.max(0, product.stockUnits);
+      const potentialGP = (parseFloat(product.sellingPrice) - parseFloat(product.unitCost)) * Math.max(0, product.stockUnits);
       
       totalCost += cost;
       totalSelling += selling;
-      totalUnits += product.stockUnits;
+      totalUnits += Math.max(0, product.stockUnits);  // Also prevent negative units in totals
       totalPotentialGP += potentialGP;
     });
 
@@ -204,6 +312,17 @@ const StockValuationScreen = () => {
       totalPotentialGP,
       potentialMargin
     });
+  };
+
+  // Product Details Modal Handlers
+  const showProductDetails = (product) => {
+    setSelectedProduct(product);
+    setShowProductModal(true);
+  };
+
+  const hideProductDetails = () => {
+    setShowProductModal(false);
+    setSelectedProduct(null);
   };
 
   const formatCurrency = (amount) => {
@@ -239,7 +358,7 @@ const StockValuationScreen = () => {
             <Text style={styles.backButton}>← Back</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>💰 Stock Valuation</Text>
-          <TouchableOpacity onPress={loadProducts}>
+          <TouchableOpacity onPress={handleRefresh}>
             <Text style={styles.refreshButton}>🔄</Text>
           </TouchableOpacity>
         </View>
@@ -309,6 +428,101 @@ const StockValuationScreen = () => {
         </View>
       </View>
 
+      {/* Real-World Financial Impacts Section */}
+      <View style={styles.financialImpactsSection}>
+        <Text style={styles.sectionTitle}>💰 Real-World Financial Impact</Text>
+        
+        {/* Wastages Impact */}
+        <View style={styles.impactCard}>
+          <Text style={styles.impactTitle}>🗑️ Wastages Impact</Text>
+          <View style={styles.impactRow}>
+            <Text style={styles.impactLabel}>Total Waste Cost:</Text>
+            <Text style={[styles.impactValue, { color: '#dc2626' }]}>
+              {formatCurrency(financialImpacts.wastages.totalCost)}
+            </Text>
+          </View>
+          <View style={styles.impactRow}>
+            <Text style={styles.impactLabel}>Waste Items:</Text>
+            <Text style={styles.impactValue}>
+              {formatNumber(financialImpacts.wastages.totalItems)}
+            </Text>
+          </View>
+          <View style={styles.impactRow}>
+            <Text style={styles.impactLabel}>Shrinkage Rate:</Text>
+            <Text style={[styles.impactValue, { color: financialImpacts.shrinkageRate > 5 ? '#dc2626' : '#fbbf24' }]}>
+              {financialImpacts.shrinkageRate.toFixed(2)}%
+            </Text>
+          </View>
+        </View>
+
+        {/* Negative Stock Impact */}
+        <View style={styles.impactCard}>
+          <Text style={styles.impactTitle}>⚠️ Negative Stock Impact</Text>
+          <View style={styles.impactRow}>
+            <Text style={styles.impactLabel}>Negative Stock Cost:</Text>
+            <Text style={[styles.impactValue, { color: '#dc2626' }]}>
+              {formatCurrency(financialImpacts.negativeStocks.totalCost)}
+            </Text>
+          </View>
+          <View style={styles.impactRow}>
+            <Text style={styles.impactLabel}>Over-Sold Units:</Text>
+            <Text style={styles.impactValue}>
+              {formatNumber(financialImpacts.negativeStocks.totalUnits)}
+            </Text>
+          </View>
+          <View style={styles.impactRow}>
+            <Text style={styles.impactLabel}>Affected Products:</Text>
+            <Text style={styles.impactValue}>
+              {formatNumber(financialImpacts.negativeStocks.products || 0)}
+            </Text>
+          </View>
+        </View>
+
+        {/* Adjusted Profit Metrics */}
+        <View style={styles.adjustedProfitCard}>
+          <Text style={styles.adjustedProfitTitle}>📊 Adjusted Profit After Losses</Text>
+          <View style={styles.adjustedProfitRow}>
+            <Text style={styles.adjustedProfitLabel}>Potential Gross Profit:</Text>
+            <Text style={styles.adjustedProfitValue}>
+              {formatCurrency(totals.totalGP)}
+            </Text>
+          </View>
+          <View style={styles.adjustedProfitRow}>
+            <Text style={styles.adjustedProfitLabel}>Minus Wastages:</Text>
+            <Text style={[styles.adjustedProfitValue, { color: '#dc2626' }]}>
+              -{formatCurrency(financialImpacts.wastages.totalCost)}
+            </Text>
+          </View>
+          <View style={styles.adjustedProfitDivider} />
+          <View style={styles.adjustedProfitRow}>
+            <Text style={[styles.adjustedProfitLabel, { fontSize: 16, fontWeight: 'bold' }]}>Net Adjusted GP:</Text>
+            <Text style={[
+              styles.adjustedProfitValue, 
+              { 
+                fontSize: 16, 
+                fontWeight: 'bold',
+                color: financialImpacts.adjustedGP >= 0 ? '#22c55e' : '#dc2626'
+              }
+            ]}>
+              {formatCurrency(financialImpacts.adjustedGP)}
+            </Text>
+          </View>
+          <View style={styles.adjustedProfitRow}>
+            <Text style={[styles.adjustedProfitLabel, { fontSize: 16, fontWeight: 'bold' }]}>Net Profit Margin:</Text>
+            <Text style={[
+              styles.adjustedProfitValue, 
+              { 
+                fontSize: 16, 
+                fontWeight: 'bold',
+                color: financialImpacts.netProfitMargin >= 0 ? '#22c55e' : '#dc2626'
+              }
+            ]}>
+              {financialImpacts.netProfitMargin.toFixed(2)}%
+            </Text>
+          </View>
+        </View>
+      </View>
+
       {/* Search Bar */}
       <View style={styles.searchContainer}>
         <Text style={styles.searchLabel}>Search:</Text>
@@ -349,6 +563,7 @@ const StockValuationScreen = () => {
             <Text style={[styles.headerCell, styles.colCategory]}>Category</Text>
             <Text style={[styles.headerCell, styles.colSupplier]}>Supplier</Text>
             <Text style={[styles.headerCell, styles.colLineCode]}>Line Code</Text>
+            <Text style={[styles.headerCell, styles.colBarcodes]}>Barcodes</Text>
             <Text style={[styles.headerCell, styles.colPackSize]}>Pack Size</Text>
             <Text style={[styles.headerCell, styles.colUnitCost]}>Unit Cost</Text>
             <Text style={[styles.headerCell, styles.colSellingPrice]}>Selling Price</Text>
@@ -360,6 +575,7 @@ const StockValuationScreen = () => {
             <Text style={[styles.headerCell, styles.colGPMargin]}>GP %</Text>
             <Text style={[styles.headerCell, styles.colLocation]}>Location</Text>
             <Text style={[styles.headerCell, styles.colLastSale]}>Last Sale</Text>
+            <Text style={[styles.headerCell, styles.colActions]}>Actions</Text>
           </View>
 
           {/* Product Rows */}
@@ -371,6 +587,12 @@ const StockValuationScreen = () => {
                 <Text style={[styles.cell, styles.colCategory]}>{product.category || 'General'}</Text>
                 <Text style={[styles.cell, styles.colSupplier]} numberOfLines={1}>{product.supplier || 'Unknown Supplier'}</Text>
                 <Text style={[styles.cell, styles.colLineCode]}>{product.line_code || 'N/A'}</Text>
+                <Text style={[styles.cell, styles.colBarcodes]} numberOfLines={2}>
+                  {product.barcode || 'N/A'}
+                  {product.additional_barcodes && product.additional_barcodes.length > 0 && (
+                    ` +${product.additional_barcodes.length}`
+                  )}
+                </Text>
                 <Text style={[styles.cell, styles.colPackSize]}>{product.packSize}</Text>
                 <Text style={[styles.cell, styles.colUnitCost]}>{formatCurrency(parseFloat(product.unitCost))}</Text>
                 <Text style={[styles.cell, styles.colSellingPrice]}>{formatCurrency(parseFloat(product.sellingPrice))}</Text>
@@ -388,6 +610,14 @@ const StockValuationScreen = () => {
                 </Text>
                 <Text style={[styles.cell, styles.colLocation]}>{product.location}</Text>
                 <Text style={[styles.cell, styles.colLastSale]}>{product.lastSale}</Text>
+                <View style={[styles.cell, styles.colActions]}>
+                  <TouchableOpacity
+                    style={styles.viewDetailsButton}
+                    onPress={() => showProductDetails(product)}
+                  >
+                    <Text style={styles.viewDetailsButtonText}>👁️ VIEW</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             ))
           ) : (
@@ -396,7 +626,7 @@ const StockValuationScreen = () => {
               <Text style={styles.emptyText}>
                 {searchQuery ? 'Try adjusting your search criteria.' : 'No products available for valuation.'}
               </Text>
-              <TouchableOpacity style={styles.retryButton} onPress={loadProducts}>
+              <TouchableOpacity style={styles.retryButton} onPress={handleRefresh}>
                 <Text style={styles.retryButtonText}>🔄 Retry Loading</Text>
               </TouchableOpacity>
             </View>
@@ -420,6 +650,37 @@ const StockValuationScreen = () => {
           <Text style={styles.footerLabel}>GP MARGIN:</Text>
           <Text style={styles.footerValueGP}>{totals.totalGPMargin.toFixed(2)}%</Text>
         </View>
+        <View style={styles.footerRow}>
+          <Text style={styles.footerLabel}>REAL-WORLD NET PROFIT:</Text>
+          <Text style={[
+            styles.footerValueGP, 
+            { 
+              color: financialImpacts.adjustedGP >= 0 ? '#22c55e' : '#dc2626',
+              fontSize: 16
+            }
+          ]}>
+            {formatCurrency(financialImpacts.adjustedGP)}
+          </Text>
+          <Text style={styles.footerLabel}>NET MARGIN:</Text>
+          <Text style={[
+            styles.footerValueGP, 
+            { 
+              color: financialImpacts.netProfitMargin >= 0 ? '#22c55e' : '#dc2626',
+              fontSize: 16
+            }
+          ]}>
+            {financialImpacts.netProfitMargin.toFixed(2)}%
+          </Text>
+        </View>
+        {financialImpacts.wastages.totalCost > 0 && (
+          <View style={styles.footerRow}>
+            <Text style={styles.footerLabelNote}>LOSSES IMPACT:</Text>
+            <Text style={styles.footerNote}>
+              Wastages: -{formatCurrency(financialImpacts.wastages.totalCost)} | 
+              Shrinkage: {financialImpacts.shrinkageRate.toFixed(2)}%
+            </Text>
+          </View>
+        )}
         {totals.totalUnits === 0 && (
           <View style={styles.footerRow}>
             <Text style={styles.footerLabelNote}>NOTE:</Text>
@@ -433,6 +694,13 @@ const StockValuationScreen = () => {
         height: Platform.OS === 'web' ? 100 : 20,
         minHeight: Platform.OS === 'web' ? 100 : 0
       }} />
+
+      {/* Product Details Modal */}
+      <ProductDetailsModal
+        visible={showProductModal}
+        onClose={hideProductDetails}
+        product={selectedProduct}
+      />
     </ScrollView>
   );
 };
@@ -623,7 +891,7 @@ const styles = StyleSheet.create({
   },
   tableBody: {
     backgroundColor: '#0a0a0a',
-    minWidth: 1800, // Ensure enough width for all columns to require horizontal scrolling
+    minWidth: 2000, // Ensure enough width for all columns including new Barcodes column
   },
   tableHeader: {
     flexDirection: 'row',
@@ -737,6 +1005,7 @@ const styles = StyleSheet.create({
   colCategory: { minWidth: 120, maxWidth: 120 },
   colSupplier: { minWidth: 150, maxWidth: 150 },
   colLineCode: { minWidth: 100, maxWidth: 100 },
+  colBarcodes: { minWidth: 120, maxWidth: 120 },
   colPackSize: { minWidth: 100, maxWidth: 100 },
   colUnitCost: { minWidth: 100, maxWidth: 100 },
   colSellingPrice: { minWidth: 110, maxWidth: 110 },
@@ -748,6 +1017,109 @@ const styles = StyleSheet.create({
   colGPMargin: { minWidth: 80, maxWidth: 80 },
   colLocation: { minWidth: 100, maxWidth: 100 },
   colLastSale: { minWidth: 100, maxWidth: 100 },
+  colActions: { minWidth: 100, maxWidth: 100 },
+  
+  // Financial Impacts Section Styles
+  financialImpactsSection: {
+    backgroundColor: '#1a1a1a',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  sectionTitle: {
+    color: '#22c55e',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  impactCard: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#444',
+  },
+  impactTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  impactRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  impactLabel: {
+    color: '#cccccc',
+    fontSize: 14,
+    flex: 1,
+  },
+  impactValue: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'right',
+  },
+  adjustedProfitCard: {
+    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#22c55e',
+  },
+  adjustedProfitTitle: {
+    color: '#22c55e',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  adjustedProfitRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  adjustedProfitLabel: {
+    color: '#22c55e',
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+  },
+  adjustedProfitValue: {
+    color: '#22c55e',
+    fontSize: 14,
+    fontWeight: 'bold',
+    textAlign: 'right',
+  },
+  adjustedProfitDivider: {
+    height: 1,
+    backgroundColor: '#22c55e',
+    marginVertical: 8,
+  },
+  
+  // View Details Button Styles
+  viewDetailsButton: {
+    backgroundColor: '#3b82f6',
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#2563eb',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewDetailsButtonText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+  },
 });
 
 export default StockValuationScreen;

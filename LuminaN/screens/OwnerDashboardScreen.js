@@ -14,6 +14,7 @@ import { useNavigation } from '@react-navigation/native';
 import { shopStorage } from '../services/storage';
 import { shopAPI } from '../services/api';
 import FeatureSidebar from '../components/FeatureSidebar';
+import { ROUTES } from '../constants/navigation';
 
 const { width } = Dimensions.get('window');
 
@@ -206,7 +207,10 @@ const OwnerDashboardScreen = () => {
         <Text style={styles.actionsTitle}>Quick Actions</Text>
         
         <View style={styles.actionsGrid}>
-          <TouchableOpacity style={styles.actionCard}>
+          <TouchableOpacity 
+            style={styles.actionCard}
+            onPress={() => navigation.navigate('Sales')}
+          >
             <Text style={styles.actionEmoji}>🛒</Text>
             <Text style={styles.actionTitle}>Sales</Text>
             <Text style={styles.actionSubtitle}>View today's sales</Text>
@@ -243,6 +247,15 @@ const OwnerDashboardScreen = () => {
             <Text style={styles.actionEmoji}>💰</Text>
             <Text style={styles.actionTitle}>Stock Valuation</Text>
             <Text style={styles.actionSubtitle}>Calculate inventory value</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.actionCard}
+            onPress={() => navigation.navigate('RestockManager')}
+          >
+            <Text style={styles.actionEmoji}>📦</Text>
+            <Text style={styles.actionTitle}>Restock Manager</Text>
+            <Text style={styles.actionSubtitle}>Manage negative stock</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -452,30 +465,36 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
   },
   actionCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 12,
-    padding: 16,
-    width: (width - 50) / 2, // Keep 2 columns for better layout
+    backgroundColor: 'rgba(6, 182, 212, 0.1)',
+    borderRadius: 16,
+    padding: 20,
+    width: (width - 60) / 2, // Keep 2 columns for better layout
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(6, 182, 212, 0.2)',
+    shadowColor: '#06b6d4',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
   },
   actionEmoji: {
     fontSize: 24,
     marginBottom: 8,
   },
   actionTitle: {
-    color: '#ffffff',
-    fontSize: 14,
+    color: '#06b6d4',
+    fontSize: 15,
     fontWeight: '600',
-    marginBottom: 4,
+    marginBottom: 6,
   },
   actionSubtitle: {
-    color: 'rgba(255, 255, 255, 0.5)',
-    fontSize: 11,
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 12,
     textAlign: 'center',
   },
   summarySection: {
@@ -493,19 +512,24 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   summaryCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 12,
-    padding: 16,
-    width: (width - 60) / 3,
+    backgroundColor: 'rgba(6, 182, 212, 0.1)',
+    borderRadius: 16,
+    padding: 20,
+    width: (width - 80) / 3,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(6, 182, 212, 0.2)',
+    shadowColor: '#06b6d4',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 2,
   },
   summaryValue: {
-    color: '#22c55e',
-    fontSize: 20,
+    color: '#06b6d4',
+    fontSize: 22,
     fontWeight: 'bold',
-    marginBottom: 4,
+    marginBottom: 6,
   },
   summaryLabel: {
     color: 'rgba(255, 255, 255, 0.6)',

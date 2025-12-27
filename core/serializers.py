@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.db.models import Sum, F
 from django.utils import timezone
 from datetime import timedelta
-from .models import ShopConfiguration, Cashier, Product, Sale, SaleItem, Customer, Discount, Shift, Expense, StaffLunch, StockTake, StockTakeItem, InventoryLog
+from .models import ShopConfiguration, Cashier, Product, Sale, SaleItem, Customer, Discount, Shift, Expense, StaffLunch, StockTake, StockTakeItem, InventoryLog, StockTransfer
 
 class ShopConfigurationSerializer(serializers.ModelSerializer):
     shop_owner_master_password = serializers.CharField(write_only=True, required=False)
@@ -107,17 +107,19 @@ class CashierResetPasswordSerializer(serializers.Serializer):
 class ProductSerializer(serializers.ModelSerializer):
     currency_display = serializers.CharField(source='get_currency_display', read_only=True)
     price_type_display = serializers.CharField(source='get_price_type_display', read_only=True)
+    stock_status = serializers.CharField(read_only=True)
+    stock_value = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
         model = Product
-        fields = ['id', 'name', 'description', 'price', 'cost_price', 'currency', 'currency_display', 'price_type', 'price_type_display', 'category', 'line_code', 'stock_quantity', 'min_stock_level', 'supplier', 'created_at', 'updated_at']
+        fields = ['id', 'name', 'description', 'price', 'cost_price', 'currency', 'currency_display', 'price_type', 'price_type_display', 'category', 'barcode', 'line_code', 'additional_barcodes', 'stock_quantity', 'min_stock_level', 'stock_status', 'stock_value', 'supplier', 'supplier_invoice', 'receiving_notes', 'is_active', 'created_at', 'updated_at']
 
 class BulkProductSerializer(serializers.ModelSerializer):
     stock_level = serializers.IntegerField(source='stock_quantity', read_only=True)
 
     class Meta:
         model = Product
-        fields = ['id', 'name', 'price', 'stock_level', 'line_code', 'category']
+        fields = ['id', 'name', 'price', 'stock_level', 'barcode', 'line_code', 'additional_barcodes', 'category']
 
 class SaleItemSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
@@ -261,16 +263,21 @@ class StockValuationSerializer(serializers.Serializer):
                     total_sales_amount += net_quantity * item.unit_price
                     total_cost_amount += net_quantity * item.product.cost_price
 
-            # Calculate GP (Gross Profit)
+            # BUSINESS LOGIC FIX: Separate Inventory Valuation from Sales Performance
+            # 
+            # 1. STOCK VALUE: Never negative - if oversold, value is $0 (no physical assets)
+            current_stock_value = product.stock_value
+            
+            # 2. GROSS PROFIT: Based on actual sales performance, not current stock
+            # This shows real profit made from selling products
             gross_profit = total_sales_amount - total_cost_amount
+            
+            # GP % should be based on sales performance, not stock levels
             if total_sales_amount > 0:
                 # Use gross margin: (sales - cost) / sales * 100
                 gp_percentage = (gross_profit / total_sales_amount * 100)
             else:
                 gp_percentage = 0.0
-
-            # Current stock value
-            current_stock_value = product.stock_quantity * product.cost_price
 
             # Calculate days in stock
             days_in_stock = (timezone.now().date() - product.created_at.date()).days
@@ -297,11 +304,15 @@ class StockValuationSerializer(serializers.Serializer):
 
                 # ROI = (Net Profit / Investment) * 100
                 # Using gross profit as proxy for net profit
+                # Note: When stock_value is 0 (no inventory), ROI calculation is not applicable
                 if current_stock_value > 0:
                     roi_percentage = (gross_profit / current_stock_value) * 100
+                else:
+                    roi_percentage = 0.0  # No inventory investment to calculate ROI on
 
                 # Asset Turnover = Sales / Assets (stock value)
-                asset_turnover = total_sales_amount / current_stock_value if current_stock_value > 0 else 0
+                # Note: When stock_value is 0 (no inventory), asset turnover is not applicable
+                asset_turnover = total_sales_amount / current_stock_value if current_stock_value > 0 else 0.0
 
                 # Profit per unit sold
                 profit_per_unit = gross_profit / total_quantity_sold if total_quantity_sold > 0 else 0
@@ -317,11 +328,30 @@ class StockValuationSerializer(serializers.Serializer):
             is_slow_moving = days_of_supply > 60 and avg_daily_sales < 1
             is_fast_moving = avg_daily_sales > 5
 
+            # Stock Status - Using model property for consistency
+            stock_status = product.stock_status
+            
+            # Stock Status Colors for UI
+            stock_status_colors = {
+                'Out of Stock': '#ef4444',    # Red
+                'Low Stock': '#f59e0b',       # Orange
+                'Well Stocked': '#10b981',    # Green
+                'Normal': '#3b82f6'           # Blue
+            }
+            stock_status_color = stock_status_colors.get(stock_status, '#6b7280')  # Gray default
+
+            # Calculate last sale date
+            last_sale = SaleItem.objects.filter(product=product).order_by('-sale__created_at').first()
+            last_sale_date = last_sale.sale.created_at if last_sale else None
+            last_sale_days_ago = (timezone.now().date() - last_sale_date.date()).days if last_sale_date else None
+
             products_data.append({
                 'id': product.id,
                 'name': product.name,
                 'description': product.description,
+                'barcode': product.barcode,
                 'line_code': product.line_code,
+                'additional_barcodes': product.additional_barcodes,
                 'category': product.category,
                 'cost_price': product.cost_price,
                 'selling_price': product.price,
@@ -331,6 +361,8 @@ class StockValuationSerializer(serializers.Serializer):
                 'min_stock_level': product.min_stock_level,
                 'currency': product.currency,
                 'is_low_stock': product.is_low_stock,
+                'pack_size': '1x1',  # Default pack size - can be enhanced later
+                'location': f'A{product.id % 20 + 1}-B{(product.id % 10) + 1}',  # Simulated location
                 'total_quantity_sold': total_quantity_sold,
                 'total_sales_amount': total_sales_amount,
                 'total_cost_amount': total_cost_amount,
@@ -342,6 +374,8 @@ class StockValuationSerializer(serializers.Serializer):
                 'profit_per_unit': round(profit_per_unit, 2),
                 'current_stock_value': current_stock_value,
                 'supplier': product.supplier,
+                'supplier_invoice': product.supplier_invoice,
+                'receiving_notes': product.receiving_notes,
                 'created_at': product.created_at,
                 'updated_at': product.updated_at,
                 'days_in_stock': days_in_stock,
@@ -350,7 +384,11 @@ class StockValuationSerializer(serializers.Serializer):
                 'days_of_supply': round(days_of_supply, 1),
                 'stock_age_category': stock_age_category,
                 'is_slow_moving': is_slow_moving,
-                'is_fast_moving': is_fast_moving
+                'is_fast_moving': is_fast_moving,
+                'stock_status': stock_status,
+                'stock_status_color': stock_status_color,
+                'last_sale_days_ago': last_sale_days_ago,
+                'last_sale_date': last_sale_date
             })
         return products_data
 
@@ -358,12 +396,14 @@ class StockValuationSerializer(serializers.Serializer):
         products = obj['products']
         shop = products[0].shop if products else None
 
-        # Calculate totals
+        # Calculate totals with proper business logic
         total_products = len(products)
-        total_stock_value = sum(p.stock_quantity * p.cost_price for p in products)
-        total_items_in_stock = sum(p.stock_quantity for p in products)
+        # STOCK VALUE: Never negative - using model property for consistency
+        total_stock_value = sum(p.stock_value for p in products)
+        total_items_in_stock = sum(p.actual_stock_quantity for p in products)  # Also prevent negative stock in totals
 
         # Calculate overall sales and GP (excluding refunded amounts)
+        # GP is based on SALES PERFORMANCE, not current stock levels
         total_quantity_sold = 0
         total_sales_amount = 0
         total_cost_amount = 0
@@ -398,8 +438,10 @@ class StockValuationSerializer(serializers.Serializer):
         total_business_expenses = total_expenses + total_staff_lunch_costs
         net_profit = overall_gross_profit - total_business_expenses
 
-        # Calculate additional overall metrics
+        # Calculate additional overall metrics with proper business logic
+        # ROI: Only meaningful when there's inventory investment
         overall_roi = (net_profit / total_stock_value) * 100 if total_stock_value > 0 else 0
+        # Asset Turnover: Sales per dollar of inventory investment
         overall_asset_turnover = total_sales_amount / total_stock_value if total_stock_value > 0 else 0
         overall_net_margin = (net_profit / total_sales_amount) * 100 if total_sales_amount > 0 else 0
 
@@ -652,3 +694,72 @@ class InventoryLogSerializer(serializers.ModelSerializer):
             'reference_number', 'notes', 'performed_by', 'performed_by_name',
             'cost_price', 'created_at', 'movement_type', 'total_value'
         ]
+
+class StockTransferSerializer(serializers.ModelSerializer):
+    from_product_name = serializers.CharField(source='from_product.name', read_only=True)
+    to_product_name = serializers.CharField(source='to_product.name', read_only=True)
+    performed_by_name = serializers.CharField(source='performed_by.name', read_only=True)
+    financial_impact = serializers.SerializerMethodField()
+    business_analysis = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = StockTransfer
+        fields = [
+            'id',
+            'transfer_type',
+            'status',
+            'from_product',
+            'from_product_name',
+            'from_quantity',
+            'from_line_code',
+            'from_barcode',
+            'to_product',
+            'to_product_name',
+            'to_quantity',
+            'to_line_code',
+            'to_barcode',
+            'conversion_ratio',
+            'cost_impact',
+            'shrinkage_quantity',
+            'shrinkage_value',
+            'from_product_cost',
+            'to_product_cost',
+            'net_inventory_value_change',
+            'reason',
+            'performed_by',
+            'performed_by_name',
+            'created_at',
+            'completed_at',
+            'notes',
+            'financial_impact',
+            'business_analysis'
+        ]
+        read_only_fields = [
+            'id',
+            'from_product_name',
+            'to_product_name',
+            'performed_by_name',
+            'conversion_ratio',
+            'cost_impact',
+            'shrinkage_quantity',
+            'shrinkage_value',
+            'from_product_cost',
+            'to_product_cost',
+            'net_inventory_value_change',
+            'created_at',
+            'completed_at',
+            'financial_impact',
+            'business_analysis'
+        ]
+    
+    def get_financial_impact(self, obj):
+        """Get detailed financial impact summary"""
+        if obj.status == 'COMPLETED':
+            return obj.get_financial_impact_summary()
+        return None
+    
+    def get_business_analysis(self, obj):
+        """Get business impact analysis"""
+        if obj.status == 'COMPLETED':
+            return obj.get_business_impact_analysis()
+        return None

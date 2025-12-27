@@ -16,9 +16,13 @@ export const ROUTES = {
   INVENTORY_AUDIT_TRAIL: 'InventoryAuditTrail',
   ORDER_CONFIRMATION: 'OrderConfirmation',
   INVENTORY_RECEIVING: 'InventoryReceiving',
+  RESTOCK_MANAGER: 'RestockManager',
+  STOCK_TRANSFER: 'StockTransfer',
+  STOCK_TRANSFER_HISTORY: 'StockTransferHistory',
   STOCK_VALUATION: 'StockValuation',
   POS_PRICE: 'POSPrice',
   SALES_AND_REFUNDS: 'SalesAndRefunds',
+  OWNER_SALES: 'OwnerSales',
 };
 
 // Screen titles
@@ -39,7 +43,11 @@ export const SCREEN_TITLES = {
   [ROUTES.INVENTORY_AUDIT_TRAIL]: 'Inventory Audit Trail',
   [ROUTES.ORDER_CONFIRMATION]: 'Order Confirmation',
   [ROUTES.INVENTORY_RECEIVING]: 'Inventory Receiving',
+  [ROUTES.RESTOCK_MANAGER]: 'Restock Manager',
+  [ROUTES.STOCK_TRANSFER]: 'Stock Transfer',
+  [ROUTES.STOCK_TRANSFER_HISTORY]: 'Transfer History',
   [ROUTES.STOCK_VALUATION]: 'Stock Valuation',
   [ROUTES.POS_PRICE]: 'POS Price Labels',
   [ROUTES.SALES_AND_REFUNDS]: 'Sales & Refunds',
+  [ROUTES.OWNER_SALES]: 'Today\'s Sales',
 };

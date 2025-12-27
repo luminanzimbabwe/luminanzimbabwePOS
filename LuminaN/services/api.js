@@ -78,6 +78,7 @@ export const shopAPI = {
     }
   }),
   getProductsByCategory: (category) => api.get(`/products/bulk/?category=${encodeURIComponent(category)}`),
+  lookupBarcode: (barcode) => api.get(`/products/barcode-lookup/?barcode=${encodeURIComponent(barcode)}`),
   
   // Sales methods
   createSale: (data) => api.post('/sales/', data),
@@ -142,7 +143,26 @@ export const shopAPI = {
     } catch (error) {
       return { success: false, error: error.message, status: error.response?.status, details: error.response?.data };
     }
-  }
+  },
+  
+  // Stock Transfer methods
+  findProductForTransfer: (data, config = {}) => api.post('/stock-transfers/find_product/', data, config),
+  validateTransfer: (data, config = {}) => api.post('/stock-transfers/validate_transfer/', data, config),
+  createTransfer: (data, config = {}) => api.post('/stock-transfers/', data, config),
+  getTransfers: (config = {}) => api.get('/stock-transfers/', config),
+
+  // Waste/Wastage management methods
+  getWastes: (config = {}) => api.get('/wastes/', config),
+  createWaste: (data, config = {}) => api.post('/wastes/', data, config),
+  getWasteSummary: (config = {}) => api.get('/wastes/summary/', config),
+  searchWasteProduct: (data, config = {}) => api.post('/wastes/product-search/', data, config),
+  
+  // Waste Batch management methods
+  createWasteBatch: (data, config = {}) => api.post('/waste-batches/', data, config),
+  getWasteBatches: (config = {}) => api.get('/waste-batches/', config),
+  getWasteBatchDetail: (batchId, config = {}) => api.get(`/waste-batches/${batchId}/`, config),
+  addWasteToBatch: (batchId, data, config = {}) => api.post(`/waste-batches/${batchId}/`, data, config),
+  updateWasteBatch: (batchId, data, config = {}) => api.patch(`/waste-batches/${batchId}/`, data, config),
 };
 
 export default api;

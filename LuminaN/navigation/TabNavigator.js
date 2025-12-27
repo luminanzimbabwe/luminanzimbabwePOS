@@ -1,12 +1,14 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View, Text } from 'react-native';
-import { Home, Users, Package, BarChart3, Settings, Truck, ClipboardCheck } from 'lucide-react-native';
+import { Home, Users, Package, BarChart3, Settings, Truck, ClipboardCheck, DollarSign, Trash2 } from 'lucide-react-native';
 
 // Import main screens for tabs
 import OwnerDashboardScreen from '../screens/OwnerDashboardScreen';
+import OwnerSalesScreen from '../screens/OwnerSalesScreen';
 import StaffManagementScreen from '../screens/StaffManagementScreen';
 import ProductManagementScreen from '../screens/ProductManagementScreen';
+import WasteScreen from '../screens/WasteScreen';
 import InventoryReceivingScreen from '../screens/InventoryReceivingScreen';
 import OrderConfirmationScreen from '../screens/OrderConfirmationScreen';
 import InventoryAuditTrailScreen from '../screens/InventoryAuditTrailScreen';
@@ -25,10 +27,14 @@ const TabNavigator = () => {
 
           if (route.name === 'Dashboard') {
             IconComponent = Home;
+          } else if (route.name === 'Sales') {
+            IconComponent = DollarSign;
           } else if (route.name === 'Staff') {
             IconComponent = Users;
           } else if (route.name === 'Products') {
             IconComponent = Package;
+          } else if (route.name === 'Waste') {
+            IconComponent = Trash2;
           } else if (route.name === 'Receiving') {
             IconComponent = Truck;
           } else if (route.name === 'Confirmations') {
@@ -75,6 +81,14 @@ const TabNavigator = () => {
         }}
       />
       <Tab.Screen 
+        name="Sales" 
+        component={OwnerSalesScreen}
+        options={{
+          title: 'Sales',
+          headerTitle: 'Today\'s Sales',
+        }}
+      />
+      <Tab.Screen 
         name="Staff" 
         component={StaffManagementScreen}
         options={{
@@ -88,6 +102,14 @@ const TabNavigator = () => {
         options={{
           title: 'Products',
           headerTitle: 'Product Management',
+        }}
+      />
+      <Tab.Screen 
+        name="Waste" 
+        component={WasteScreen}
+        options={{
+          title: 'Waste',
+          headerTitle: 'Waste Management',
         }}
       />
       <Tab.Screen 

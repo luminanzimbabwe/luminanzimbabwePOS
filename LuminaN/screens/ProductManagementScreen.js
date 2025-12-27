@@ -17,7 +17,7 @@ import { useNavigation } from '@react-navigation/native';
 import { shopAPI } from '../services/api';
 import { shopStorage } from '../services/storage';
 import { ROUTES } from '../constants/navigation';
-import { lineCodeGenerator } from '../utils/lineCodeGenerator';
+
 import SuccessScreen from './SuccessScreen';
 
 const ProductManagementScreen = () => {
@@ -62,6 +62,8 @@ const ProductManagementScreen = () => {
     price: '',
     cost_price: '',
     category: '',
+    barcode: '',
+    additional_barcodes: '',
     stock_quantity: '',
     min_stock_level: '5',
     supplier: '',
@@ -79,6 +81,8 @@ const ProductManagementScreen = () => {
     price: '',
     cost_price: '',
     category: '',
+    barcode: '',
+    additional_barcodes: '',
     stock_quantity: '',
     min_stock_level: '5',
     supplier: '',
@@ -265,12 +269,14 @@ const ProductManagementScreen = () => {
       const productsData = response.data || [];
       setProducts(productsData);
       
-      // Calculate simple total inventory value
+      // Calculate total inventory value using proper business logic
       let totalValue = 0;
       productsData.forEach(product => {
         const stockQty = parseFloat(product.stock_quantity) || 0;
         const costPrice = parseFloat(product.cost_price) || 0;
-        totalValue += stockQty * costPrice;
+        // Apply business logic: only count actual physical stock (max 0)
+        const actualStockValue = Math.max(0, stockQty) * costPrice;
+        totalValue += actualStockValue;
       });
       setTotalInventoryValue(totalValue);
       
@@ -299,11 +305,15 @@ const ProductManagementScreen = () => {
 
     // Search filter
     if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
       filtered = filtered.filter(product =>
-        (product.name && product.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (product.category && product.category.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (product.supplier && product.supplier.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (product.line_code && product.line_code.toLowerCase().includes(searchQuery.toLowerCase()))
+        (product.name && product.name.toLowerCase().includes(query)) ||
+        (product.category && product.category.toLowerCase().includes(query)) ||
+        (product.supplier && product.supplier.toLowerCase().includes(query)) ||
+        (product.line_code && product.line_code.toLowerCase().includes(query)) ||
+        (product.barcode && product.barcode.toLowerCase().includes(query)) ||
+        (product.additional_barcodes && Array.isArray(product.additional_barcodes) && 
+         product.additional_barcodes.some(barcode => barcode.toLowerCase().includes(query)))
       );
     }
 
@@ -370,7 +380,8 @@ const ProductManagementScreen = () => {
     const product = criticalProducts[notificationIndex % criticalProducts.length];
     const stockQuantity = parseFloat(product.stock_quantity) || 0;
     const minStockLevel = parseFloat(product.min_stock_level) || 5;
-    const isOutOfStock = stockQuantity === 0;
+    // FIXED: Negative stock should be treated as "Out of Stock"
+    const isOutOfStock = stockQuantity <= 0;
     const isLowStock = stockQuantity > 0 && stockQuantity <= minStockLevel;
 
     const unitDisplay = product.price_type === 'unit' ? 'units' : product.price_type;
@@ -434,7 +445,8 @@ const ProductManagementScreen = () => {
     const stockQuantity = parseFloat(product.stock_quantity) || 0;
     const minStockLevel = parseFloat(product.min_stock_level) || 5;
     
-    if (stockQuantity === 0) {
+    // FIXED: Negative stock should be "Out of Stock" (no physical inventory)
+    if (stockQuantity <= 0) {
       return styles.outOfStock;
     } else if (stockQuantity <= minStockLevel) {
       return styles.lowStock;
@@ -447,7 +459,8 @@ const ProductManagementScreen = () => {
     const stockQuantity = parseFloat(product.stock_quantity) || 0;
     const minStockLevel = parseFloat(product.min_stock_level) || 5;
     
-    if (stockQuantity === 0) {
+    // FIXED: Negative stock should be "Out" (no physical inventory)
+    if (stockQuantity <= 0) {
       return 'Out';
     } else if (stockQuantity <= minStockLevel) {
       return 'Low';
@@ -460,7 +473,8 @@ const ProductManagementScreen = () => {
     const stockQuantity = parseFloat(product.stock_quantity) || 0;
     const minStockLevel = parseFloat(product.min_stock_level) || 5;
     
-    if (stockQuantity === 0) {
+    // FIXED: Negative stock should show as "Out" style (no physical inventory)
+    if (stockQuantity <= 0) {
       return styles.stockOut;
     } else if (stockQuantity <= minStockLevel) {
       return styles.stockLow;
@@ -785,15 +799,9 @@ const ProductManagementScreen = () => {
         price: parseFloat(newProduct.price),
         cost_price: parseFloat(newProduct.cost_price) || 0,
         category: newProduct.category,
-        line_code: (() => {
-          try {
-            const location = lineCodeGenerator.autoDetectLocation(shopData);
-            return lineCodeGenerator.generateLineCode(location.country, location.city);
-          } catch (error) {
-            const timestamp = Date.now().toString().slice(-4);
-            return `ZW-HAR-${timestamp.padStart(4, '0')}`;
-          }
-        })(),
+        barcode: newProduct.barcode.trim(),
+        additional_barcodes: newProduct.additional_barcodes ? 
+          newProduct.additional_barcodes.split(',').map(b => b.trim()).filter(b => b) : [],
         stock_quantity: parseFloat(newProduct.stock_quantity) || 0,
         min_stock_level: parseFloat(newProduct.min_stock_level) || 5,
         supplier: newProduct.supplier.trim(),
@@ -818,6 +826,8 @@ const ProductManagementScreen = () => {
         price: '',
         cost_price: '',
         category: '',
+        barcode: '',
+        additional_barcodes: '',
         stock_quantity: '',
         min_stock_level: '5',
         supplier: '',
@@ -844,6 +854,9 @@ const ProductManagementScreen = () => {
       price: product.price?.toString() || '',
       cost_price: product.cost_price?.toString() || '',
       category: product.category || '',
+      barcode: product.barcode || '',
+      additional_barcodes: product.additional_barcodes ? 
+        product.additional_barcodes.join(', ') : '',
       stock_quantity: product.stock_quantity?.toString() || '',
       min_stock_level: product.min_stock_level?.toString() || '5',
       supplier: product.supplier || '',
@@ -871,12 +884,14 @@ const ProductManagementScreen = () => {
         price: parseFloat(editedProduct.price),
         cost_price: parseFloat(editedProduct.cost_price) || 0,
         category: editedProduct.category,
+        barcode: editedProduct.barcode.trim(),
+        additional_barcodes: editedProduct.additional_barcodes ? 
+          editedProduct.additional_barcodes.split(',').map(b => b.trim()).filter(b => b) : [],
         stock_quantity: parseFloat(editedProduct.stock_quantity) || 0,
         min_stock_level: parseFloat(editedProduct.min_stock_level) || 5,
         supplier: editedProduct.supplier.trim(),
         currency: editedProduct.currency,
-        price_type: editedProduct.price_type,
-        line_code: editingProduct.line_code
+        price_type: editedProduct.price_type
       };
 
       console.log('📤 Sending update request...', authData);
@@ -1018,6 +1033,12 @@ const ProductManagementScreen = () => {
             <TouchableOpacity onPress={() => setShowDelisted(!showDelisted)} style={[styles.headerActionButton, showDelisted && styles.headerActionButtonActive]}>
               <Text style={styles.headerActionText}>{showDelisted ? 'Active' : 'Delisted'}</Text>
             </TouchableOpacity>
+            <TouchableOpacity 
+              onPress={() => navigation.navigate(ROUTES.RESTOCK_MANAGER)} 
+              style={[styles.headerActionButton, styles.restockButton]}
+            >
+              <Text style={styles.headerActionText}>📦</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => setBulkMode(true)} style={styles.headerActionButton}>
               <Text style={styles.headerActionText}>Select</Text>
             </TouchableOpacity>
@@ -1039,7 +1060,7 @@ const ProductManagementScreen = () => {
       <View style={styles.searchContainer}>
         <TextInput
           style={styles.searchInput}
-          placeholder="Search products, categories, suppliers..."
+          placeholder="Search products, categories, suppliers, barcodes..."
           value={searchQuery}
           onChangeText={setSearchQuery}
           placeholderTextColor="#999"
@@ -1202,13 +1223,13 @@ const ProductManagementScreen = () => {
             </View>
             <View style={[styles.statCard, { borderLeftColor: '#dc2626' }]}>
               <Text style={styles.statValue}>
-                {filteredProducts.filter(p => (parseFloat(p.stock_quantity) || 0) <= (parseFloat(p.min_stock_level) || 5) && (parseFloat(p.stock_quantity) || 0) > 0).length}
+                {filteredProducts.filter(p => (parseFloat(p.stock_quantity) || 0) > 0 && (parseFloat(p.stock_quantity) || 0) <= (parseFloat(p.min_stock_level) || 5)).length}
               </Text>
               <Text style={styles.statTitle}>Low Stock</Text>
             </View>
             <View style={[styles.statCard, { borderLeftColor: '#dc2626' }]}>
               <Text style={styles.statValue}>
-                {filteredProducts.filter(p => (parseFloat(p.stock_quantity) || 0) === 0).length}
+                {filteredProducts.filter(p => (parseFloat(p.stock_quantity) || 0) <= 0).length}
               </Text>
               <Text style={styles.statTitle}>Out of Stock</Text>
             </View>
@@ -1234,6 +1255,8 @@ const ProductManagementScreen = () => {
               <Text style={styles.headerCell}>#</Text>
               <Text style={[styles.headerCell, styles.headerName]}>Product Name</Text>
               <Text style={styles.headerCell}>Category</Text>
+              <Text style={styles.headerCell}>Primary Barcode</Text>
+              <Text style={styles.headerCell}>Additional Barcodes</Text>
               <Text style={styles.headerCell}>Code</Text>
               <Text style={styles.headerCell}>Price</Text>
               <Text style={styles.headerCell}>Cost</Text>
@@ -1252,6 +1275,13 @@ const ProductManagementScreen = () => {
                 <Text style={styles.cell}>{index + 1}</Text>
                 <Text style={[styles.cell, styles.cellName]} numberOfLines={2}>{product.name || 'Unknown Product'}</Text>
                 <Text style={styles.cell} numberOfLines={1}>{product.category || 'Unknown'}</Text>
+                <Text style={styles.cell} numberOfLines={1}>{product.barcode || 'N/A'}</Text>
+                <Text style={styles.cell} numberOfLines={2}>
+                  {product.additional_barcodes && Array.isArray(product.additional_barcodes) && product.additional_barcodes.length > 0 
+                    ? product.additional_barcodes.slice(0, 2).join(', ') + (product.additional_barcodes.length > 2 ? ` (+${product.additional_barcodes.length - 2})` : '')
+                    : 'None'
+                  }
+                </Text>
                 <Text style={styles.cell} numberOfLines={1}>{product.line_code || 'N/A'}</Text>
                 <Text style={[styles.cell, styles.cellPrice]}>{product.currency || 'USD'} ${product.price || '0.00'}</Text>
                 <Text style={[styles.cell, styles.cellCost]}>${product.cost_price || '0.00'}</Text>
@@ -1357,6 +1387,32 @@ const ProductManagementScreen = () => {
                     multiline
                     numberOfLines={3}
                   />
+                </View>
+
+                <View style={styles.formField}>
+                  <Text style={styles.formLabel}>Primary Barcode (Optional)</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    value={newProduct.barcode}
+                    onChangeText={(text) => setNewProduct({...newProduct, barcode: text})}
+                    placeholder="Enter primary product barcode"
+                  />
+                  <Text style={styles.formHelperText}>
+                    Primary barcode for scanning products during sales
+                  </Text>
+                </View>
+                
+                <View style={styles.formField}>
+                  <Text style={styles.formLabel}>Additional Barcodes (Optional)</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    value={newProduct.additional_barcodes}
+                    onChangeText={(text) => setNewProduct({...newProduct, additional_barcodes: text})}
+                    placeholder="Enter additional barcodes separated by commas"
+                  />
+                  <Text style={styles.formHelperText}>
+                    Additional barcodes from different suppliers (comma-separated)
+                  </Text>
                 </View>
               </View>
 
@@ -1550,6 +1606,32 @@ const ProductManagementScreen = () => {
                     multiline
                     numberOfLines={3}
                   />
+                </View>
+
+                <View style={styles.formField}>
+                  <Text style={styles.formLabel}>Primary Barcode (Optional)</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    value={editedProduct.barcode}
+                    onChangeText={(text) => setEditedProduct({...editedProduct, barcode: text})}
+                    placeholder="Enter primary product barcode"
+                  />
+                  <Text style={styles.formHelperText}>
+                    Primary barcode for scanning products during sales
+                  </Text>
+                </View>
+                
+                <View style={styles.formField}>
+                  <Text style={styles.formLabel}>Additional Barcodes (Optional)</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    value={editedProduct.additional_barcodes}
+                    onChangeText={(text) => setEditedProduct({...editedProduct, additional_barcodes: text})}
+                    placeholder="Enter additional barcodes separated by commas"
+                  />
+                  <Text style={styles.formHelperText}>
+                    Additional barcodes from different suppliers (comma-separated)
+                  </Text>
                 </View>
               </View>
 
@@ -1905,6 +1987,9 @@ const styles = StyleSheet.create({
   },
   refreshButton: {
     backgroundColor: '#10b981',
+  },
+  restockButton: {
+    backgroundColor: '#f59e0b',
   },
   
   // Manual Refresh Bar at very top
