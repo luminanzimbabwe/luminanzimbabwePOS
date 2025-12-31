@@ -2,6 +2,7 @@ import uuid
 from django.db import models
 from django.contrib.auth.hashers import make_password, check_password
 from django.utils import timezone
+from decimal import Decimal
 
 # Forward declaration to avoid circular import
 from django.apps import apps
@@ -204,7 +205,7 @@ class Product(models.Model):
                 quantity_change=quantity_change,
                 new_stock=new_stock,
                 cost_price=self.cost_price,
-                notes=f'Stock transition: {previous_stock} → {new_stock}',
+                notes=f'Stock transition: {previous_stock} -> {new_stock}',
                 performed_by=None  # Will be set by the save method
             )
         except Exception as e:
@@ -359,6 +360,174 @@ class Discount(models.Model):
         return (self.is_active and
                 self.valid_from <= now <= self.valid_until and
                 (self.usage_limit is None or self.usage_count < self.usage_limit))
+
+class ShopDay(models.Model):
+    """
+    Shop Day Management - Controls when the shop is open/closed
+    Owner must start the day before any cashier can login
+    """
+    STATUS_CHOICES = [
+        ('CLOSED', 'Shop Closed'),
+        ('OPEN', 'Shop Open'),
+        ('CLOSING', 'Shop Closing'),
+    ]
+    
+    shop = models.ForeignKey(ShopConfiguration, on_delete=models.CASCADE)
+    date = models.DateField(unique=True, help_text="Business date")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='CLOSED')
+    opened_at = models.DateTimeField(null=True, blank=True, help_text="When shop was opened")
+    closed_at = models.DateTimeField(null=True, blank=True, help_text="When shop was closed")
+    opened_by = models.ForeignKey('Cashier', on_delete=models.SET_NULL, null=True, blank=True, related_name='opened_shop_days', help_text="Who opened the shop")
+    closed_by = models.ForeignKey('Cashier', on_delete=models.SET_NULL, null=True, blank=True, related_name='closed_shop_days', help_text="Who closed the shop")
+    opening_notes = models.TextField(blank=True, help_text="Notes when opening")
+    closing_notes = models.TextField(blank=True, help_text="Notes when closing")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Shop Day"
+        verbose_name_plural = "Shop Days"
+        ordering = ['-date']
+        indexes = [
+            models.Index(fields=['shop', 'date']),
+            models.Index(fields=['status']),
+        ]
+    
+    def __str__(self):
+        return f"{self.shop.name} - {self.date} ({self.get_status_display()})"
+    
+    @property
+    def is_open(self):
+        return self.status == 'OPEN'
+    
+    @property
+    def is_closed(self):
+        return self.status == 'CLOSED'
+    
+    @property
+    def duration(self):
+        if self.opened_at and self.closed_at:
+            return self.closed_at - self.opened_at
+        elif self.opened_at:
+            return timezone.now() - self.opened_at
+        return None
+    
+    def open_shop(self, opened_by=None, notes=''):
+        """Open the shop for business"""
+        if self.status != 'CLOSED':
+            raise ValueError("Shop can only be opened when closed")
+        
+        self.status = 'OPEN'
+        self.opened_at = timezone.now()
+        self.opened_by = opened_by
+        self.opening_notes = notes
+        self.save()
+        # Ensure each active cashier has a CashFloat record for today (zeroed) so UI shows drawers
+        try:
+            from decimal import Decimal
+            today = self.date
+            active_cashiers = Cashier.objects.filter(shop=self.shop, status='active')
+            for cashier in active_cashiers:
+                try:
+                    CashFloat.objects.get_or_create(
+                        shop=self.shop,
+                        cashier=cashier,
+                        date=today,
+                        defaults={
+                            'float_amount': Decimal('0.00'),
+                            'current_cash': Decimal('0.00'),
+                            'current_card': Decimal('0.00'),
+                            'current_ecocash': Decimal('0.00'),
+                            'current_transfer': Decimal('0.00'),
+                            'current_total': Decimal('0.00'),
+                            'session_cash_sales': Decimal('0.00'),
+                            'session_card_sales': Decimal('0.00'),
+                            'session_ecocash_sales': Decimal('0.00'),
+                            'session_transfer_sales': Decimal('0.00'),
+                            'session_total_sales': Decimal('0.00'),
+                            'expected_cash_at_eod': Decimal('0.00'),
+                            'status': 'INACTIVE'
+                        }
+                    )
+                except Exception:
+                    continue
+        except Exception:
+            # Non-fatal: do not block opening the shop if float creation fails
+            pass
+        return self
+    
+    def close_shop(self, closed_by=None, notes=''):
+        """Close the shop for business"""
+        if self.status != 'OPEN':
+            raise ValueError("Shop can only be closed when open")
+        
+        self.status = 'CLOSED'
+        self.closed_at = timezone.now()
+        self.closed_by = closed_by
+        self.closing_notes = notes
+        self.save()
+        # At close of day, mark/clear all today's cash floats so the next day starts fresh.
+        try:
+            from decimal import Decimal
+            today = self.date
+            drawers = CashFloat.objects.filter(shop=self.shop, date=today)
+            for d in drawers:
+                try:
+                    # Mark as settled and clear running totals to avoid showing previous day data
+                    d.status = 'SETTLED'
+                    d.current_cash = Decimal('0.00')
+                    d.current_card = Decimal('0.00')
+                    d.current_ecocash = Decimal('0.00')
+                    d.current_transfer = Decimal('0.00')
+                    d.current_total = Decimal('0.00')
+                    d.session_cash_sales = Decimal('0.00')
+                    d.session_card_sales = Decimal('0.00')
+                    d.session_ecocash_sales = Decimal('0.00')
+                    d.session_transfer_sales = Decimal('0.00')
+                    d.session_total_sales = Decimal('0.00')
+                    d.expected_cash_at_eod = Decimal('0.00')
+                    d.save()
+                except Exception:
+                    continue
+        except Exception:
+            # Non-fatal: do not block closing the shop if drawer reset fails
+            pass
+
+        # Close all active shifts
+        from django.db.models import Q
+        active_shifts = Shift.objects.filter(
+            shop=self.shop,
+            start_time__date=self.date,
+            is_active=True
+        )
+        
+        for shift in active_shifts:
+            shift.is_active = False
+            shift.end_time = timezone.now()
+            shift.save()
+        
+        return self
+    
+    @classmethod
+    def get_current_day(cls, shop):
+        """Get or create today's shop day"""
+        today = timezone.now().date()
+        shop_day, created = cls.objects.get_or_create(
+            shop=shop,
+            date=today,
+            defaults={'status': 'CLOSED'}
+        )
+        return shop_day
+    
+    @classmethod
+    def is_shop_open(cls, shop):
+        """Check if shop is currently open"""
+        today = timezone.now().date()
+        try:
+            shop_day = cls.objects.get(shop=shop, date=today)
+            return shop_day.is_open
+        except cls.DoesNotExist:
+            return False
 
 class Shift(models.Model):
     cashier = models.ForeignKey('Cashier', on_delete=models.CASCADE)
@@ -875,7 +1044,7 @@ class StockMovement(models.Model):
         previous_status = self._get_stock_status(self.previous_stock)
         new_status = self._get_stock_status(self.new_stock)
         if previous_status != new_status:
-            return f"{previous_status} → {new_status}"
+            return f"{previous_status} -> {new_status}"
         return new_status
 
     def _get_stock_status(self, stock_quantity):
@@ -995,7 +1164,7 @@ class StockTransfer(models.Model):
         """Validate if the transfer can be processed with business impact analysis"""
         errors = []
         warnings = []
-        print(f"🔍 DEBUG: Starting validation for transfer")
+        print(f"DEBUG: Starting validation for transfer")
         
         # Check if from product exists
         if not self.from_product and not (self.from_line_code or self.from_barcode):
@@ -1003,32 +1172,39 @@ class StockTransfer(models.Model):
         elif not self.from_product:
             # Try to find the from product
             identifier = self.from_line_code or self.from_barcode
-            print(f"🔍 DEBUG: Attempting to find source product with identifier: {identifier}")
+            print(f"DEBUG: Attempting to find source product with identifier: {identifier}")
             self.from_product = self._find_product_by_identifier(identifier)
             if not self.from_product:
                 errors.append(f"Source product not found: {identifier}")
             else:
-                print(f"🔍 DEBUG: Source product found: {self.from_product.name}")
+                print(f"DEBUG: Source product found: {self.from_product.name}")
         
         # Check if to product exists
         if not self.to_product and not (self.to_line_code or self.to_barcode):
             errors.append("Destination product must be specified")
         elif not self.to_product:
-            # Try to find the to product
-            identifier = self.to_line_code or self.to_barcode
-            print(f"🔍 DEBUG: Attempting to find destination product with identifier: {identifier}")
-            self.to_product = self._find_product_by_identifier(identifier)
-            if not self.to_product:
-                errors.append(f"Destination product not found: {identifier}")
+            # For SPLIT operations, we'll create the product during processing
+            if self.transfer_type == 'SPLIT':
+                print(f"DEBUG: SPLIT operation - will create destination product during processing")
+                # For SPLIT operations, we allow the product to not exist yet
+                # It will be created in the process_transfer method
+                pass
             else:
-                print(f"🔍 DEBUG: Destination product found: {self.to_product.name}")
+                # Try to find the to product for other transfer types
+                identifier = self.to_line_code or self.to_barcode
+                print(f"DEBUG: Attempting to find destination product with identifier: {identifier}")
+                self.to_product = self._find_product_by_identifier(identifier)
+                if not self.to_product:
+                    errors.append(f"Destination product not found: {identifier}")
+                else:
+                    print(f"DEBUG: Destination product found: {self.to_product.name}")
         
-        # 🚨 MANDATORY COST VALIDATION - Critical Business Logic
+        # COST VALIDATION - Now treated as WARNINGS (user can confirm)
         if self.from_product and float(self.from_product.cost_price) <= 0:
-            errors.append(f"CRITICAL: Source product '{self.from_product.name}' has $0.00 cost price. This will mask shrinkage losses!")
+            warnings.append(f"WARNING: Source product '{self.from_product.name}' has $0.00 cost price. This will mask shrinkage losses!")
         
         if self.to_product and float(self.to_product.cost_price) <= 0:
-            errors.append(f"CRITICAL: Destination product '{self.to_product.name}' has $0.00 cost price. This will mask shrinkage losses!")
+            warnings.append(f"WARNING: Destination product '{self.to_product.name}' has $0.00 cost price. This will mask shrinkage losses!")
         
         # Check quantities
         if self.from_quantity <= 0:
@@ -1040,84 +1216,151 @@ class StockTransfer(models.Model):
         # Check if we have enough stock for transfer (if applicable)
         if self.from_product and self.from_quantity > 0:
             current_stock = float(self.from_product.stock_quantity) if self.from_product.stock_quantity else 0
-            print(f"🔍 DEBUG: Source product stock check - Current: {current_stock}, Required: {self.from_quantity}")
+            print(f"DEBUG: Source product stock check - Current: {current_stock}, Required: {self.from_quantity}")
             if current_stock < float(self.from_quantity):
                 errors.append(f"Insufficient stock. Available: {current_stock}, Required: {self.from_quantity}")
         
-        # 🚨 SHRINKAGE DETECTION - Expected vs Actual Yield Analysis
+        # SHRINKAGE DETECTION - Expected vs Actual Yield Analysis
         if self.from_product and self.to_product and self.from_quantity > 0 and self.to_quantity > 0:
             conversion_ratio = self.calculate_conversion_ratio()
             expected_yield = float(self.from_quantity) * float(conversion_ratio)
             actual_yield = float(self.to_quantity)
             
-            print(f"🔍 DEBUG: Yield Analysis - Expected: {expected_yield}, Actual: {actual_yield}")
+            print(f"DEBUG: Yield Analysis - Expected: {expected_yield}, Actual: {actual_yield}")
             
             # Calculate potential shrinkage
             if actual_yield < expected_yield:
                 shrinkage_qty = expected_yield - actual_yield
                 shrinkage_value = shrinkage_qty * float(self.to_product.cost_price)
-                warnings.append(f"⚠️ SHRINKAGE DETECTED: Expected {expected_yield} units but only {actual_yield} produced. Loss: {shrinkage_qty:.2f} units (${shrinkage_value:.2f})")
+                warnings.append(f"SHRINKAGE DETECTED: Expected {expected_yield} units but only {actual_yield} produced. Loss: {shrinkage_qty:.2f} units (${shrinkage_value:.2f})")
             elif actual_yield > expected_yield:
                 surplus_qty = actual_yield - expected_yield
                 surplus_value = surplus_qty * float(self.to_product.cost_price)
-                warnings.append(f"📈 SURPLUS DETECTED: Expected {expected_yield} units but produced {actual_yield}. Gain: {surplus_qty:.2f} units (${surplus_value:.2f})")
+                warnings.append(f"SURPLUS DETECTED: Expected {expected_yield} units but produced {actual_yield}. Gain: {surplus_qty:.2f} units (${surplus_value:.2f})")
         
-        print(f"🔍 DEBUG: Validation complete. Errors: {len(errors)}, Warnings: {len(warnings)}")
+        print(f"DEBUG: Validation complete. Errors: {len(errors)}, Warnings: {len(warnings)}")
         for error in errors:
-            print(f"❌ DEBUG: Validation error: {error}")
+            print(f"DEBUG: Validation error: {error}")
         for warning in warnings:
-            print(f"⚠️ DEBUG: Validation warning: {warning}")
+            print(f"DEBUG: Validation warning: {warning}")
         
-        return errors + warnings  # Return both errors and warnings
+        return {
+            'errors': errors,
+            'warnings': warnings,
+            'can_proceed': len(errors) == 0,  # Can proceed if no critical errors
+            'has_warnings': len(warnings) > 0
+        }
     
     def process_transfer(self):
         """Execute the stock transfer"""
-        print(f"🔍 DEBUG: process_transfer called for transfer ID: {self.id}")
-        print(f"🔍 DEBUG: Transfer status: {self.status}")
-        print(f"🔍 DEBUG: Transfer type: {self.transfer_type}")
+        print(f"DEBUG: process_transfer called for transfer ID: {self.id}")
+        print(f"DEBUG: Transfer status: {self.status}")
+        print(f"DEBUG: Transfer type: {self.transfer_type}")
         
         if self.status != 'PENDING':
-            print(f"❌ DEBUG: Transfer is not in pending status: {self.status}")
+            print(f"DEBUG: Transfer is not in pending status: {self.status}")
             return False, ["Transfer is not in pending status"]
         
         # Validate transfer
-        errors = self.validate_transfer()
-        print(f"🔍 DEBUG: Validation errors: {errors}")
-        if errors:
-            print(f"❌ DEBUG: Validation failed with errors: {errors}")
-            return False, errors
+        validation_result = self.validate_transfer()
+        print(f"DEBUG: Validation result: {validation_result}")
+        if not validation_result['can_proceed']:
+            print(f"DEBUG: Validation failed with errors: {validation_result['errors']}")
+            return False, validation_result['errors']
         
         try:
             from django.db import transaction
             
-            print(f"🔍 DEBUG: Finding products...")
+            print(f"DEBUG: Finding products...")
             # Find products if not already set
             if not self.from_product and (self.from_line_code or self.from_barcode):
                 self.from_product = self._find_product_by_identifier(self.from_line_code or self.from_barcode)
-                print(f"🔍 DEBUG: Found from_product: {self.from_product.name if self.from_product else 'Not found'}")
+                print(f"DEBUG: Found from_product: {self.from_product.name if self.from_product else 'Not found'}")
                 if not self.from_product:
                     return False, [f"Source product not found: {self.from_line_code or self.from_barcode}"]
             
-            if not self.to_product and (self.to_line_code or self.to_barcode):
-                self.to_product = self._find_product_by_identifier(self.to_line_code or self.to_barcode)
-                print(f"🔍 DEBUG: Found to_product: {self.to_product.name if self.to_product else 'Not found'}")
-                if not self.to_product:
-                    return False, [f"Destination product not found: {self.to_line_code or self.to_barcode}"]
+            # Handle destination product creation for SPLIT operations
+            if not self.to_product:
+                if self.transfer_type == 'SPLIT':
+                    # For SPLIT operations, check if we have new product data in notes
+                    # This would be passed from the frontend via the notes field or a separate field
+                    # For now, we'll try to create a basic product
+                    try:
+                        # Try to find existing product first
+                        identifier = self.to_line_code or self.to_barcode
+                        self.to_product = self._find_product_by_identifier(identifier)
+                        
+                        if not self.to_product:
+                            # Create new product for split operation
+                            # Extract new product data from notes if available (format: "Product split: OLD -> NEW\n{"name": "...", "price": ..., ...}")
+                            new_product_data = None
+                            if self.notes and 'Product split:' in self.notes:
+                                try:
+                                    # Look for JSON data in notes after "Product split:"
+                                    lines = self.notes.split('\n')
+                                    for line in lines:
+                                        if line.strip().startswith('{'):
+                                            import json
+                                            new_product_data = json.loads(line.strip())
+                                            break
+                                except:
+                                    pass
+                            
+                            if new_product_data:
+                                self.to_product = Product.objects.create(
+                                    shop=self.shop,
+                                    name=new_product_data['name'],
+                                    price=new_product_data['price'],
+                                    cost_price=new_product_data['cost_price'],
+                                    category=new_product_data.get('category', 'Bakery'),
+                                    currency=new_product_data.get('currency', 'USD'),
+                                    line_code=self.to_line_code,  # Use the provided line code
+                                    barcode=self.to_barcode or '',
+                                    stock_quantity=0  # Start with 0, will be updated below
+                                )
+                                print(f"DEBUG: Created new product for split: {self.to_product.name}")
+                            else:
+                                # Create basic product without detailed data
+                                self.to_product = Product.objects.create(
+                                    shop=self.shop,
+                                    name=f"Split Product from {self.from_product.name if self.from_product else 'Unknown'}",
+                                    price=1.00,  # Default price
+                                    cost_price=0.50,  # Default cost
+                                    category='Bakery',
+                                    currency='USD',
+                                    line_code=self.to_line_code,
+                                    barcode=self.to_barcode or '',
+                                    stock_quantity=0
+                                )
+                                print(f"DEBUG: Created basic product for split: {self.to_product.name}")
+                    except Exception as e:
+                        print(f"DEBUG: Error creating new product: {e}")
+                        return False, [f"Failed to create new product for split: {str(e)}"]
+                else:
+                    # Try to find existing product for other transfer types
+                    identifier = self.to_line_code or self.to_barcode
+                    self.to_product = self._find_product_by_identifier(identifier)
+                    print(f"DEBUG: Found to_product: {self.to_product.name if self.to_product else 'Not found'}")
+                    if not self.to_product:
+                        return False, [f"Destination product not found: {self.to_line_code or self.to_barcode}"]
             
             # Final check - ensure we have both products
             if not self.from_product:
                 return False, ["Source product is required but not found"]
             if not self.to_product:
-                return False, ["Destination product is required but not found"]
+                if self.transfer_type == 'SPLIT':
+                    return False, ["Failed to create destination product for split operation"]
+                else:
+                    return False, ["Destination product is required but not found"]
             
             # Process the transfer
             with transaction.atomic():
-                print(f"🔍 DEBUG: Processing transfer in transaction...")
+                print(f"DEBUG: Processing transfer in transaction...")
                 # Deduct from source product
                 if self.from_product and self.from_quantity > 0:
                     old_from_stock = float(self.from_product.stock_quantity) or 0
                     new_from_stock = old_from_stock - float(self.from_quantity)
-                    print(f"🔍 DEBUG: Updating from_product stock: {old_from_stock} → {new_from_stock}")
+                    print(f"DEBUG: Updating from_product stock: {old_from_stock} -> {new_from_stock}")
                     self.from_product.stock_quantity = new_from_stock
                     self.from_product.save()
                 
@@ -1126,39 +1369,41 @@ class StockTransfer(models.Model):
                 to_product_cost = 0
                 net_inventory_value_change = 0
                 
-                # 🚨 CRITICAL: Use actual cost prices from database
+                # CRITICAL: Use actual cost prices from database
                 if self.from_product:
                     from_cost_price = float(self.from_product.cost_price or 0)
                     from_product_cost = float(self.from_quantity) * from_cost_price
-                    print(f"🔍 DEBUG: Source product cost calculation:")
-                    print(f"🔍 DEBUG: Product name: {self.from_product.name}")
-                    print(f"🔍 DEBUG: Cost price from DB: ${from_cost_price}")
-                    print(f"🔍 DEBUG: Quantity: {self.from_quantity}")
-                    print(f"🔍 DEBUG: Total source cost: {self.from_quantity} × ${from_cost_price} = ${from_product_cost}")
+                    print(f"DEBUG: Source product cost calculation:")
+                    print(f"DEBUG: Product name: {self.from_product.name}")
+                    print(f"DEBUG: Cost price from DB: ${from_cost_price}")
+                    print(f"DEBUG: Quantity: {self.from_quantity}")
+                    print(f"DEBUG: Total source cost: {self.from_quantity} × ${from_cost_price} = ${from_product_cost}")
                 else:
-                    print(f"🔍 DEBUG: No source product found for cost calculation")
+                    print(f"DEBUG: No source product found for cost calculation")
                 
                 if self.to_product:
                     to_cost_price = float(self.to_product.cost_price or 0)
                     # Calculate quantity to add based on transfer type
                     old_to_stock = float(self.to_product.stock_quantity) or 0
                     
+                    # Calculate conversion ratio for all transfer types
+                    conversion_ratio = self.calculate_conversion_ratio()
+                    
                     if self.transfer_type == 'SPLIT':
-                        conversion_ratio = self.calculate_conversion_ratio()
                         quantity_to_add = float(self.from_quantity) * float(conversion_ratio)
                         new_to_stock = old_to_stock + quantity_to_add
-                        print(f"🔍 DEBUG: SPLIT operation - Adding {quantity_to_add} (from {self.from_quantity} × {conversion_ratio})")
+                        print(f"DEBUG: SPLIT operation - Adding {quantity_to_add} (from {self.from_quantity} × {conversion_ratio})")
                     else:
                         quantity_to_add = float(self.to_quantity)
                         new_to_stock = old_to_stock + quantity_to_add
-                        print(f"🔍 DEBUG: ADD operation - Adding {self.to_quantity}")
+                        print(f"DEBUG: ADD operation - Adding {self.to_quantity}")
                     
                     to_product_cost = quantity_to_add * to_cost_price
-                    print(f"🔍 DEBUG: Destination product cost calculation:")
-                    print(f"🔍 DEBUG: Product name: {self.to_product.name}")
-                    print(f"🔍 DEBUG: Cost price from DB: ${to_cost_price}")
-                    print(f"🔍 DEBUG: Quantity to add: {quantity_to_add}")
-                    print(f"🔍 DEBUG: Total destination cost: {quantity_to_add} × ${to_cost_price} = ${to_product_cost}")
+                    print(f"DEBUG: Destination product cost calculation:")
+                    print(f"DEBUG: Product name: {self.to_product.name}")
+                    print(f"DEBUG: Cost price from DB: ${to_cost_price}")
+                    print(f"DEBUG: Quantity to add: {quantity_to_add}")
+                    print(f"DEBUG: Total destination cost: {quantity_to_add} × ${to_cost_price} = ${to_product_cost}")
                     
                     # Calculate inventory value change
                     old_inventory_value = max(0, old_to_stock) * float(self.to_product.cost_price)
@@ -1176,7 +1421,7 @@ class StockTransfer(models.Model):
                     else:
                         net_inventory_value_change = to_inventory_change
                     
-                    print(f"🔍 DEBUG: Inventory value change: ${net_inventory_value_change}")
+                    print(f"DEBUG: Inventory value change: ${net_inventory_value_change}")
                     
                     # Update destination product stock
                     self.to_product.stock_quantity = new_to_stock
@@ -1188,11 +1433,11 @@ class StockTransfer(models.Model):
                     shrinkage_qty = max(0, expected_yield - actual_yield)
                     shrinkage_val = shrinkage_qty * float(self.to_product.cost_price)
                     
-                    print(f"🔍 DEBUG: Shrinkage Analysis:")
-                    print(f"🔍 DEBUG: Expected yield: {expected_yield}")
-                    print(f"🔍 DEBUG: Actual yield: {actual_yield}")
-                    print(f"🔍 DEBUG: Shrinkage quantity: {shrinkage_qty}")
-                    print(f"🔍 DEBUG: Shrinkage value: ${shrinkage_val}")
+                    print(f"DEBUG: Shrinkage Analysis:")
+                    print(f"DEBUG: Expected yield: {expected_yield}")
+                    print(f"DEBUG: Actual yield: {actual_yield}")
+                    print(f"DEBUG: Shrinkage quantity: {shrinkage_qty}")
+                    print(f"DEBUG: Shrinkage value: ${shrinkage_val}")
                     
                     # Store all financial calculations including shrinkage
                     self.from_product_cost = from_product_cost
@@ -1202,22 +1447,21 @@ class StockTransfer(models.Model):
                     self.shrinkage_quantity = shrinkage_qty
                     self.shrinkage_value = shrinkage_val
                 
-                # Calculate conversion ratio
-                self.calculate_conversion_ratio()
+                # Conversion ratio already calculated above
                 
                 # Mark as completed
                 self.status = 'COMPLETED'
                 self.completed_at = timezone.now()
                 self.save()
                 
-                print(f"✅ DEBUG: Transfer completed successfully!")
+                print(f"DEBUG: Transfer completed successfully!")
                 return True, ["Transfer completed successfully"]
                 
         except Exception as e:
-            print(f"❌ DEBUG: Exception in process_transfer: {str(e)}")
-            print(f"❌ DEBUG: Exception type: {type(e)}")
+            print(f"DEBUG: Exception in process_transfer: {str(e)}")
+            print(f"DEBUG: Exception type: {type(e)}")
             import traceback
-            print(f"❌ DEBUG: Traceback: {traceback.format_exc()}")
+            print(f"DEBUG: Traceback: {traceback.format_exc()}")
             return False, [f"Error processing transfer: {str(e)}"]
     
     def get_financial_impact_summary(self):
@@ -1251,15 +1495,15 @@ class StockTransfer(models.Model):
         inventory_change = float(self.net_inventory_value_change or 0)
         shrinkage_value = float(self.shrinkage_value or 0)
         
-        # 🚨 ENHANCED IMPACT ANALYSIS - More aggressive for losses
+        # ENHANCED IMPACT ANALYSIS - More aggressive for losses
         if shrinkage_value > 0:
-            impact_type = "💸 SHRINKAGE LOSS"
+            impact_type = "SHRINKAGE LOSS"
             impact_level = "CRITICAL" if shrinkage_value > 20 else "HIGH" if shrinkage_value > 5 else "MEDIUM"
         elif cost_impact > 0:
-            impact_type = "💰 Cost Increase"
+            impact_type = "Cost Increase"
             impact_level = "HIGH" if cost_impact > 50 else "MEDIUM" if cost_impact > 10 else "LOW"
         elif cost_impact < 0:
-            impact_type = "💚 Cost Savings"
+            impact_type = "Cost Savings"
             impact_level = "HIGH" if abs(cost_impact) > 50 else "MEDIUM" if abs(cost_impact) > 10 else "LOW"
         else:
             # Check if this is a zero-cost transfer (which should trigger alerts)
@@ -1267,55 +1511,55 @@ class StockTransfer(models.Model):
                 from_cost = float(self.from_product.cost_price or 0)
                 to_cost = float(self.to_product.cost_price or 0)
                 if from_cost == 0 or to_cost == 0:
-                    impact_type = "🚨 ZERO COST ALERT"
+                    impact_type = "ZERO COST ALERT"
                     impact_level = "CRITICAL"
                 else:
-                    impact_type = "✅ Cost Neutral"
+                    impact_type = "Cost Neutral"
                     impact_level = "NONE"
             else:
-                impact_type = "✅ Cost Neutral"
+                impact_type = "Cost Neutral"
                 impact_level = "NONE"
         
         # Enhanced inventory impact with shrinkage focus
         if shrinkage_value > 0:
-            inventory_impact = f"💸 Shrinkage Loss: -${shrinkage_value:.2f}"
+            inventory_impact = f"Shrinkage Loss: -${shrinkage_value:.2f}"
         elif inventory_change > 0:
-            inventory_impact = f"📈 Inventory Value Increased: +${inventory_change:.2f}"
+            inventory_impact = f"Inventory Value Increased: +${inventory_change:.2f}"
         elif inventory_change < 0:
-            inventory_impact = f"📉 Inventory Value Decreased: -${abs(inventory_change):.2f}"
+            inventory_impact = f"Inventory Value Decreased: -${abs(inventory_change):.2f}"
         else:
-            inventory_impact = "➡️ Inventory Value Unchanged"
+            inventory_impact = "Inventory Value Unchanged"
         
-        # 🚨 AGGRESSIVE RECOMMENDATIONS - Make owners care about losses
+        # AGGRESSIVE RECOMMENDATIONS - Make owners care about losses
         recommendations = []
         
         # Shrinkage-specific recommendations
         if shrinkage_value > 0:
-            recommendations.append(f"🚨 INVESTIGATE SHRINKAGE: ${shrinkage_value:.2f} loss detected - Check handling procedures")
-            recommendations.append("🔍 Review staff training on product handling")
-            recommendations.append("📋 Implement quality control checkpoints")
+            recommendations.append(f"INVESTIGATE SHRINKAGE: ${shrinkage_value:.2f} loss detected - Check handling procedures")
+            recommendations.append("Review staff training on product handling")
+            recommendations.append("Implement quality control checkpoints")
             
             if shrinkage_value > 20:
-                recommendations.append("🚨 MANAGEMENT REVIEW REQUIRED: High shrinkage cost")
+                recommendations.append("MANAGEMENT REVIEW REQUIRED: High shrinkage cost")
         
         # Zero cost alerts
         if self.from_product and self.to_product:
             from_cost = float(self.from_product.cost_price or 0)
             to_cost = float(self.to_product.cost_price or 0)
             if from_cost == 0 or to_cost == 0:
-                recommendations.append("🚨 URGENT: Set proper cost prices to track real losses")
-                recommendations.append("💰 Zero-cost products mask shrinkage and waste")
+                recommendations.append("URGENT: Set proper cost prices to track real losses")
+                recommendations.append("Zero-cost products mask shrinkage and waste")
         
         # Transfer type specific recommendations
         if self.transfer_type == 'SPLIT':
-            recommendations.append("✂️ Monitor splitting process for waste")
-            recommendations.append("📏 Review cutting accuracy and tool quality")
+            recommendations.append("Monitor splitting process for waste")
+            recommendations.append("Review cutting accuracy and tool quality")
         elif self.transfer_type == 'CONVERSION':
-            recommendations.append("🔄 Verify conversion process efficiency")
+            recommendations.append("Verify conversion process efficiency")
         
         # General cost management
         if abs(cost_impact) > 10:
-            recommendations.append("💡 Review supplier costs and process efficiency")
+            recommendations.append("Review supplier costs and process efficiency")
         
         # Calculate if this needs immediate review
         needs_review = (
@@ -1339,7 +1583,7 @@ class StockTransfer(models.Model):
     
     def _find_product_by_identifier(self, identifier):
         """Find product by line code or barcode with comprehensive search"""
-        print(f"🔍 DEBUG: Searching for product with identifier: '{identifier}'")
+        print(f"DEBUG: Searching for product with identifier: '{identifier}'")
         
         # Get shop context - we need to filter by shop
         shop = self.shop
@@ -1347,18 +1591,18 @@ class StockTransfer(models.Model):
         # Search by line code first
         try:
             product = Product.objects.get(line_code=identifier, shop=shop)
-            print(f"✅ DEBUG: Found product by line_code: {product.name}")
+            print(f"DEBUG: Found product by line_code: {product.name}")
             return product
         except Product.DoesNotExist:
-            print(f"🔍 DEBUG: Product not found by line_code: {identifier}")
+            print(f"DEBUG: Product not found by line_code: {identifier}")
         
         # Search by primary barcode
         try:
             product = Product.objects.get(barcode=identifier, shop=shop)
-            print(f"✅ DEBUG: Found product by barcode: {product.name}")
+            print(f"DEBUG: Found product by barcode: {product.name}")
             return product
         except Product.DoesNotExist:
-            print(f"🔍 DEBUG: Product not found by barcode: {identifier}")
+            print(f"DEBUG: Product not found by barcode: {identifier}")
         
         # Search in additional barcodes
         try:
@@ -1367,10 +1611,10 @@ class StockTransfer(models.Model):
                 additional_barcodes__contains=identifier
             ).first()
             if product:
-                print(f"✅ DEBUG: Found product by additional_barcodes: {product.name}")
+                print(f"DEBUG: Found product by additional_barcodes: {product.name}")
                 return product
         except Exception as e:
-            print(f"⚠️ DEBUG: Error searching additional_barcodes: {e}")
+            print(f"DEBUG: Error searching additional_barcodes: {e}")
         
         # Search by product name (case insensitive, partial match)
         try:
@@ -1379,12 +1623,12 @@ class StockTransfer(models.Model):
                 name__icontains=identifier
             ).first()
             if product:
-                print(f"✅ DEBUG: Found product by name search: {product.name}")
+                print(f"DEBUG: Found product by name search: {product.name}")
                 return product
         except Exception as e:
-            print(f"⚠️ DEBUG: Error searching by name: {e}")
+            print(f"DEBUG: Error searching by name: {e}")
         
-        print(f"❌ DEBUG: Product not found with identifier: '{identifier}'")
+        print(f"DEBUG: Product not found with identifier: '{identifier}'")
         return None
 
 class WasteBatch(models.Model):
@@ -1670,3 +1914,497 @@ class Waste(models.Model):
                 'end_date': end_date
             }
         }
+
+
+class CashFloat(models.Model):
+    """
+    Cash Float Management System
+    Tracks float amounts, drawer contents, and real-time cash flow
+    """
+    STATUS_CHOICES = [
+        ('ACTIVE', 'Active Drawer'),
+        ('INACTIVE', 'Inactive Drawer'),
+        ('SETTLED', 'Settled at EOD'),
+    ]
+    
+    shop = models.ForeignKey(ShopConfiguration, on_delete=models.CASCADE)
+    cashier = models.ForeignKey('Cashier', on_delete=models.CASCADE)
+    date = models.DateField(default=timezone.now)
+    
+    # Float Management
+    float_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Owner-set float amount")
+    float_set_by = models.ForeignKey('Cashier', on_delete=models.SET_NULL, null=True, blank=True, related_name='floats_set', help_text="Who set the float")
+    float_set_at = models.DateTimeField(null=True, blank=True, help_text="When float was last set")
+    
+    # Current Drawer Contents (Real-time tracking)
+    current_cash = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current cash in drawer")
+    current_card = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current card payments in drawer")
+    current_ecocash = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current EcoCash in drawer")
+    current_transfer = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current bank transfers in drawer")
+    current_total = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Total current amount in drawer")
+    
+    # Sales Tracking (for current session)
+    session_cash_sales = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    session_card_sales = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    session_ecocash_sales = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    session_transfer_sales = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    session_total_sales = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    
+    # EOD Integration
+    expected_cash_at_eod = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Expected cash at end of day (float + cash sales)")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='INACTIVE')
+    
+    # Tracking
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    last_activity = models.DateTimeField(auto_now=True, help_text="Last time drawer was updated")
+    
+    class Meta:
+        verbose_name = "Cash Float"
+        verbose_name_plural = "Cash Floats"
+        ordering = ['-date', '-created_at']
+        unique_together = ['shop', 'cashier', 'date']
+        indexes = [
+            models.Index(fields=['shop', 'date']),
+            models.Index(fields=['cashier', 'date']),
+            models.Index(fields=['status']),
+        ]
+    
+    def __str__(self):
+        return f"{self.cashier.name} - {self.date} - ${self.current_total}"
+    
+    @property
+    def is_active(self):
+        return self.status == 'ACTIVE'
+    
+    @property
+    def expected_drawer_total(self):
+        """Expected total in drawer: float + all cash sales"""
+        return self.float_amount + self.session_cash_sales
+    
+    @property
+    def cash_variance(self):
+        """Difference between current cash and expected cash"""
+        return self.current_cash - self.expected_drawer_total
+    
+    @property
+    def drawer_efficiency(self):
+        """Calculate drawer efficiency percentage"""
+        expected = self.expected_drawer_total
+        if expected == 0:
+            return 100
+        actual = self.current_cash
+        return min(100, (float(actual) / float(expected)) * 100)
+    
+    def activate_drawer(self, cashier):
+        """Activate the drawer for a cashier"""
+        self.status = 'ACTIVE'
+        self.cashier = cashier
+        self.float_set_by = cashier
+        self.float_set_at = timezone.now()
+        self.save()
+        return self
+    
+    def set_float_amount(self, amount, set_by):
+        """Set or update float amount"""
+        # Ensure amount is Decimal for consistency
+        if not isinstance(amount, Decimal):
+            amount = Decimal(str(amount))
+        self.float_amount = amount
+        self.float_set_by = set_by
+        self.float_set_at = timezone.now()
+        self.update_expected_cash()
+        self.save()
+        return self
+    
+    def add_sale(self, amount, payment_method):
+        """Add a sale to the drawer"""
+        # Ensure amount is Decimal for consistency
+        if not isinstance(amount, Decimal):
+            amount = Decimal(str(amount))
+        
+        if payment_method == 'cash':
+            self.session_cash_sales += amount
+            self.current_cash += amount
+        elif payment_method == 'card':
+            self.session_card_sales += amount
+            self.current_card += amount
+        elif payment_method == 'ecocash':
+            self.session_ecocash_sales += amount
+            self.current_ecocash += amount
+        elif payment_method == 'transfer':
+            self.session_transfer_sales += amount
+            self.current_transfer += amount
+        
+        # Update totals
+        self.session_total_sales += amount
+        self.current_total = (self.current_cash + self.current_card + 
+                             self.current_ecocash + self.current_transfer)
+        
+        self.update_expected_cash()
+        self.last_activity = timezone.now()
+        self.save()
+        
+        return self
+    
+    def update_expected_cash(self):
+        """Update expected cash amount at EOD"""
+        self.expected_cash_at_eod = self.float_amount + self.session_cash_sales
+    
+    def get_drawer_summary(self):
+        """Get comprehensive drawer summary"""
+        return {
+            'cashier': self.cashier.name,
+            'float_amount': float(self.float_amount),
+            'current_breakdown': {
+                'cash': float(self.current_cash),
+                'card': float(self.current_card),
+                'ecocash': float(self.current_ecocash),
+                'transfer': float(self.current_transfer),
+                'total': float(self.current_total)
+            },
+            'session_sales': {
+                'cash': float(self.session_cash_sales),
+                'card': float(self.session_card_sales),
+                'ecocash': float(self.session_ecocash_sales),
+                'transfer': float(self.session_transfer_sales),
+                'total': float(self.session_total_sales)
+            },
+            'eod_expectations': {
+                'expected_cash': float(self.expected_cash_at_eod),
+                'variance': float(self.cash_variance),
+                'efficiency': float(self.drawer_efficiency)
+            },
+            'status': self.status,
+            'last_activity': self.last_activity.isoformat() if self.last_activity else None
+        }
+    
+    def settle_at_eod(self, actual_cash_counted):
+        """Settle drawer at end of day"""
+        # Ensure amount is Decimal for consistency
+        if not isinstance(actual_cash_counted, Decimal):
+            actual_cash_counted = Decimal(str(actual_cash_counted))
+        
+        expected_cash = self.expected_cash_at_eod
+        variance = actual_cash_counted - expected_cash
+        
+        self.current_cash = actual_cash_counted
+        self.current_total = (actual_cash_counted + self.current_card + 
+                             self.current_ecocash + self.current_transfer)
+        self.status = 'SETTLED'
+        self.save()
+        
+        return {
+            'expected_cash': float(expected_cash),
+            'actual_cash': float(actual_cash_counted),
+            'variance': float(variance),
+            'variance_percentage': (float(variance) / float(expected_cash) * 100) if expected_cash > 0 else 0,
+            'settled_at': timezone.now()
+        }
+    
+    @classmethod
+    def get_active_drawer(cls, shop, cashier):
+        """Get or create active drawer for cashier"""
+        today = timezone.now().date()
+        drawer, created = cls.objects.get_or_create(
+            shop=shop,
+            cashier=cashier,
+            date=today,
+            defaults={
+                'status': 'INACTIVE',
+                'float_amount': 0
+            }
+        )
+        return drawer
+    
+    @classmethod
+    def get_shop_drawer_status(cls, shop):
+        """Get status of all drawers in shop"""
+        today = timezone.now().date()
+        drawers = cls.objects.filter(shop=shop, date=today)
+        
+        active_drawers = drawers.filter(status='ACTIVE')
+        inactive_drawers = drawers.filter(status='INACTIVE')
+        settled_drawers = drawers.filter(status='SETTLED')
+        
+        total_expected_cash = sum([d.expected_cash_at_eod for d in active_drawers])
+        total_current_cash = sum([d.current_cash for d in active_drawers])
+        
+        return {
+            'shop': shop.name,
+            'date': today.isoformat(),
+            'total_drawers': drawers.count(),
+            'active_drawers': active_drawers.count(),
+            'inactive_drawers': inactive_drawers.count(),
+            'settled_drawers': settled_drawers.count(),
+            'cash_flow': {
+                'total_expected_cash': float(total_expected_cash),
+                'total_current_cash': float(total_current_cash),
+                'variance': float(total_current_cash - total_expected_cash)
+            },
+            'drawers': [d.get_drawer_summary() for d in drawers]
+        }
+
+
+# ============================================================================
+# CASH FLOAT API VIEWS
+# ============================================================================
+
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
+
+
+@api_view(['GET', 'POST'])
+def cash_float_management(request):
+    """
+    GET: Get cash float status for current user's shop
+    POST: Set or update cash float for a cashier
+    """
+    try:
+        # Get shop from request data (owner context) or use default shop
+        if request.method == 'POST':
+            # Owner setting float - get from request data
+            shop_email = request.data.get('shop_email')
+            if shop_email:
+                try:
+                    shop = ShopConfiguration.objects.get(email=shop_email)
+                    cashier = None  # Owner operation
+                except ShopConfiguration.DoesNotExist:
+                    return Response({'error': 'Shop not found'}, status=status.HTTP_404_NOT_FOUND)
+            else:
+                shop = ShopConfiguration.objects.get()
+                cashier = None
+        else:
+            # GET request - get current shop
+            shop = ShopConfiguration.objects.get()
+            cashier = None
+        
+        if request.method == 'GET':
+            # Get drawer status for current user
+            if cashier:
+                # Cashier requesting their own drawer status
+                drawer = CashFloat.get_active_drawer(shop, cashier)
+                return Response({
+                    'success': True,
+                    'drawer': drawer.get_drawer_summary()
+                })
+            else:
+                # Owner requesting all drawers status
+                drawer_status = CashFloat.get_shop_drawer_status(shop)
+                return Response({
+                    'success': True,
+                    'shop_status': drawer_status
+                })
+        
+        elif request.method == 'POST':
+            data = request.data
+            target_cashier_id = data.get('cashier_id')
+            float_amount = data.get('float_amount')
+            
+            if not target_cashier_id or float_amount is None:
+                return Response({
+                    'error': 'cashier_id and float_amount are required'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            try:
+                target_cashier = Cashier.objects.get(id=target_cashier_id, shop=shop)
+                float_amount = float(float_amount)
+                
+                if float_amount < 0:
+                    return Response({
+                        'error': 'Float amount cannot be negative'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                
+                # Get or create drawer for target cashier
+                drawer = CashFloat.get_active_drawer(shop, target_cashier)
+                # For now, set by owner (no specific cashier)
+                drawer.set_float_amount(float_amount, None)
+                
+                return Response({
+                    'success': True,
+                    'message': f'Float of ${float_amount:.2f} set for {target_cashier.name}',
+                    'drawer': drawer.get_drawer_summary()
+                })
+                
+            except Cashier.DoesNotExist:
+                return Response({
+                    'error': 'Cashier not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+            except ValueError:
+                return Response({
+                    'error': 'Invalid float amount'
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
+    except Exception as e:
+        return Response({
+            'error': f'Server error: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def activate_cashier_drawer(request):
+    """
+    Activate a cashier's drawer (called when cashier starts their shift)
+    """
+    try:
+        data = request.data
+        cashier_id = data.get('cashier_id')
+        
+        if not cashier_id:
+            return Response({'error': 'cashier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        shop = ShopConfiguration.objects.get()
+        try:
+            cashier = Cashier.objects.get(id=cashier_id, shop=shop)
+        except Cashier.DoesNotExist:
+            return Response({'error': 'Cashier not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Get or create drawer for today
+        drawer = CashFloat.get_active_drawer(shop, cashier)
+        drawer.activate_drawer(cashier)
+        
+        return Response({
+            'success': True,
+            'message': f'Drawer activated for {cashier.name}',
+            'drawer': drawer.get_drawer_summary()
+        })
+        
+    except Exception as e:
+        return Response({
+            'error': f'Server error: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def update_drawer_sale(request):
+    """
+    Update drawer with a new sale
+    """
+    try:
+        data = request.data
+        cashier_id = data.get('cashier_id')
+        sale_amount = data.get('amount')
+        payment_method = data.get('payment_method')
+        
+        if not cashier_id or not sale_amount or not payment_method:
+            return Response({
+                'error': 'cashier_id, amount, and payment_method are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        shop = ShopConfiguration.objects.get()
+        try:
+            cashier = Cashier.objects.get(id=cashier_id, shop=shop)
+        except Cashier.DoesNotExist:
+            return Response({'error': 'Cashier not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Remove the duplicate data assignment since we already have it
+        # data = request.data  # This was moved up
+        # sale_amount = data.get('amount')  # This was moved up
+        # payment_method = data.get('payment_method')  # This was moved up
+
+        
+        valid_payment_methods = ['cash', 'card', 'ecocash', 'transfer']
+        if payment_method not in valid_payment_methods:
+            return Response({
+                'error': f'Invalid payment method. Must be one of: {", ".join(valid_payment_methods)}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            sale_amount = float(sale_amount)
+            if sale_amount <= 0:
+                return Response({
+                    'error': 'Sale amount must be positive'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Get or create active drawer
+            drawer = CashFloat.get_active_drawer(shop, cashier)
+            if drawer.status != 'ACTIVE':
+                drawer.activate_drawer(cashier)
+            
+            # Add sale to drawer
+            drawer.add_sale(sale_amount, payment_method)
+            
+            return Response({
+                'success': True,
+                'message': f'${sale_amount:.2f} {payment_method} sale recorded',
+                'drawer': drawer.get_drawer_summary()
+            })
+            
+        except ValueError:
+            return Response({
+                'error': 'Invalid sale amount'
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+    except Exception as e:
+        return Response({
+            'error': f'Server error: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def settle_drawer_at_eod(request):
+    """
+    Settle a cashier's drawer at end of day
+    """
+    try:
+        data = request.data
+        cashier_id = data.get('cashier_id')
+        actual_cash_counted = data.get('actual_cash_counted')
+        
+        if not cashier_id or actual_cash_counted is None:
+            return Response({
+                'error': 'cashier_id and actual_cash_counted are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        shop = ShopConfiguration.objects.get()
+        try:
+            cashier = Cashier.objects.get(id=cashier_id, shop=shop)
+        except Cashier.DoesNotExist:
+            return Response({'error': 'Cashier not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        try:
+            actual_cash_counted = float(actual_cash_counted)
+            
+            # Get active drawer
+            drawer = CashFloat.get_active_drawer(shop, cashier)
+            
+            # Settle drawer
+            settlement_result = drawer.settle_at_eod(actual_cash_counted)
+            
+            return Response({
+                'success': True,
+                'message': 'Drawer settled successfully',
+                'settlement': settlement_result,
+                'drawer': drawer.get_drawer_summary()
+            })
+            
+        except ValueError:
+            return Response({
+                'error': 'Invalid cash amount'
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+    except Exception as e:
+        return Response({
+            'error': f'Server error: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def get_all_cashiers_drawer_status(request):
+    """
+    Get drawer status for all cashiers in the shop (owners only)
+    """
+    try:
+        shop = ShopConfiguration.objects.get()
+        drawer_status = CashFloat.get_shop_drawer_status(shop)
+        
+        return Response({
+            'success': True,
+            'shop_status': drawer_status
+        })
+        
+    except Exception as e:
+        return Response({
+            'error': f'Server error: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

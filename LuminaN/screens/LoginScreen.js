@@ -151,10 +151,11 @@ const LoginScreen = () => {
         // Cashier login
         const response = await shopAPI.loginCashier({ name: formData.name, password: formData.password });
         
-        // Save cashier credentials
+        // Save cashier credentials - FIXED to include cashier_info with ID
         await shopStorage.saveCredentials({
           name: formData.name,
           user_type: 'cashier',
+          cashier_info: response.data.cashier_info, // This contains the ID!
           shop_info: response.data.shop_info || response.data.shop
         });
         

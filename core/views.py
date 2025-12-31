@@ -11,7 +11,7 @@ from django.db import models, IntegrityError
 from django.db.models import Sum, F
 from datetime import timedelta
 from decimal import Decimal
-from .models import ShopConfiguration, Cashier, Product, Sale, SaleItem, Customer, Discount, Shift, Expense, StaffLunch, StockTake, StockTakeItem, InventoryLog, StockTransfer, Waste
+from .models import ShopConfiguration, Cashier, Product, Sale, SaleItem, Customer, Discount, Shift, Expense, StaffLunch, StockTake, StockTakeItem, InventoryLog, StockTransfer, Waste, ShopDay
 from .serializers import ShopConfigurationSerializer, ShopLoginSerializer, ResetPasswordSerializer, CashierSerializer, CashierLoginSerializer, ProductSerializer, SaleSerializer, CreateSaleSerializer, ExpenseSerializer, StockValuationSerializer, StaffLunchSerializer, BulkProductSerializer, CustomerSerializer, DiscountSerializer, StockTakeSerializer, StockTakeItemSerializer, CreateStockTakeSerializer, AddStockTakeItemSerializer, BulkAddStockTakeItemsSerializer, CashierResetPasswordSerializer, InventoryLogSerializer, StockTransferSerializer
 from django.db import transaction
 from django.shortcuts import get_object_or_404
@@ -19,7 +19,10 @@ from django.shortcuts import get_object_or_404
 # Import waste views
 from .waste_views import WasteListView, WasteSummaryView, WasteProductSearchView
 
+@method_decorator(csrf_exempt, name='dispatch')
 class ShopStatusView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request):
         try:
             shop = ShopConfiguration.objects.get()
@@ -46,6 +49,8 @@ class ShopStatusView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ShopRegisterView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request):
         if ShopConfiguration.objects.exists():
             return Response({"error": "Shop is already registered"}, status=status.HTTP_400_BAD_REQUEST)
@@ -62,6 +67,8 @@ class ShopRegisterView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class CashierListView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request):
         shop = ShopConfiguration.objects.get()
         cashiers = Cashier.objects.filter(shop=shop)
@@ -94,6 +101,8 @@ class CashierListView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class CashierLoginView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request):
         print(f"🔍 DEBUG: Cashier login attempt with data: {request.data}")
         serializer = CashierLoginSerializer(data=request.data)
@@ -128,28 +137,78 @@ class CashierLoginView(APIView):
                     password_check = cashier.check_password(password)
                     print(f"🔍 DEBUG: Password check result: {password_check}")
                     
-                    if password_check:
-                        print(f"🔍 DEBUG: Login successful for {cashier.name}")
+                    # Check if shop is open before allowing login
+                    if not ShopDay.is_shop_open(shop):
                         return Response({
-                            "success": True,
-                            "cashier_info": {
-                                "id": cashier.id, 
-                                "name": cashier.name,
-                                "email": cashier.email,
-                                "role": cashier.role,
-                                "preferred_shift": cashier.preferred_shift,
-                                "status": cashier.status,
-                                "is_active": cashier.is_active
-                            },
-                            "shop_info": {
-                                "id": shop.id,
-                                "name": shop.name,
-                                "email": shop.email,
-                                "address": shop.address,
-                                "phone": shop.phone,
-                                "shop_id": shop.shop_id  # Add shop_id for API authentication
+                            "error": "Shop is currently closed. Please contact the shop owner to open the shop before logging in.",
+                            "shop_status": "closed",
+                            "message": "Cannot login when shop is closed"
+                        }, status=status.HTTP_403_FORBIDDEN)
+                    
+                    # On successful login: activate cashier drawer and create an active Shift if missing
+                    try:
+                        from .models import CashFloat, Shift
+                        from django.utils import timezone
+                        from decimal import Decimal
+                        today = timezone.now().date()
+
+                        # Ensure a CashFloat exists for today and activate it
+                        cf, _ = CashFloat.objects.get_or_create(
+                            shop=shop,
+                            cashier=cashier,
+                            date=today,
+                            defaults={
+                                'float_amount': Decimal('0.00'),
+                                'current_cash': Decimal('0.00'),
+                                'current_card': Decimal('0.00'),
+                                'current_ecocash': Decimal('0.00'),
+                                'current_transfer': Decimal('0.00'),
+                                'current_total': Decimal('0.00'),
+                                'session_cash_sales': Decimal('0.00'),
+                                'session_card_sales': Decimal('0.00'),
+                                'session_ecocash_sales': Decimal('0.00'),
+                                'session_transfer_sales': Decimal('0.00'),
+                                'session_total_sales': Decimal('0.00'),
+                                'expected_cash_at_eod': Decimal('0.00'),
+                                'status': 'ACTIVE'
                             }
-                        }, status=status.HTTP_200_OK)
+                        )
+                        # Mark existing cashfloat active
+                        if cf.status != 'ACTIVE':
+                            cf.status = 'ACTIVE'
+                            cf.save()
+
+                        # Create an active Shift for this cashier for today if none exists
+                        active_shift = Shift.objects.filter(shop=shop, cashier=cashier, start_time__date=today, is_active=True).first()
+                        if not active_shift:
+                            opening_balance = getattr(cf, 'float_amount', Decimal('0.00'))
+                            Shift.objects.create(cashier=cashier, shop=shop, start_time=timezone.now(), opening_balance=opening_balance, is_active=True)
+                    except Exception as _e:
+                        # Non-fatal; login should still succeed even if shift/cashfloat creation fails
+                        print(f"⚠️ Warning creating shift/cashfloat on login: {_e}")
+
+                    print(f"🔍 DEBUG: Login successful for {cashier.name}")
+                    return Response({
+                        "success": True,
+                        "cashier_info": {
+                            "id": cashier.id, 
+                            "name": cashier.name,
+                            "email": cashier.email,
+                            "role": cashier.role,
+                            "preferred_shift": cashier.preferred_shift,
+                            "status": cashier.status,
+                            "is_active": cashier.is_active
+                        },
+                        "shop_info": {
+                            "id": shop.id,
+                            "name": shop.name,
+                            "email": shop.email,
+                            "address": shop.address,
+                            "phone": shop.phone,
+                            "shop_id": shop.shop_id,  # Add shop_id for API authentication
+                            "shop_open": True  # Indicate shop is open
+                        }
+                    }, status=status.HTTP_200_OK)
 
                 print("🔍 DEBUG: Password check failed for all cashiers")
                 return Response({"error": "Invalid password"}, status=status.HTTP_401_UNAUTHORIZED)
@@ -162,6 +221,8 @@ class CashierLoginView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class CashierResetPasswordView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request):
         serializer = CashierResetPasswordSerializer(data=request.data)
         if serializer.is_valid():
@@ -199,6 +260,8 @@ class CashierResetPasswordView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class CashierDetailView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request, cashier_id):
         shop = ShopConfiguration.objects.get()
         try:
@@ -239,6 +302,8 @@ class CashierDetailView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class CashierLogoutView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request):
         cashier_id = request.data.get('cashier_id')
         if not cashier_id:
@@ -268,6 +333,8 @@ class CashierLogoutView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ProductListView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request):
         shop = ShopConfiguration.objects.get()
         products = Product.objects.filter(shop=shop)
@@ -284,6 +351,8 @@ class ProductListView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ProductDetailView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     permission_classes = [AllowAny]
 
     def patch(self, request, product_id):
@@ -367,6 +436,8 @@ class ProductDetailView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class BulkProductView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request):
         shop = ShopConfiguration.objects.get()
         category = request.query_params.get('category')
@@ -379,6 +450,8 @@ class BulkProductView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class SaleListView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request):
         shop = ShopConfiguration.objects.get()
         sales = Sale.objects.filter(shop=shop).order_by('-created_at')
@@ -386,19 +459,16 @@ class SaleListView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
-        # First get the cashier_id from request data before serializer validation
-        cashier_id = request.data.get('cashier_id')
         print(f"DEBUG: Sale request data: {request.data}")
-        print(f"DEBUG: Cashier ID from request: {cashier_id}")
-        
-        if not cashier_id:
-            return Response({"error": "Cashier ID required"}, status=status.HTTP_400_BAD_REQUEST)
         
         serializer = CreateSaleSerializer(data=request.data)
         if serializer.is_valid():
             print(f"DEBUG: Serializer validated successfully: {serializer.validated_data}")
             shop = ShopConfiguration.objects.get()
 
+            cashier_id = serializer.validated_data['cashier_id']
+            print(f"DEBUG: Cashier ID from validated data: {cashier_id}")
+            
             try:
                 cashier = Cashier.objects.get(id=cashier_id, shop=shop)
                 print(f"DEBUG: Cashier found: {cashier.name} (ID: {cashier.id})")
@@ -458,6 +528,26 @@ class SaleListView(APIView):
                 customer_name=customer_name,
                 customer_phone=customer_phone
             )
+            
+            # Log sale attribution for debugging
+            print(f"🔍 SALE ATTRIBUTION LOG: Sale #{sale.id} created")
+            print(f"   Cashier ID: {cashier.id}")
+            print(f"   Cashier Name: {cashier.name}")
+            print(f"   Amount: ${total_amount}")
+            print(f"   Payment Method: {payment_method}")
+            print(f"   Timestamp: {sale.created_at}")
+
+            # Automatically update drawer with the sale
+            try:
+                from .models import CashFloat
+                drawer = CashFloat.get_active_drawer(shop, cashier)
+                if drawer.status != 'ACTIVE':
+                    drawer.activate_drawer(cashier)
+                drawer.add_sale(total_amount, payment_method)
+                print(f"💰 DRAWER UPDATE: Added ${total_amount} {payment_method} sale to drawer")
+            except Exception as drawer_error:
+                print(f"⚠️ WARNING: Failed to update drawer: {drawer_error}")
+                # Don't fail the sale if drawer update fails
 
             # Create sale items and update stock
             for item_data in sale_items:
@@ -488,6 +578,7 @@ class SaleListView(APIView):
                     cost_price=item_data['product'].cost_price
                 )
 
+            print(f"✅ SALE COMPLETE: Sale #{sale.id} processed successfully with drawer update")
             serializer = SaleSerializer(sale)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -495,6 +586,8 @@ class SaleListView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ShopLoginView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request):
         serializer = ShopLoginSerializer(data=request.data)
         if serializer.is_valid():
@@ -522,6 +615,8 @@ class ShopLoginView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ResetPasswordView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request):
         serializer = ResetPasswordSerializer(data=request.data)
         if serializer.is_valid():
@@ -568,6 +663,8 @@ class ResetPasswordView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class CustomerListView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request):
         shop = ShopConfiguration.objects.get()
         customers = Customer.objects.filter(shop=shop)
@@ -584,6 +681,8 @@ class CustomerListView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class DiscountListView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request):
         shop = ShopConfiguration.objects.get()
         discounts = Discount.objects.filter(shop=shop)
@@ -600,6 +699,8 @@ class DiscountListView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ShiftListView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request):
         shop = ShopConfiguration.objects.get()
         shifts = Shift.objects.filter(shop=shop).order_by('-start_time')
@@ -635,6 +736,8 @@ class ShiftListView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ShiftDetailView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def patch(self, request, shift_id):
         try:
             shift = Shift.objects.get(id=shift_id)
@@ -656,6 +759,8 @@ class ShiftDetailView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class StockValuationView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request):
         shop = ShopConfiguration.objects.get()
         products = Product.objects.filter(shop=shop)
@@ -665,6 +770,8 @@ class StockValuationView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class SaleDetailView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request, sale_id):
         """Get a single sale details"""
         shop = ShopConfiguration.objects.first()
@@ -782,6 +889,8 @@ class SaleDetailView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class SaleItemDetailView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def patch(self, request, item_id):
         """Refund an individual sale item"""
         try:
@@ -842,6 +951,8 @@ class SaleItemDetailView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ExpenseListView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request):
         shop = ShopConfiguration.objects.get()
         expenses = Expense.objects.filter(shop=shop).order_by('-created_at')
@@ -875,6 +986,8 @@ class ExpenseListView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class StaffLunchListView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request):
         shop = ShopConfiguration.objects.get()
         lunches = StaffLunch.objects.filter(shop=shop).order_by('-created_at')
@@ -939,6 +1052,8 @@ class StaffLunchListView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class StockTakeListView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request):
         shop = ShopConfiguration.objects.get()
         stock_takes = StockTake.objects.filter(shop=shop).order_by('-started_at')
@@ -970,6 +1085,8 @@ class StockTakeListView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class StockTakeDetailView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request, stock_take_id):
         shop = ShopConfiguration.objects.get()
         try:
@@ -1021,6 +1138,8 @@ class StockTakeDetailView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class StockTakeItemListView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request, stock_take_id):
         shop = ShopConfiguration.objects.get()
         try:
@@ -1074,6 +1193,8 @@ class StockTakeItemListView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class BulkAddStockTakeItemsView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request, stock_take_id):
         shop = ShopConfiguration.objects.get()
         try:
@@ -1132,6 +1253,8 @@ class BulkAddStockTakeItemsView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class StockTakeProductSearchView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request, stock_take_id):
         shop = ShopConfiguration.objects.get()
         try:
@@ -1175,6 +1298,8 @@ class StockTakeProductSearchView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class OwnerDashboardView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request):
         try:
             shop = ShopConfiguration.objects.get()
@@ -1348,6 +1473,8 @@ class OwnerDashboardView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class FounderLoginView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request):
         username = request.data.get('username')
         password = request.data.get('password')
@@ -1369,6 +1496,8 @@ class FounderLoginView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class FounderShopListView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request):
         # Verify founder credentials
         username = request.data.get('username')
@@ -1405,6 +1534,8 @@ class FounderShopListView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class FounderShopDashboardView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request):
         # Verify founder credentials
         username = request.data.get('username')
@@ -1602,6 +1733,8 @@ class FounderShopDashboardView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class FounderResetShopPasswordView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request):
         # Verify founder credentials
         username = request.data.get('username')
@@ -1639,6 +1772,8 @@ class FounderResetShopPasswordView(APIView):
 class InventoryAuditTrailView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
+    permission_classes = [AllowAny]
+    authentication_classes = []
 
     def get(self, request):
         shop = ShopConfiguration.objects.get()
@@ -1666,6 +1801,8 @@ class InventoryAuditTrailView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ProductAuditHistoryView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request, product_id):
         shop = ShopConfiguration.objects.get()
         try:
@@ -1679,6 +1816,8 @@ class ProductAuditHistoryView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class CashierTopProductsView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request):
         """Get top 5 selling products for cashier dashboard"""
         try:
@@ -1720,6 +1859,8 @@ class CashierTopProductsView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class BarcodeLookupView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     permission_classes = [AllowAny]
     authentication_classes = []
     
@@ -1767,6 +1908,8 @@ class BarcodeLookupView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class SalesHistoryView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     permission_classes = [AllowAny]
     authentication_classes = []
     
@@ -1829,6 +1972,8 @@ class SalesHistoryView(APIView):
 
 class StockTransferViewSet(viewsets.ViewSet):
     """ViewSet for Stock Transfer operations"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
     
     def list(self, request):
         """List all stock transfers for the shop"""
@@ -1907,16 +2052,46 @@ class StockTransferViewSet(viewsets.ViewSet):
             
             print(f"🔍 DEBUG: StockTransfer instance created")
             
+            # Extract new product data for SPLIT operations
+            if data.get('transfer_type') == 'SPLIT' and data.get('new_product_data'):
+                # Store new product data in notes field for the model to use
+                new_product_data = data['new_product_data']
+                import json
+                data['notes'] = data.get('notes', '') + '\n' + json.dumps(new_product_data)
+                # Update transfer notes
+                transfer.notes = data['notes']
+            
             # Validate transfer
-            errors = transfer.validate_transfer()
-            print(f"🔍 DEBUG: Validation errors: {errors}")
-            if errors:
-                print(f"❌ DEBUG: Validation failed")
+            validation_result = transfer.validate_transfer()
+            print(f"🔍 DEBUG: Validation result: {validation_result}")
+            
+            # Check if there are critical errors (blocking)
+            if validation_result['errors']:
+                print(f"DEBUG: Validation errors found: {validation_result['errors']}")
                 return Response({
                     'success': False,
                     'error': 'Validation failed',
-                    'details': errors
+                    'errors': validation_result['errors'],
+                    'warnings': validation_result['warnings'],
+                    'can_proceed': False,
+                    'message': 'Transfer cannot proceed due to critical errors'
                 }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # If there are warnings but no errors, allow user to proceed with confirmation
+            if validation_result['has_warnings']:
+                print(f"DEBUG: Validation warnings found: {validation_result['warnings']}")
+                return Response({
+                    'success': False,
+                    'error': 'Validation warnings',
+                    'errors': validation_result['errors'],
+                    'warnings': validation_result['warnings'],
+                    'can_proceed': True,
+                    'requires_confirmation': True,
+                    'message': 'Transfer has warnings but can proceed with user confirmation'
+                }, status=status.HTTP_200_OK)
+            
+            # No errors or warnings - proceed directly
+            print(f"🔍 DEBUG: Validation passed, proceeding with transfer")
             
             # Find products if identifiers provided
             if transfer.from_line_code or transfer.from_barcode:
@@ -2091,3 +2266,217 @@ class StockTransferViewSet(viewsets.ViewSet):
                 'success': False,
                 'error': f'Internal server error: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# Product Splitting ViewSet
+class ProductSplittingViewSet(viewsets.ViewSet):
+    """ViewSet for Product Splitting operations"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    
+    def create_split_product(self, request):
+        """Create a new product by splitting an existing product in half"""
+        try:
+            # Get shop credentials from request headers
+            shop_id = request.META.get('HTTP_X_SHOP_ID')
+            if not shop_id:
+                return Response({'error': 'Shop ID required in X-Shop-ID header'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            shop = get_object_or_404(ShopConfiguration, shop_id=shop_id)
+            
+            # Get the source product ID from request data
+            source_product_id = request.data.get('source_product_id')
+            if not source_product_id:
+                return Response({'error': 'Source product ID required'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Get the source product
+            source_product = get_object_or_404(Product, id=source_product_id, shop=shop)
+            
+            # Generate new product data
+            new_product_data = self._generate_split_product_data(source_product)
+            
+            # Create the new product
+            new_product = Product.objects.create(
+                shop=shop,
+                name=new_product_data['name'],
+                description=new_product_data['description'],
+                price=new_product_data['price'],  # User can set this manually
+                cost_price=new_product_data['cost_price'],  # Automatically calculated
+                currency=source_product.currency,
+                price_type=source_product.price_type,
+                category=source_product.category,
+                barcode=new_product_data['barcode'],
+                line_code=new_product_data['line_code'],
+                additional_barcodes=[],
+                stock_quantity=new_product_data['stock_quantity'],  # Start with 0
+                min_stock_level=source_product.min_stock_level,
+                supplier=source_product.supplier,
+                supplier_invoice=source_product.supplier_invoice,
+                receiving_notes=f"Split from {source_product.name} (ID: {source_product.id})",
+                is_active=True
+            )
+            
+            # Serialize and return the new product
+            serializer = ProductSerializer(new_product)
+            return Response({
+                'success': True,
+                'message': f'Successfully created {new_product.name}',
+                'data': serializer.data,
+                'source_product': {
+                    'id': source_product.id,
+                    'name': source_product.name,
+                    'cost_price': float(source_product.cost_price)
+                },
+                'split_product': {
+                    'id': new_product.id,
+                    'name': new_product.name,
+                    'cost_price': float(new_product.cost_price),
+                    'auto_calculated': True
+                }
+            }, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': f'Failed to create split product: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _generate_split_product_data(self, source_product):
+        """Generate data for the new split product"""
+        # Generate new name
+        source_name = source_product.name
+        
+        # Common splitting patterns
+        split_patterns = [
+            ('full', 'half'),
+            ('whole', 'half'),
+            ('large', 'small'),
+            ('regular', 'small'),
+            ('standard', 'mini'),
+            ('classic', 'mini'),
+            ('normal', 'small'),
+            ('big', 'small'),
+            ('xl', 'regular'),
+            ('medium', 'small')
+        ]
+        
+        # Try to create a logical half product name
+        new_name = None
+        for full_word, half_word in split_patterns:
+            if full_word.lower() in source_name.lower():
+                new_name = source_name.lower().replace(full_word.lower(), half_word)
+                break
+        
+        # If no pattern matches, just add "Half" prefix
+        if not new_name:
+            if source_name.lower().startswith('half'):
+                new_name = f"Quarter {source_name[5:]}"  # If already half, make quarter
+            else:
+                new_name = f"Half {source_name}"
+        
+        # Capitalize properly
+        new_name = ' '.join(word.capitalize() for word in new_name.split())
+        
+        # Generate new barcode and line code
+        new_barcode = f"{source_product.barcode or source_product.line_code}H"
+        new_line_code = f"{source_product.line_code}H"
+        
+        # Calculate cost price (automatically - this is the key feature!)
+        original_cost_price = float(source_product.cost_price or 0)
+        new_cost_price = original_cost_price / 2  # Half the cost price
+        
+        return {
+            'name': new_name,
+            'description': f"Split from {source_product.name}. Automatically calculated cost price.",
+            'price': source_product.price / 2,  # Start with half the selling price too
+            'cost_price': new_cost_price,  # Automatically calculated
+            'barcode': new_barcode,
+            'line_code': new_line_code,
+            'stock_quantity': 0  # New product starts with 0 stock
+        }
+    
+    @action(detail=False, methods=['post'])
+    def validate_split(self, request):
+        """Validate if a product can be split"""
+        try:
+            shop_id = request.META.get('HTTP_X_SHOP_ID')
+            if not shop_id:
+                return Response({'error': 'Shop ID required in X-Shop-ID header'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            shop = get_object_or_404(ShopConfiguration, shop_id=shop_id)
+            
+            source_product_id = request.data.get('source_product_id')
+            if not source_product_id:
+                return Response({'error': 'Source product ID required'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            source_product = get_object_or_404(Product, id=source_product_id, shop=shop)
+            
+            # Validation checks
+            validation_result = self._validate_split_possibility(source_product)
+            
+            # Generate preview of what the new product would look like
+            new_product_data = self._generate_split_product_data(source_product)
+            
+            return Response({
+                'success': True,
+                'can_split': validation_result['can_split'],
+                'validation_errors': validation_result['errors'],
+                'warnings': validation_result['warnings'],
+                'preview': {
+                    'source_product': {
+                        'id': source_product.id,
+                        'name': source_product.name,
+                        'cost_price': float(source_product.cost_price),
+                        'price': float(source_product.price),
+                        'stock_quantity': float(source_product.stock_quantity)
+                    },
+                    'new_product': {
+                        'name': new_product_data['name'],
+                        'cost_price': new_product_data['cost_price'],
+                        'price': new_product_data['price'],
+                        'line_code': new_product_data['line_code'],
+                        'barcode': new_product_data['barcode']
+                    }
+                }
+            })
+            
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': f'Validation failed: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _validate_split_possibility(self, source_product):
+        """Validate if a product can be split"""
+        errors = []
+        warnings = []
+        can_split = True
+        
+        # Check if product has cost price
+        if float(source_product.cost_price or 0) <= 0:
+            warnings.append("Source product has $0.00 cost price. Split product will also have $0.00 cost price.")
+        
+        # Check if product is active
+        if not source_product.is_active:
+            errors.append("Source product is not active.")
+            can_split = False
+        
+        # Check if product has stock
+        if float(source_product.stock_quantity or 0) <= 0:
+            warnings.append("Source product has no stock. Split product will start with 0 stock.")
+        
+        # Check for duplicate names (basic check)
+        existing_half_products = Product.objects.filter(
+            shop=source_product.shop,
+            name__icontains='half',
+            category=source_product.category
+        ).exclude(id=source_product.id)
+        
+        if existing_half_products.exists():
+            warnings.append(f"Found {existing_half_products.count()} existing 'half' products in the same category.")
+        
+        return {
+            'can_split': can_split,
+            'errors': errors,
+            'warnings': warnings
+        }

@@ -1,18 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  Alert,
-  ActivityIndicator,
-  RefreshControl,
-} from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, Alert, ActivityIndicator, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { shopAPI } from '../services/api';
-import { shopStorage } from '../services/storage';
-import { ROUTES } from '../constants/navigation';
+import shopAPI from '../services/api';
+import shopStorage from '../services/storage';
 
 const StaffManagementSimple = () => {
   const navigation = useNavigation();
@@ -22,38 +12,29 @@ const StaffManagementSimple = () => {
   const [shopCredentials, setShopCredentials] = useState(null);
 
   useEffect(() => {
-    loadShopCredentials();
+    loadCredentials();
   }, []);
 
-  const loadShopCredentials = async () => {
+  const loadCredentials = async () => {
     try {
       const credentials = await shopStorage.getCredentials();
-      if (!credentials) {
-        navigation.replace(ROUTES.LOGIN);
-        return;
-      }
       setShopCredentials(credentials);
       loadStaffData();
     } catch (error) {
       console.error('Error loading credentials:', error);
-      navigation.replace(ROUTES.LOGIN);
+      setLoading(false);
     }
   };
 
   const loadStaffData = async () => {
     try {
-      setLoading(true);
-      const authData = {
-        email: shopCredentials.email,
-        password: shopCredentials.shop_owner_master_password
-      };
-      
-      const pendingResponse = await shopAPI.getPendingStaff(authData);
+      // NO AUTHENTICATION REQUIRED - Public access
+      const pendingResponse = await shopAPI.getPendingStaff({});
       setPendingStaff(pendingResponse.data?.staff || []);
-      
-      const approvedResponse = await shopAPI.getApprovedStaff(authData);
+
+      const approvedResponse = await shopAPI.getApprovedStaff({});
       setApprovedStaff(approvedResponse.data?.staff || []);
-      
+
     } catch (error) {
       console.error('Error loading staff data:', error);
       Alert.alert('Error', 'Failed to load staff data.');
@@ -63,14 +44,13 @@ const StaffManagementSimple = () => {
   };
 
   const handleApprove = (staffId, role) => {
-    console.log('✅ Approve button clicked:', { staffId, role });
     Alert.alert(
       'Confirm Action',
       `Approve this staff member as ${role}?`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Yes, Approve', 
+        {
+          text: 'Yes, Approve',
           onPress: () => executeApprove(staffId, role)
         }
       ]
@@ -79,46 +59,40 @@ const StaffManagementSimple = () => {
 
   const executeApprove = async (staffId, role) => {
     try {
-      console.log('🚀 Executing approval...');
-      
       const authData = {
-        email: shopCredentials.email,
-        password: shopCredentials.shop_owner_master_password,
         staff_id: staffId,
         role: role
       };
-      
+
       const response = await shopAPI.approveStaff(authData);
       console.log('✅ Approval successful:', response.data);
-      
+
       // Update local state
       const staffMember = pendingStaff.find(s => s.id === staffId);
       if (staffMember) {
         setPendingStaff(prev => prev.filter(s => s.id !== staffId));
         setApprovedStaff(prev => [...prev, { ...staffMember, role, status: 'approved' }]);
       }
-      
+
       Alert.alert('✅ Success!', `Staff member approved as ${role}`);
-      
+
     } catch (error) {
       console.error('❌ Approval failed:', error);
-      Alert.alert('❌ Error', `Approval failed: ${error.message}`);
+      Alert.alert('Error', 'Failed to approve staff member.');
     }
   };
 
   const handleReject = (staffId) => {
-    console.log('❌ Reject button clicked:', staffId);
-    
     const staffMember = pendingStaff.find(s => s.id === staffId);
     const staffName = staffMember?.name || 'Staff member';
-    
+
     Alert.alert(
       'Confirm Rejection',
       `Are you sure you want to reject ${staffName}?`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Yes, Reject', 
+        {
+          text: 'Yes, Reject',
           style: 'destructive',
           onPress: () => executeReject(staffId)
         }
@@ -128,23 +102,19 @@ const StaffManagementSimple = () => {
 
   const executeReject = async (staffId) => {
     try {
-      console.log('🚀 Executing rejection...');
-      
       const authData = {
-        email: shopCredentials.email,
-        password: shopCredentials.shop_owner_master_password,
         staff_id: staffId
       };
-      
+
       const response = await shopAPI.rejectStaff(authData);
       console.log('✅ Rejection successful:', response.data);
-      
+
       setPendingStaff(prev => prev.filter(s => s.id !== staffId));
       Alert.alert('✅ Rejected', 'Staff member has been rejected.');
-      
+
     } catch (error) {
       console.error('❌ Rejection failed:', error);
-      Alert.alert('❌ Error', `Rejection failed: ${error.message}`);
+      Alert.alert('Error', 'Failed to reject staff member.');
     }
   };
 
@@ -168,7 +138,6 @@ const StaffManagementSimple = () => {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Text style={styles.backButton}>← Back</Text>
@@ -179,12 +148,9 @@ const StaffManagementSimple = () => {
         </TouchableOpacity>
       </View>
 
-      {/* Status Info */}
-      <View style={styles.statusBar}>
-        <Text style={styles.statusText}>
-          {`Pending: ${pendingStaff.length} | Approved: ${approvedStaff.length}`}
-        </Text>
-      </View>
+      <Text style={styles.statusText}>
+        {`Pending: ${pendingStaff.length} | Approved: ${approvedStaff.length}`}
+      </Text>
 
       <ScrollView style={styles.content}>
         {pendingStaff.length > 0 ? (
@@ -198,16 +164,14 @@ const StaffManagementSimple = () => {
                   <Text style={styles.staffPhone}>{staff.phone}</Text>
                   <Text style={styles.staffShift}>Shift: {staff.shift}</Text>
                 </View>
-                
                 <View style={styles.actionContainer}>
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={styles.approveButton}
                     onPress={() => handleApprove(staff.id, 'cashier')}
                   >
                     <Text style={styles.approveButtonText}>✅ Approve</Text>
                   </TouchableOpacity>
-                  
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={styles.rejectButton}
                     onPress={() => handleReject(staff.id)}
                   >
@@ -242,26 +206,68 @@ const StaffManagementSimple = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
+  container: {
+    flex: 1,
+    backgroundColor: '#0a0a0a',
+  },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
     padding: 16,
+    backgroundColor: '#1a1a1a',
     borderBottomWidth: 1,
     borderBottomColor: '#333',
   },
-  backButton: { color: '#3b82f6', fontSize: 16 },
-  refreshButton: { color: '#3b82f6', fontSize: 14 },
-  headerTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  headerSpacer: { width: 60 },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText: { color: '#fff', marginTop: 16 },
-  statusBar: { backgroundColor: '#1a1a1a', padding: 12 },
-  statusText: { color: '#ccc', textAlign: 'center', fontSize: 14 },
-  content: { flex: 1, padding: 16 },
-  section: { marginBottom: 20 },
-  sectionTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginBottom: 12 },
+  headerTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  backButton: {
+    color: '#3b82f6',
+    fontSize: 16,
+  },
+  refreshButton: {
+    color: '#10b981',
+    fontSize: 14,
+  },
+  headerSpacer: {
+    width: 50,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#ccc',
+    fontSize: 16,
+    marginTop: 12,
+  },
+  content: {
+    flex: 1,
+    padding: 16,
+  },
+  statusText: {
+    color: '#ccc',
+    fontSize: 14,
+    textAlign: 'center',
+    padding: 12,
+    backgroundColor: '#1a1a1a',
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 8,
+  },
+  section: {
+    marginBottom: 24,
+  },
+  sectionTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
   staffCard: {
     backgroundColor: '#1a1a1a',
     borderRadius: 12,
@@ -271,41 +277,88 @@ const styles = StyleSheet.create({
     borderColor: '#333',
   },
   approvedCard: {
-    backgroundColor: '#0a2e1a',
+    backgroundColor: '#1a1a1a',
     borderRadius: 12,
-    padding: 12,
-    marginBottom: 8,
+    padding: 16,
+    marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#1e4d2b',
+    borderColor: '#10b981',
   },
-  staffInfo: { flex: 1, marginBottom: 12 },
-  staffName: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginBottom: 4 },
-  staffEmail: { color: '#ccc', fontSize: 14, marginBottom: 2 },
-  staffPhone: { color: '#ccc', fontSize: 14, marginBottom: 2 },
-  staffShift: { color: '#ccc', fontSize: 14, marginBottom: 8 },
-  staffRole: { color: '#10b981', fontSize: 14, fontWeight: 'bold' },
-  actionContainer: { flexDirection: 'row', gap: 12 },
+  staffInfo: {
+    flex: 1,
+    marginBottom: 12,
+  },
+  staffName: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  staffEmail: {
+    color: '#ccc',
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  staffPhone: {
+    color: '#ccc',
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  staffShift: {
+    color: '#ccc',
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  staffRole: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  actionContainer: {
+    flexDirection: 'row',
+    gap: 12,
+  },
   approveButton: {
     backgroundColor: '#10b981',
-    paddingVertical: 10,
     paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 8,
     flex: 1,
-    alignItems: 'center',
   },
   rejectButton: {
     backgroundColor: '#ef4444',
-    paddingVertical: 10,
     paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 8,
     flex: 1,
-    alignItems: 'center',
   },
-  approveButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
-  rejectButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
-  emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 60 },
-  emptyTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
-  emptyText: { color: '#666', textAlign: 'center' },
+  approveButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  rejectButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 48,
+  },
+  emptyTitle: {
+    color: '#10b981',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  emptyText: {
+    color: '#666',
+    fontSize: 14,
+    textAlign: 'center',
+  },
 });
 
 export default StaffManagementSimple;

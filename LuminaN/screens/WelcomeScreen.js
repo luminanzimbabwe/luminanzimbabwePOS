@@ -188,10 +188,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.1)',
     padding: 24,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 20 },
-    shadowOpacity: 0.5,
-    shadowRadius: 40,
+    boxShadow: '0px 20px 40px rgba(0, 0, 0, 0.5)',
     elevation: 20,
   },
   logoContainer: {

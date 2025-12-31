@@ -533,9 +533,20 @@ const InventoryReceivingScreen = () => {
         <Text style={styles.backButton}>← Back to Restock</Text>
       </TouchableOpacity>
       <Text style={styles.headerTitle}>📦 Batch Receiving</Text>
-      <TouchableOpacity onPress={() => setShowReceivingHistory(true)}>
-        <Text style={styles.historyButton}>📋 History</Text>
-      </TouchableOpacity>
+      <View style={styles.headerButtons}>
+        <TouchableOpacity 
+          style={styles.refreshButton} 
+          onPress={onRefresh}
+          disabled={refreshing}
+        >
+          <Text style={styles.refreshButtonText}>
+            {refreshing ? '⏳' : '🔄 Refresh'}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setShowReceivingHistory(true)}>
+          <Text style={styles.historyButton}>📋 History</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 
@@ -1229,28 +1240,30 @@ const InventoryReceivingScreen = () => {
   }
 
   return (
-    <ScrollView 
-      style={[styles.container, Platform.OS === 'web' && styles.webContainer]}
-      contentContainerStyle={styles.scrollContentContainer}
-      showsVerticalScrollIndicator={true}
-      scrollEventThrottle={16}
-      nestedScrollEnabled={Platform.OS === 'web'}
-      removeClippedSubviews={false}
-      onScroll={(event) => {
-        if (Platform.OS === 'web') {
-          const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-          const isAtBottom = contentOffset.y >= (contentSize.height - layoutMeasurement.height - 10);
+    <View style={[styles.container, Platform.OS === 'web' && styles.webContainer]}>
+      {renderHeader()}
+      <ScrollView 
+        style={styles.scrollContainer}
+        contentContainerStyle={styles.scrollContentContainer}
+        showsVerticalScrollIndicator={true}
+        scrollEventThrottle={16}
+        nestedScrollEnabled={Platform.OS === 'web'}
+        removeClippedSubviews={false}
+        onScroll={(event) => {
+          if (Platform.OS === 'web') {
+            const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+            const isAtBottom = contentOffset.y >= (contentSize.height - layoutMeasurement.height - 10);
+          }
+        }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#06b6d4']}
+            tintColor="#06b6d4"
+          />
         }
-      }}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-          colors={['#06b6d4']}
-          tintColor="#06b6d4"
-        />
-      }
-    >
+      >
       {renderReceivingForm()}
       {renderReceivingItems()}
       {renderReceivingDetails()}
@@ -1269,7 +1282,8 @@ const InventoryReceivingScreen = () => {
       {renderBarcodeScannerModal()}
       {renderReceivingReportsModal()}
       {renderSuccessModal()}
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 };
 
@@ -1308,6 +1322,9 @@ const styles = StyleSheet.create({
       },
     }),
   },
+  scrollContainer: {
+    flex: 1,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1326,6 +1343,22 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  refreshButton: {
+    backgroundColor: '#3b82f6',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  refreshButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
   },
   historyButton: {
     color: '#10b981',

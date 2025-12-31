@@ -36,6 +36,7 @@ class StockTransferViewSet(viewsets.ViewSet):
     
     def create(self, request):
         """Create a new stock transfer"""
+        print("DEBUG: StockTransferViewSet.create called")
         try:
             # Get shop credentials from request
             shop_id = request.headers.get('X-Shop-ID')
@@ -44,15 +45,29 @@ class StockTransferViewSet(viewsets.ViewSet):
             
             shop = get_object_or_404(ShopConfiguration, shop_id=shop_id)
             
-            # Get cashier from request
+            # Get cashier from request (optional for shop owners)
             cashier_id = request.headers.get('X-Cashier-ID')
-            if not cashier_id:
-                return Response({'error': 'Cashier ID required'}, status=status.HTTP_400_BAD_REQUEST)
+            cashier = None
             
-            cashier = get_object_or_404(Cashier, id=cashier_id, shop=shop)
+            if cashier_id:
+                # If cashier ID is provided, validate it
+                cashier = get_object_or_404(Cashier, id=cashier_id, shop=shop)
+            elif not cashier_id:
+                # For shop owners (no cashier ID), we can proceed without cashier validation
+                # This allows shop owners to perform stock transfers
+                pass
+            else:
+                return Response({'error': 'Invalid cashier ID'}, status=status.HTTP_400_BAD_REQUEST)
             
             # Extract transfer data from request
             data = request.data.copy()
+            
+            # Extract new product data for SPLIT operations
+            if data.get('transfer_type') == 'SPLIT' and data.get('new_product_data'):
+                # Store new product data in notes field for the model to use
+                new_product_data = data['new_product_data']
+                import json
+                data['notes'] = data.get('notes', '') + '\n' + json.dumps(new_product_data)
             
             # Create transfer instance
             transfer = StockTransfer(
@@ -65,18 +80,56 @@ class StockTransferViewSet(viewsets.ViewSet):
                 to_barcode=data.get('to_barcode', ''),
                 to_quantity=float(data.get('to_quantity', 0)),
                 reason=data.get('reason', ''),
-                performed_by=cashier,
+                performed_by=cashier,  # Can be None for shop owners
                 notes=data.get('notes', '')
             )
             
             # Validate transfer
-            errors = transfer.validate_transfer()
-            if errors:
+            validation_result = transfer.validate_transfer()
+            
+            # Check if there are critical errors (blocking)
+            if validation_result['errors']:
+                print(f"DEBUG: Validation errors found: {validation_result['errors']}")
                 return Response({
                     'success': False,
                     'error': 'Validation failed',
-                    'details': errors
+                    'errors': validation_result['errors'],
+                    'warnings': validation_result['warnings'],
+                    'can_proceed': False,
+                    'message': 'Transfer cannot proceed due to critical errors'
                 }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # If there are warnings but no errors, allow user to proceed with confirmation
+            if validation_result['has_warnings']:
+                print(f"DEBUG: Validation warnings found: {validation_result['warnings']}")
+                return Response({
+                    'success': False,
+                    'error': 'Validation warnings',
+                    'errors': validation_result['errors'],
+                    'warnings': validation_result['warnings'],
+                    'can_proceed': True,
+                    'requires_confirmation': True,
+                    'message': 'Transfer has warnings but can proceed with user confirmation'
+                }, status=status.HTTP_200_OK)
+            
+            # No errors or warnings - proceed directly
+            if not validation_result['has_warnings']:
+                # Process the transfer directly
+                success, messages = transfer.process_transfer()
+                
+                if success:
+                    serializer = StockTransferSerializer(transfer)
+                    return Response({
+                        'success': True,
+                        'message': 'Stock transfer completed successfully',
+                        'data': serializer.data
+                    }, status=status.HTTP_201_CREATED)
+                else:
+                    return Response({
+                        'success': False,
+                        'error': 'Transfer failed',
+                        'details': messages
+                    }, status=status.HTTP_400_BAD_REQUEST)
             
             # Find products if identifiers provided
             if transfer.from_line_code or transfer.from_barcode:
@@ -206,16 +259,19 @@ class StockTransferViewSet(viewsets.ViewSet):
                 identifier = transfer.to_line_code or transfer.to_barcode
                 transfer.to_product = transfer._find_product_by_identifier(identifier)
             
-            # Validate transfer
-            errors = transfer.validate_transfer()
+            # Validate transfer using new format
+            validation_result = transfer.validate_transfer()
             
             # Calculate conversion ratio
             conversion_ratio = transfer.calculate_conversion_ratio()
             
             return Response({
                 'success': True,
-                'is_valid': len(errors) == 0,
-                'errors': errors,
+                'is_valid': len(validation_result['errors']) == 0,
+                'can_proceed': validation_result['can_proceed'],
+                'requires_confirmation': validation_result['has_warnings'],
+                'errors': validation_result['errors'],
+                'warnings': validation_result['warnings'],
                 'conversion_ratio': float(conversion_ratio),
                 'from_product_info': {
                     'name': transfer.from_product.name if transfer.from_product else 'Not found',
@@ -231,6 +287,101 @@ class StockTransferViewSet(viewsets.ViewSet):
                 } if transfer.to_product or transfer.to_line_code or transfer.to_barcode else None
             })
             
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': f'Internal server error: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=False, methods=['post'])
+    def confirm_transfer(self, request):
+        """Confirm and execute a transfer that has warnings"""
+        try:
+            # Get shop credentials from request
+            shop_id = request.headers.get('X-Shop-ID')
+            if not shop_id:
+                return Response({'error': 'Shop ID required'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            shop = get_object_or_404(ShopConfiguration, shop_id=shop_id)
+            
+            # Get cashier from request (optional for shop owners)
+            cashier_id = request.headers.get('X-Cashier-ID')
+            cashier = None
+            
+            if cashier_id:
+                # If cashier ID is provided, validate it
+                cashier = get_object_or_404(Cashier, id=cashier_id, shop=shop)
+            elif not cashier_id:
+                # For shop owners (no cashier ID), we can proceed without cashier validation
+                # This allows shop owners to perform stock transfers
+                pass
+            else:
+                return Response({'error': 'Invalid cashier ID'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Extract transfer data from request
+            data = request.data.copy()
+            
+            # Extract new product data for SPLIT operations
+            if data.get('transfer_type') == 'SPLIT' and data.get('new_product_data'):
+                # Store new product data in notes field for the model to use
+                new_product_data = data['new_product_data']
+                import json
+                data['notes'] = data.get('notes', '') + '\n' + json.dumps(new_product_data)
+            
+            # Create transfer instance
+            transfer = StockTransfer(
+                shop=shop,
+                transfer_type=data.get('transfer_type', 'CONVERSION'),
+                from_line_code=data.get('from_line_code', ''),
+                from_barcode=data.get('from_barcode', ''),
+                from_quantity=float(data.get('from_quantity', 0)),
+                to_line_code=data.get('to_line_code', ''),
+                to_barcode=data.get('to_barcode', ''),
+                to_quantity=float(data.get('to_quantity', 0)),
+                reason=data.get('reason', ''),
+                performed_by=cashier,  # Can be None for shop owners
+                notes=data.get('notes', '') + ' [CONFIRMED WITH WARNINGS]'
+            )
+            
+            # Find products if identifiers provided
+            if transfer.from_line_code or transfer.from_barcode:
+                identifier = transfer.from_line_code or transfer.from_barcode
+                transfer.from_product = transfer._find_product_by_identifier(identifier)
+            
+            if transfer.to_line_code or transfer.to_barcode:
+                identifier = transfer.to_line_code or transfer.to_barcode
+                transfer.to_product = transfer._find_product_by_identifier(identifier)
+            
+            # Validate transfer first
+            validation_result = transfer.validate_transfer()
+            
+            # Only proceed if there are no critical errors
+            if validation_result['errors']:
+                return Response({
+                    'success': False,
+                    'error': 'Transfer has critical errors and cannot proceed',
+                    'errors': validation_result['errors'],
+                    'warnings': validation_result['warnings']
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Process the transfer (user has confirmed despite warnings)
+            success, messages = transfer.process_transfer()
+            
+            if success:
+                serializer = StockTransferSerializer(transfer)
+                return Response({
+                    'success': True,
+                    'message': 'Stock transfer completed successfully (confirmed with warnings)',
+                    'data': serializer.data,
+                    'warnings': validation_result['warnings']
+                }, status=status.HTTP_201_CREATED)
+            else:
+                return Response({
+                    'success': False,
+                    'error': 'Transfer failed',
+                    'details': messages
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
         except Exception as e:
             return Response({
                 'success': False,

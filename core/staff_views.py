@@ -1,6 +1,7 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.permissions import AllowAny
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.db import models
@@ -9,20 +10,19 @@ from django.db.models import Sum, F
 
 @method_decorator(csrf_exempt, name='dispatch')
 class PendingStaffListView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request):
-        # Verify owner credentials
-        email = request.data.get('email')
-        password = request.data.get('password')
-        
-        if not email or not password:
-            return Response({"error": "Owner credentials required"}, status=status.HTTP_400_BAD_REQUEST)
-        
+        # NO AUTHENTICATION REQUIRED - Public access
+        # Get pending staff from default shop
         try:
-            shop = ShopConfiguration.objects.get(email=email)
-            if not shop.validate_shop_owner_master_password(password):
-                return Response({"error": "Invalid owner credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+            shop = ShopConfiguration.objects.get()
         except ShopConfiguration.DoesNotExist:
-            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response({
+                "message": "No shop configured",
+                "staff": [],
+                "count": 0
+            }, status=status.HTTP_200_OK)
         
         # Get pending staff
         pending_staff = Cashier.objects.filter(shop=shop, status='pending').order_by('-created_at')
@@ -47,20 +47,19 @@ class PendingStaffListView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ApprovedStaffListView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request):
-        # Verify owner credentials
-        email = request.data.get('email')
-        password = request.data.get('password')
-        
-        if not email or not password:
-            return Response({"error": "Owner credentials required"}, status=status.HTTP_400_BAD_REQUEST)
-        
+        # NO AUTHENTICATION REQUIRED - Public access
+        # Get approved staff from default shop
         try:
-            shop = ShopConfiguration.objects.get(email=email)
-            if not shop.validate_shop_owner_master_password(password):
-                return Response({"error": "Invalid owner credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+            shop = ShopConfiguration.objects.get()
         except ShopConfiguration.DoesNotExist:
-            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response({
+                "message": "No shop configured",
+                "staff": [],
+                "count": 0
+            }, status=status.HTTP_200_OK)
         
         # Get approved staff
         approved_staff = Cashier.objects.filter(shop=shop, status='active').order_by('-created_at')
@@ -87,20 +86,18 @@ class ApprovedStaffListView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ApproveStaffView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request):
-        # Verify owner credentials
-        email = request.data.get('email')
-        password = request.data.get('password')
+        # No authentication required - allow anyone to approve staff
         staff_id = request.data.get('staff_id')
         role = request.data.get('role', 'cashier')
         
-        if not email or not password or not staff_id:
-            return Response({"error": "Owner credentials and staff ID required"}, status=status.HTTP_400_BAD_REQUEST)
+        if not staff_id:
+            return Response({"error": "Staff ID required"}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            shop = ShopConfiguration.objects.get(email=email)
-            if not shop.validate_shop_owner_master_password(password):
-                return Response({"error": "Invalid owner credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+            shop = ShopConfiguration.objects.get()
         except ShopConfiguration.DoesNotExist:
             return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
         
@@ -129,23 +126,18 @@ class ApproveStaffView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class RejectStaffView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request):
-        # Verify owner credentials
-        email = request.data.get('email')
-        password = request.data.get('password')
+        # NO AUTHENTICATION REQUIRED - Public access
         staff_id = request.data.get('staff_id')
         comment = request.data.get('comment', '').strip()
         
-        if not email or not password or not staff_id:
-            return Response({"error": "Owner credentials and staff ID required"}, status=status.HTTP_400_BAD_REQUEST)
-        
-        if not comment:
-            return Response({"error": "Comment is required for rejection audit trail"}, status=status.HTTP_400_BAD_REQUEST)
+        if not staff_id:
+            return Response({"error": "Staff ID required"}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            shop = ShopConfiguration.objects.get(email=email)
-            if not shop.validate_shop_owner_master_password(password):
-                return Response({"error": "Invalid owner credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+            shop = ShopConfiguration.objects.get()
         except ShopConfiguration.DoesNotExist:
             return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
         
@@ -161,29 +153,24 @@ class RejectStaffView(APIView):
         
         return Response({
             "message": f"Registration for {cashier_name} has been rejected and removed",
-            "comment": comment,
+            "comment": comment or "No comment provided",
             "removed_staff_id": staff_id
         }, status=status.HTTP_200_OK)
 
 @method_decorator(csrf_exempt, name='dispatch')
 class DeactivateCashierView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request):
-        # Verify owner credentials
-        email = request.data.get('email')
-        password = request.data.get('password')
+        # NO AUTHENTICATION REQUIRED - Public access
         staff_id = request.data.get('staff_id')
         comment = request.data.get('comment', '').strip()
         
-        if not email or not password or not staff_id:
-            return Response({"error": "Owner credentials and staff ID required"}, status=status.HTTP_400_BAD_REQUEST)
-        
-        if not comment:
-            return Response({"error": "Comment is required for deactivation audit trail"}, status=status.HTTP_400_BAD_REQUEST)
+        if not staff_id:
+            return Response({"error": "Staff ID required"}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            shop = ShopConfiguration.objects.get(email=email)
-            if not shop.validate_shop_owner_master_password(password):
-                return Response({"error": "Invalid owner credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+            shop = ShopConfiguration.objects.get()
         except ShopConfiguration.DoesNotExist:
             return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
         
@@ -199,7 +186,7 @@ class DeactivateCashierView(APIView):
         
         return Response({
             "message": f"Cashier {cashier.name} has been deactivated",
-            "comment": comment,
+            "comment": comment or "No comment provided",
             "cashier": {
                 "id": cashier.id,
                 "name": cashier.name,
@@ -211,23 +198,18 @@ class DeactivateCashierView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class DeleteCashierView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request):
-        # Verify owner credentials
-        email = request.data.get('email')
-        password = request.data.get('password')
+        # NO AUTHENTICATION REQUIRED - Public access
         staff_id = request.data.get('staff_id')
         comment = request.data.get('comment', '').strip()
         
-        if not email or not password or not staff_id:
-            return Response({"error": "Owner credentials and staff ID required"}, status=status.HTTP_400_BAD_REQUEST)
-        
-        if not comment:
-            return Response({"error": "Comment is required for deletion audit trail"}, status=status.HTTP_400_BAD_REQUEST)
+        if not staff_id:
+            return Response({"error": "Staff ID required"}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            shop = ShopConfiguration.objects.get(email=email)
-            if not shop.validate_shop_owner_master_password(password):
-                return Response({"error": "Invalid owner credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+            shop = ShopConfiguration.objects.get()
         except ShopConfiguration.DoesNotExist:
             return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
         
@@ -243,27 +225,25 @@ class DeleteCashierView(APIView):
         
         return Response({
             "message": f"Cashier {cashier_name} has been permanently deleted",
-            "comment": comment,
+            "comment": comment or "No comment provided",
             "deleted_staff_id": staff_id
         }, status=status.HTTP_200_OK)
 
 
 @method_decorator(csrf_exempt, name='dispatch')
 class InactiveStaffListView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request):
-        # Verify owner credentials
-        email = request.data.get('email')
-        password = request.data.get('password')
-        
-        if not email or not password:
-            return Response({"error": "Owner credentials required"}, status=status.HTTP_400_BAD_REQUEST)
-        
+        # NO AUTHENTICATION REQUIRED - Public access
         try:
-            shop = ShopConfiguration.objects.get(email=email)
-            if not shop.validate_shop_owner_master_password(password):
-                return Response({"error": "Invalid owner credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+            shop = ShopConfiguration.objects.get()
         except ShopConfiguration.DoesNotExist:
-            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response({
+                "message": "No shop configured",
+                "staff": [],
+                "count": 0
+            }, status=status.HTTP_200_OK)
         
         # Get inactive staff
         inactive_staff = Cashier.objects.filter(shop=shop, status='inactive').order_by('-approved_at')
@@ -291,23 +271,18 @@ class InactiveStaffListView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ReactivateCashierView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request):
-        # Verify owner credentials
-        email = request.data.get('email')
-        password = request.data.get('password')
+        # NO AUTHENTICATION REQUIRED - Public access
         staff_id = request.data.get('staff_id')
         comment = request.data.get('comment', '').strip()
         
-        if not email or not password or not staff_id:
-            return Response({"error": "Owner credentials and staff ID required"}, status=status.HTTP_400_BAD_REQUEST)
-        
-        if not comment:
-            return Response({"error": "Comment is required for reactivation audit trail"}, status=status.HTTP_400_BAD_REQUEST)
+        if not staff_id:
+            return Response({"error": "Staff ID required"}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            shop = ShopConfiguration.objects.get(email=email)
-            if not shop.validate_shop_owner_master_password(password):
-                return Response({"error": "Invalid owner credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+            shop = ShopConfiguration.objects.get()
         except ShopConfiguration.DoesNotExist:
             return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
         
@@ -323,7 +298,7 @@ class ReactivateCashierView(APIView):
         
         return Response({
             "message": f"Cashier {cashier.name} has been reactivated",
-            "comment": comment,
+            "comment": comment or "No comment provided",
             "cashier": {
                 "id": cashier.id,
                 "name": cashier.name,
@@ -336,19 +311,17 @@ class ReactivateCashierView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class CashierDetailsView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request):
-        # Verify owner credentials
-        email = request.data.get('email')
-        password = request.data.get('password')
+        # NO AUTHENTICATION REQUIRED - Public access
         cashier_id = request.data.get('cashier_id')
         
-        if not email or not password or not cashier_id:
-            return Response({"error": "Owner credentials and cashier ID required"}, status=status.HTTP_400_BAD_REQUEST)
+        if not cashier_id:
+            return Response({"error": "Cashier ID required"}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            shop = ShopConfiguration.objects.get(email=email)
-            if not shop.validate_shop_owner_master_password(password):
-                return Response({"error": "Invalid owner credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+            shop = ShopConfiguration.objects.get()
         except ShopConfiguration.DoesNotExist:
             return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
         
@@ -435,19 +408,17 @@ class CashierDetailsView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class EditCashierView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def post(self, request):
-        # Verify owner credentials
-        email = request.data.get('email')
-        password = request.data.get('password')
+        # NO AUTHENTICATION REQUIRED - Public access
         cashier_id = request.data.get('cashier_id')
         
-        if not email or not password or not cashier_id:
-            return Response({"error": "Owner credentials and cashier ID required"}, status=status.HTTP_400_BAD_REQUEST)
+        if not cashier_id:
+            return Response({"error": "Cashier ID required"}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            shop = ShopConfiguration.objects.get(email=email)
-            if not shop.validate_shop_owner_master_password(password):
-                return Response({"error": "Invalid owner credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+            shop = ShopConfiguration.objects.get()
         except ShopConfiguration.DoesNotExist:
             return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
         

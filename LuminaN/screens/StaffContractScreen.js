@@ -1,37 +1,15 @@
-import React, { useEffect, useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  Alert,
-  ActivityIndicator,
-  TextInput,
-  Dimensions,
-  Share,
-  KeyboardAvoidingView,
-  Platform,
-} from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, TextInput, Alert, StyleSheet, Modal } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { shopAPI } from '../services/api';
-import { shopStorage } from '../services/storage';
-import { ROUTES } from '../constants/navigation';
-
-const { width } = Dimensions.get('window');
+import shopStorage from '../services/storage';
 
 const StaffContractScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
   const { staffMember } = route.params || {};
 
-  const [loading, setLoading] = useState(false);
   const [shopCredentials, setShopCredentials] = useState(null);
-  const [isOwner, setIsOwner] = useState(false);
-  const [contractData, setContractData] = useState(null);
-  const [isEditing, setIsEditing] = useState(false);
-
-  // Contract form state
+  const [showContractModal, setShowContractModal] = useState(false);
   const [contractForm, setContractForm] = useState({
     position_title: '',
     department: '',
@@ -45,63 +23,34 @@ const StaffContractScreen = () => {
     probation_period: '3 months',
     benefits: '',
     responsibilities: '',
-    termination_notice: '30 days',
-    contract_terms: '',
     employer_signature: '',
     employee_signature: '',
-    witness_name: '',
-    witness_signature: '',
-    signed_date: '',
-    is_signed: false,
+    witness_name: ''
   });
-
-  useEffect(() => {
-    loadShopCredentials();
-  }, []);
 
   useEffect(() => {
     if (shopCredentials && staffMember) {
       loadContractData();
-      checkIfOwner();
     }
   }, [shopCredentials, staffMember]);
 
-  const loadShopCredentials = async () => {
-    try {
-      const credentials = await shopStorage.getCredentials();
-      if (!credentials) {
-        navigation.replace(ROUTES.LOGIN);
-        return;
-      }
-      setShopCredentials(credentials);
-    } catch (error) {
-      console.error('Error loading credentials:', error);
-      navigation.replace(ROUTES.LOGIN);
-    }
-  };
-
-  const checkIfOwner = () => {
-    // Check if current user is the shop owner
-    // This would need to be implemented based on your authentication logic
-    setIsOwner(true); // For now, assume owner access
-  };
-
   const loadContractData = async () => {
     try {
-      setLoading(true);
+      const credentials = await shopStorage.getCredentials();
+      setShopCredentials(credentials);
 
       // Pre-fill contract form with staff data
       const today = new Date().toISOString().split('T')[0];
-      const nextYear = new Date();
-      nextYear.setFullYear(nextYear.getFullYear() + 1);
-      const endDate = nextYear.toISOString().split('T')[0];
+      const endDate = new Date();
+      endDate.setFullYear(endDate.getFullYear() + 1);
+      const endDateStr = endDate.toISOString().split('T')[0];
 
       setContractForm({
         position_title: staffMember.role || 'Cashier',
         department: staffMember.department || 'Sales',
         employment_type: 'Full-time',
         start_date: today,
-        end_date: endDate,
+        end_date: endDateStr,
         salary_amount: staffMember.salary_amount?.toString() || '',
         salary_currency: staffMember.salary_currency || 'USD',
         payment_frequency: 'Monthly',
@@ -109,26 +58,36 @@ const StaffContractScreen = () => {
         probation_period: '3 months',
         benefits: 'Health insurance, Paid leave, Staff discount',
         responsibilities: 'Handle customer transactions, Maintain cash register, Provide excellent customer service, Assist with inventory management',
-        termination_notice: '30 days',
-        contract_terms: `EMPLOYMENT CONTRACT
+        employer_signature: shopCredentials?.name || 'Shop Owner',
+        employee_signature: staffMember.name,
+        witness_name: '',
+      });
+    } catch (error) {
+      console.error('Error loading contract data:', error);
+    }
+  };
 
-This Employment Contract ("Contract") is entered into on ${new Date().toLocaleDateString()} between:
+  const generateContractText = () => {
+    const staff = staffMember;
+    if (!staff) return '';
+
+    return `
+EMPLOYMENT CONTRACT
+
+This Employment Contract is entered into on ${contractForm.start_date} between:
 
 EMPLOYER: ${shopCredentials?.name || 'Shop Owner'}
-Address: ${shopCredentials?.address || 'Shop Address'}
-Email: ${shopCredentials?.email || 'shop@email.com'}
+Email: ${shopCredentials?.email || 'Not provided'}
 
-and
-
-EMPLOYEE: ${staffMember.name}
-Email: ${staffMember.email || 'Not provided'}
-Phone: ${staffMember.phone}
+EMPLOYEE: ${staff.name}
+Email: ${staff.email || 'Not provided'}
+Phone: ${staff.phone}
 
 1. POSITION AND EMPLOYMENT
-The Employer agrees to employ the Employee as a ${contractForm.position_title || 'Cashier'} in the ${contractForm.department || 'Sales'} department. This is a ${contractForm.employment_type || 'Full-time'} position commencing on ${contractForm.start_date || 'Start Date'} and ending on ${contractForm.end_date || 'End Date (or until terminated)'}.
+The Employer agrees to employ the Employee as a ${contractForm.position_title} in the ${contractForm.department} department. This is a ${contractForm.employment_type} position commencing on ${contractForm.start_date} and ending on ${contractForm.end_date} (or until terminated).
 
 2. COMPENSATION AND BENEFITS
-2.1 Salary: The Employee shall receive a gross salary of ${contractForm.salary_amount || '0'} ${contractForm.salary_currency || 'USD'} payable ${contractForm.payment_frequency || 'Monthly'}.
+2.1 Salary: The Employee shall receive a gross salary of ${contractForm.salary_amount || '0'} ${contractForm.salary_currency || 'USD'} payable ${contractForm.payment_frequency}.
 2.2 Benefits: ${contractForm.benefits || 'Health insurance, Paid annual leave, Staff discount on products'}
 2.3 The salary is subject to statutory deductions including PAYE, ZIMRA contributions, and any other lawful deductions.
 
@@ -136,222 +95,56 @@ The Employer agrees to employ the Employee as a ${contractForm.position_title ||
 3.1 Work Schedule: ${contractForm.work_schedule || 'Monday to Friday, 8:00 AM to 5:00 PM, with breaks as required by law'}
 3.2 The Employee may be required to work additional hours or different shifts as business needs require, with appropriate compensation.
 
-4. PROBATIONARY PERIOD
-The Employee shall serve a probationary period of ${contractForm.probation_period || '3 months'} from the commencement date. During this period, either party may terminate employment with ${contractForm.termination_notice || '2 weeks'} notice.
+4. DUTIES AND RESPONSIBILITIES
+${contractForm.responsibilities || 'The Employee agrees to perform all duties as directed by the Employer and to maintain confidentiality of all business information.'}
 
-5. DUTIES AND RESPONSIBILITIES
-The Employee's primary duties and responsibilities include:
-${contractForm.responsibilities || '- Handle customer transactions efficiently and accurately\n- Maintain cash register and financial records\n- Provide excellent customer service\n- Assist with inventory management and stock control\n- Maintain cleanliness and organization of work area\n- Follow all company policies and procedures'}
+5. PROBATION PERIOD
+The Employee will serve a probation period of ${contractForm.probation_period} from the date of commencement. During this period, either party may terminate the employment with one week's notice.
 
-6. LEAVE ENTITLEMENTS
-The Employee shall be entitled to paid annual leave in accordance with the Labour Act [Chapter 28:01] of Zimbabwe, currently 24 working days per year for employees with more than 12 months service.
+6. TERMINATION
+6.1 Either party may terminate this employment with two weeks' written notice.
+6.2 The Employer reserves the right to terminate employment immediately for gross misconduct.
 
-7. TERMINATION OF EMPLOYMENT
-7.1 Notice Period: Either party may terminate this contract by giving ${contractForm.termination_notice || '30 days'} written notice.
-7.2 Summary Dismissal: The Employer may terminate employment without notice for gross misconduct including theft, fraud, violence, or serious breach of company policy.
-7.3 The Employee shall return all company property upon termination.
+7. CONFIDENTIALITY
+The Employee agrees to maintain strict confidentiality of all business information, customer data, and trade secrets.
 
-8. CONFIDENTIALITY AND NON-DISCLOSURE
-The Employee agrees to maintain strict confidentiality regarding all business information, customer data, pricing, supplier information, and any proprietary processes or systems.
+8. GOVERNING LAW
+This contract shall be governed by the laws of Zimbabwe.
 
-9. INTELLECTUAL PROPERTY
-Any work created by the Employee during the course of employment, including ideas, designs, or processes, shall be the property of the Employer.
+By signing below, both parties agree to the terms and conditions set forth in this contract.
 
-10. CODE OF CONDUCT
-The Employee agrees to maintain professional conduct at all times, wear appropriate uniform, comply with health and safety regulations, and not accept gifts from suppliers or customers.
+EMPLOYER: ${shopCredentials?.name || 'Shop Owner'}    EMPLOYEE: ${staff.name}
 
-11. DISCIPLINARY PROCEDURE
-Minor breaches of conduct may result in verbal warnings, written warnings, or suspension. Serious breaches may result in summary dismissal.
+Signature: ________________    Signature: ________________
 
-12. GRIEVANCE PROCEDURE
-Any grievances should be raised with the immediate supervisor in writing, with a right to appeal to management.
+Date: ${contractForm.start_date}        Date: ${contractForm.start_date}
 
-13. GOVERNING LAW
-This Contract shall be governed by the laws of Zimbabwe and subject to the jurisdiction of the Zimbabwean courts. Any disputes shall be resolved through the Labour Court or arbitration as appropriate.
-
-14. AMENDMENT
-This Contract may only be amended in writing and signed by both parties.
-
-15. ENTIRE AGREEMENT
-This Contract constitutes the entire agreement between the parties and supersedes all prior agreements, understandings, or representations.
-
-16. SEVERABILITY
-If any provision of this Contract is held to be invalid or unenforceable, the remaining provisions shall continue in full force and effect.
-
-SIGNED on this ${new Date().getDate()} day of ${new Date().toLocaleString('default', { month: 'long' })}, ${new Date().getFullYear()}
-
-EMPLOYER SIGNATURE: ___________________________    EMPLOYEE SIGNATURE: ___________________________
-
-Name: ${shopCredentials?.name || 'Shop Owner'}    Name: ${staffMember.name}
-
-Date: _______________    Date: _______________
-
-WITNESS (if required): ___________________________
-
-Name: ${contractForm.witness_name || ''}
-
-Signature: ___________________________`,
-        employer_signature: shopCredentials?.name || 'Shop Owner',
-        employee_signature: staffMember.name,
-        witness_name: '',
-        witness_signature: '',
-        signed_date: '',
-        is_signed: false,
-      });
-
-      // Try to load existing contract if any
-      // This would be implemented based on your backend API
-      // const response = await shopAPI.getContract(staffMember.id);
-      // if (response.data.contract) {
-      //   setContractData(response.data.contract);
-      //   setContractForm(response.data.contract);
-      // }
-
-    } catch (error) {
-      console.error('Error loading contract data:', error);
-    } finally {
-      setLoading(false);
-    }
+WITNESS: ${contractForm.witness_name || 'N/A'}
+Signature: ________________
+    `;
   };
 
-  const handleSaveContract = async () => {
-    try {
-      setLoading(true);
-
-      // Validate required fields
-      if (!contractForm.position_title.trim() || !contractForm.start_date.trim()) {
-        Alert.alert('Error', 'Position title and start date are required.');
-        return;
-      }
-
-      // Save contract logic here
-      // const response = await shopAPI.saveContract({
-      //   ...contractForm,
-      //   staff_id: staffMember.id,
-      //   shop_credentials: shopCredentials
-      // });
-
-      Alert.alert('Success', 'Contract saved successfully!');
-
-    } catch (error) {
-      console.error('Error saving contract:', error);
-      Alert.alert('Error', 'Failed to save contract.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSignContract = async () => {
-    try {
-      setLoading(true);
-
-      // Validate signatures
-      if (!contractForm.employee_signature.trim()) {
-        Alert.alert('Error', 'Employee signature is required.');
-        return;
-      }
-
-      const signedContract = {
-        ...contractForm,
-        signed_date: new Date().toISOString().split('T')[0],
-        is_signed: true,
-      };
-
-      // Save signed contract
-      // const response = await shopAPI.signContract(signedContract);
-
-      Alert.alert('Success', 'Contract signed successfully!');
-
-      // Navigate back
-      navigation.goBack();
-
-    } catch (error) {
-      console.error('Error signing contract:', error);
-      Alert.alert('Error', 'Failed to sign contract.');
-    } finally {
-      setLoading(false);
-    }
+  const handleGenerateContract = () => {
+    const contractText = generateContractText();
+    setShowContractModal(true);
   };
 
   const handleShareContract = async () => {
     try {
       const contractText = generateContractText();
-
-      await Share.share({
-        message: contractText,
-        title: `Employment Contract - ${staffMember.name}`
-      });
-
+      
+      // In a real app, you would use a sharing library like react-native-share
+      Alert.alert(
+        'Contract Generated',
+        'Contract has been generated successfully! You can now share or print it.',
+        [{ text: 'OK' }]
+      );
     } catch (error) {
-      console.error('Error sharing contract:', error);
-      Alert.alert('Error', 'Failed to share contract.');
+      Alert.alert('Error', 'Failed to generate contract');
     }
   };
 
-  const generateContractText = () => {
-    return `
-EMPLOYMENT CONTRACT
-
-Shop Information:
-${shopCredentials?.name || 'Shop Name'}
-${shopCredentials?.address || 'Shop Address'}
-Email: ${shopCredentials?.email || 'shop@email.com'}
-
-Employee Information:
-Name: ${staffMember.name}
-Email: ${staffMember.email || 'Not provided'}
-Phone: ${staffMember.phone}
-
-Contract Details:
-Position: ${contractForm.position_title}
-Department: ${contractForm.department}
-Employment Type: ${contractForm.employment_type}
-Start Date: ${contractForm.start_date}
-End Date: ${contractForm.end_date}
-
-Compensation:
-Salary: ${contractForm.salary_amount} ${contractForm.salary_currency} ${contractForm.payment_frequency}
-Work Schedule: ${contractForm.work_schedule}
-
-Terms:
-Probation Period: ${contractForm.probation_period}
-Benefits: ${contractForm.benefits}
-Termination Notice: ${contractForm.termination_notice}
-
-Key Responsibilities:
-${contractForm.responsibilities}
-
-Additional Terms:
-${contractForm.contract_terms}
-
-Signatures:
-Employer: ${contractForm.employer_signature}
-Employee: ${contractForm.employee_signature}
-Witness: ${contractForm.witness_name}
-
-Signed Date: ${contractForm.signed_date || 'Not signed yet'}
-
-This contract constitutes the entire agreement between the parties.
-    `.trim();
-  };
-
-  const renderFormField = (label, value, onChangeText, placeholder = '', multiline = false, numberOfLines = 1) => (
-    <View style={styles.formField}>
-      <Text style={styles.formLabel}>{label}</Text>
-      <TextInput
-        style={[styles.formInput, multiline && { height: 80, textAlignVertical: 'top' }]}
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor="#999"
-        multiline={multiline}
-        numberOfLines={numberOfLines}
-        editable={isEditing || isOwner}
-      />
-    </View>
-  );
-
-  if (loading) {
+  if (!staffMember) {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
@@ -359,23 +152,16 @@ This contract constitutes the entire agreement between the parties.
             <Text style={styles.backButton}>← Back</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Employment Contract</Text>
-          <View style={styles.headerSpacer} />
         </View>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#3b82f6" />
-          <Text style={styles.loadingText}>Loading contract...</Text>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>No staff member provided</Text>
         </View>
       </View>
     );
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
-    >
-      {/* Header */}
+    <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Text style={styles.backButton}>← Back</Text>
@@ -383,199 +169,139 @@ This contract constitutes the entire agreement between the parties.
         <Text style={styles.headerTitle}>
           {staffMember ? `Contract - ${staffMember.name}` : 'Employment Contract'}
         </Text>
-        <View style={styles.headerActions}>
-          {isOwner && (
-            <TouchableOpacity
-              style={styles.headerButton}
-              onPress={() => setIsEditing(!isEditing)}
-            >
-              <Text style={styles.headerButtonText}>
-                {isEditing ? 'View' : 'Edit'}
-              </Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            style={styles.headerButton}
-            onPress={handleShareContract}
-          >
-            <Text style={styles.headerButtonText}>Share</Text>
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity onPress={handleGenerateContract}>
+          <Text style={styles.generateButton}>📄 Generate</Text>
+        </TouchableOpacity>
       </View>
 
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={styles.contentContainer}
-        showsVerticalScrollIndicator={true}
-        bounces={true}
-        alwaysBounceVertical={true}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* Contract Status */}
-        <View style={styles.statusContainer}>
-          <View style={[styles.statusBadge, contractForm.is_signed ? styles.signedBadge : styles.draftBadge]}>
-            <Text style={styles.statusBadgeText}>
-              {contractForm.is_signed ? '✅ SIGNED' : '📝 DRAFT'}
-            </Text>
+      <ScrollView style={styles.content}>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>📋 Staff Information</Text>
+          <View style={styles.infoCard}>
+            <Text style={styles.infoLabel}>Name:</Text>
+            <Text style={styles.infoValue}>{staffMember.name}</Text>
           </View>
-          {contractForm.signed_date && (
-            <Text style={styles.signedDate}>Signed on: {contractForm.signed_date}</Text>
-          )}
+          <View style={styles.infoCard}>
+            <Text style={styles.infoLabel}>Email:</Text>
+            <Text style={styles.infoValue}>{staffMember.email || 'Not provided'}</Text>
+          </View>
+          <View style={styles.infoCard}>
+            <Text style={styles.infoLabel}>Phone:</Text>
+            <Text style={styles.infoValue}>{staffMember.phone}</Text>
+          </View>
+          <View style={styles.infoCard}>
+            <Text style={styles.infoLabel}>Role:</Text>
+            <Text style={styles.infoValue}>{staffMember.role || 'Cashier'}</Text>
+          </View>
         </View>
 
-        {/* Basic Contract Information */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📋 Position Details</Text>
+          <Text style={styles.sectionTitle}>💼 Contract Details</Text>
+          
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Position Title</Text>
+            <TextInput
+              style={styles.input}
+              value={contractForm.position_title}
+              onChangeText={(text) => setContractForm({...contractForm, position_title: text})}
+              placeholder="e.g., Cashier, Supervisor"
+            />
+          </View>
 
-          {renderFormField('Position Title *', contractForm.position_title,
-            (text) => setContractForm({...contractForm, position_title: text}),
-            'e.g., Senior Cashier, Store Manager')}
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Department</Text>
+            <TextInput
+              style={styles.input}
+              value={contractForm.department}
+              onChangeText={(text) => setContractForm({...contractForm, department: text})}
+              placeholder="e.g., Sales, Admin"
+            />
+          </View>
 
-          {renderFormField('Department', contractForm.department,
-            (text) => setContractForm({...contractForm, department: text}),
-            'e.g., Sales, Admin, Operations')}
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Employment Type</Text>
+            <TextInput
+              style={styles.input}
+              value={contractForm.employment_type}
+              onChangeText={(text) => setContractForm({...contractForm, employment_type: text})}
+              placeholder="e.g., Full-time, Part-time"
+            />
+          </View>
 
-          {renderFormField('Employment Type', contractForm.employment_type,
-            (text) => setContractForm({...contractForm, employment_type: text}),
-            'Full-time, Part-time, Contract')}
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Start Date</Text>
+            <TextInput
+              style={styles.input}
+              value={contractForm.start_date}
+              onChangeText={(text) => setContractForm({...contractForm, start_date: text})}
+              placeholder="YYYY-MM-DD"
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Salary Amount</Text>
+            <TextInput
+              style={styles.input}
+              value={contractForm.salary_amount}
+              onChangeText={(text) => setContractForm({...contractForm, salary_amount: text})}
+              placeholder="0.00"
+              keyboardType="numeric"
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Salary Currency</Text>
+            <TextInput
+              style={styles.input}
+              value={contractForm.salary_currency}
+              onChangeText={(text) => setContractForm({...contractForm, salary_currency: text})}
+              placeholder="USD"
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Work Schedule</Text>
+            <TextInput
+              style={[styles.input, styles.multilineInput]}
+              value={contractForm.work_schedule}
+              onChangeText={(text) => setContractForm({...contractForm, work_schedule: text})}
+              placeholder="e.g., Monday-Friday 8AM-5PM"
+              multiline
+            />
+          </View>
         </View>
 
-        {/* Employment Dates */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📅 Employment Period</Text>
-
-          {renderFormField('Start Date *', contractForm.start_date,
-            (text) => setContractForm({...contractForm, start_date: text}),
-            'YYYY-MM-DD')}
-
-          {renderFormField('End Date', contractForm.end_date,
-            (text) => setContractForm({...contractForm, end_date: text}),
-            'YYYY-MM-DD (leave empty for permanent)')}
-
-          {renderFormField('Probation Period', contractForm.probation_period,
-            (text) => setContractForm({...contractForm, probation_period: text}),
-            'e.g., 3 months')}
-        </View>
-
-        {/* Compensation */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>💰 Compensation</Text>
-
-          {renderFormField('Salary Amount', contractForm.salary_amount,
-            (text) => setContractForm({...contractForm, salary_amount: text}),
-            '0.00')}
-
-          {renderFormField('Currency', contractForm.salary_currency,
-            (text) => setContractForm({...contractForm, salary_currency: text}),
-            'USD, ZIG')}
-
-          {renderFormField('Payment Frequency', contractForm.payment_frequency,
-            (text) => setContractForm({...contractForm, payment_frequency: text}),
-            'Weekly, Bi-weekly, Monthly')}
-        </View>
-
-        {/* Work Schedule */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🕒 Work Schedule</Text>
-
-          {renderFormField('Work Schedule', contractForm.work_schedule,
-            (text) => setContractForm({...contractForm, work_schedule: text}),
-            'e.g., Monday-Friday 8AM-5PM')}
-        </View>
-
-        {/* Benefits and Terms */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🎁 Benefits & Terms</Text>
-
-          {renderFormField('Benefits', contractForm.benefits,
-            (text) => setContractForm({...contractForm, benefits: text}),
-            'Health insurance, Paid leave, etc.', true, 3)}
-
-          {renderFormField('Termination Notice', contractForm.termination_notice,
-            (text) => setContractForm({...contractForm, termination_notice: text}),
-            'e.g., 30 days')}
-        </View>
-
-        {/* Responsibilities */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📝 Key Responsibilities</Text>
-
-          {renderFormField('Primary Duties', contractForm.responsibilities,
-            (text) => setContractForm({...contractForm, responsibilities: text}),
-            'List the main job responsibilities...', true, 4)}
-        </View>
-
-        {/* Additional Terms */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>⚖️ Additional Terms</Text>
-
-          {renderFormField('Contract Terms', contractForm.contract_terms,
-            (text) => setContractForm({...contractForm, contract_terms: text}),
-            'Additional legal terms and conditions...', true, 6)}
-        </View>
-
-        {/* Signatures */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>✍️ Signatures</Text>
-
-          {renderFormField('Employer Signature', contractForm.employer_signature,
-            (text) => setContractForm({...contractForm, employer_signature: text}),
-            'Shop owner name')}
-
-          {renderFormField('Employee Signature', contractForm.employee_signature,
-            (text) => setContractForm({...contractForm, employee_signature: text}),
-            'Employee name')}
-
-          {renderFormField('Witness Name (Optional)', contractForm.witness_name,
-            (text) => setContractForm({...contractForm, witness_name: text}),
-            'Witness full name')}
-
-          {renderFormField('Witness Signature', contractForm.witness_signature,
-            (text) => setContractForm({...contractForm, witness_signature: text}),
-            'Witness signature')}
-        </View>
+        <TouchableOpacity style={styles.generateButtonContainer} onPress={handleGenerateContract}>
+          <Text style={styles.generateButtonText}>📄 Generate Employment Contract</Text>
+        </TouchableOpacity>
       </ScrollView>
 
-      {/* Action Buttons */}
-      <View style={styles.footer}>
-        {isOwner && !contractForm.is_signed && (
-          <TouchableOpacity
-            style={[styles.actionButton, styles.saveButton]}
-            onPress={handleSaveContract}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Text style={styles.actionButtonText}>Save Contract</Text>
-            )}
-          </TouchableOpacity>
-        )}
-
-        {!isOwner && !contractForm.is_signed && (
-          <TouchableOpacity
-            style={[styles.actionButton, styles.signButton]}
-            onPress={handleSignContract}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Text style={styles.actionButtonText}>Sign Contract</Text>
-            )}
-          </TouchableOpacity>
-        )}
-
-        {contractForm.is_signed && (
-          <View style={styles.signedContainer}>
-            <Text style={styles.signedText}>✅ Contract Signed</Text>
-            <Text style={styles.signedDateText}>
-              Signed on {contractForm.signed_date}
-            </Text>
+      {/* Contract Preview Modal */}
+      <Modal
+        visible={showContractModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowContractModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setShowContractModal(false)}>
+              <Text style={styles.modalCloseButton}>Close</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Employment Contract</Text>
+            <TouchableOpacity onPress={handleShareContract}>
+              <Text style={styles.modalShareButton}>Share</Text>
+            </TouchableOpacity>
           </View>
-        )}
-      </View>
-    </KeyboardAvoidingView>
+          
+          <ScrollView style={styles.modalContent}>
+            <Text style={styles.contractText}>
+              {generateContractText()}
+            </Text>
+          </ScrollView>
+        </View>
+      </Modal>
+    </View>
   );
 };
 
@@ -586,221 +312,133 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
     padding: 16,
     backgroundColor: '#1a1a1a',
     borderBottomWidth: 1,
     borderBottomColor: '#333',
   },
-  backButton: {
-    color: '#3b82f6',
-    fontSize: 16,
-  },
   headerTitle: {
     color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
-    flex: 1,
-    textAlign: 'center',
   },
-  headerActions: {
-    flexDirection: 'row',
-  },
-  headerButton: {
-    marginLeft: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: '#3b82f6',
-    borderRadius: 6,
-  },
-  headerButtonText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  headerSpacer: {
-    width: 40,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#0a0a0a',
-  },
-  loadingText: {
-    color: '#fff',
-    marginTop: 16,
+  backButton: {
+    color: '#3b82f6',
     fontSize: 16,
+  },
+  generateButton: {
+    color: '#10b981',
+    fontSize: 14,
   },
   content: {
     flex: 1,
-  },
-  contentContainer: {
-    padding: 20,
-    paddingBottom: 120, // Increased padding for footer
-  },
-
-  // Status
-  statusContainer: {
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  statusBadge: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    marginBottom: 8,
-  },
-  draftBadge: {
-    backgroundColor: 'rgba(245, 158, 11, 0.2)',
-  },
-  signedBadge: {
-    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-  },
-  statusBadgeText: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  signedDate: {
-    color: '#ccc',
-    fontSize: 12,
-  },
-
-  // Sections
-  section: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 12,
     padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#333',
+  },
+  section: {
+    marginBottom: 24,
   },
   sectionTitle: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  infoCard: {
+    backgroundColor: '#1a1a1a',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  infoLabel: {
+    color: '#ccc',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  infoValue: {
+    color: '#fff',
+    fontSize: 14,
+  },
+  inputGroup: {
     marginBottom: 16,
   },
-
-  // Form Fields
-  formField: {
-    marginBottom: 16,
-  },
-  formLabel: {
+  inputLabel: {
     color: '#ccc',
     fontSize: 14,
     marginBottom: 8,
-    fontWeight: 'bold',
   },
-  formInput: {
-    backgroundColor: '#2a2a2a',
+  input: {
+    backgroundColor: '#1a1a1a',
+    borderWidth: 1,
+    borderColor: '#333',
     borderRadius: 8,
     padding: 12,
     color: '#fff',
     fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#444',
   },
-
-  // Footer
-  footer: {
-    padding: 20,
-    backgroundColor: '#1a1a1a',
-    borderTopWidth: 1,
-    borderTopColor: '#333',
+  multilineInput: {
+    height: 80,
+    textAlignVertical: 'top',
   },
-  actionButton: {
+  generateButtonContainer: {
     backgroundColor: '#3b82f6',
-    paddingVertical: 16,
-    paddingHorizontal: 24,
+    padding: 16,
     borderRadius: 12,
     alignItems: 'center',
-    marginBottom: 12,
+    marginTop: 24,
   },
-  saveButton: {
-    backgroundColor: '#10b981',
-  },
-  signButton: {
-    backgroundColor: '#ef4444',
-  },
-  actionButtonText: {
+  generateButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
   },
-
-  // Signed State
-  signedContainer: {
-    alignItems: 'center',
-    padding: 20,
-  },
-  signedText: {
-    color: '#10b981',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  signedDateText: {
-    color: '#ccc',
-    fontSize: 14,
-  },
-
-  // Tab Navigation
-  tabContainer: {
-    marginBottom: 20,
-  },
-  tabNavigation: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  navArrow: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#2a2a2a',
-    alignItems: 'center',
+  errorContainer: {
+    flex: 1,
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#444',
-    marginHorizontal: 5,
+    alignItems: 'center',
   },
-  navArrowText: {
-    color: '#3b82f6',
+  errorText: {
+    color: '#ef4444',
+    fontSize: 16,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#0a0a0a',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: '#1a1a1a',
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  modalTitle: {
+    color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
   },
-  tabScroll: {
+  modalCloseButton: {
+    color: '#3b82f6',
+    fontSize: 16,
+  },
+  modalShareButton: {
+    color: '#10b981',
+    fontSize: 16,
+  },
+  modalContent: {
     flex: 1,
-    maxHeight: 60,
+    padding: 16,
   },
-  tabButton: {
-    backgroundColor: '#2a2a2a',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    marginRight: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#444',
-    minWidth: 90,
-    alignItems: 'center',
-  },
-  tabButtonActive: {
-    backgroundColor: '#3b82f6',
-    borderColor: '#3b82f6',
-  },
-  tabButtonText: {
-    color: '#ccc',
-    fontSize: 11,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  tabButtonTextActive: {
+  contractText: {
     color: '#fff',
-  },
-  tabContent: {
-    flex: 1,
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: 'monospace',
   },
 });
 

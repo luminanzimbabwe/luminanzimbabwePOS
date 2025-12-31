@@ -88,15 +88,94 @@ const InventoryAuditTrailScreen = () => {
         password: shopCredentials.shop_owner_master_password,
       };
 
-      let endpoint = '/audit-trail/';
-      if (selectedProduct) {
-        endpoint = `/products/${selectedProduct.id}/audit-history/`;
+      // First test API connection
+      console.log('🔌 Testing API connection...');
+      try {
+        const testConnection = await shopAPI.testConnection();
+        console.log('📡 API test result:', testConnection);
+        
+        if (testConnection.success) {
+          // Try to load from API first
+          let endpoint = '/audit-trail/';
+          if (selectedProduct) {
+            endpoint = `/products/${selectedProduct.id}/audit-history/`;
+          }
+
+          const response = await shopAPI.getCustomEndpoint(endpoint, authData);
+          console.log('📋 Audit trail loaded from API:', response.data);
+          
+          setAuditTrail(response.data || []);
+          return;
+        }
+      } catch (connError) {
+        console.warn('⚠️ API connection failed, falling back to storage:', connError.message);
       }
 
-      const response = await shopAPI.getCustomEndpoint(endpoint, authData);
-      console.log('📋 Audit trail loaded:', response.data);
+      // Fallback to local storage if API fails
+      console.log('💾 Loading audit trail from local storage...');
       
-      setAuditTrail(response.data || []);
+      // Load different types of audit data from storage (matching OrderConfirmationScreen)
+      const auditData = await shopStorage.getItem('inventory_audit_trail') || '[]';
+      const confirmedOrders = await shopStorage.getItem('confirmed_orders') || '[]'; // ← This is what OrderConfirmationScreen uses
+      const pendingOrders = await shopStorage.getItem('pending_orders') || '[]';
+      const stockMovements = await shopStorage.getItem('stock_movements') || '[]';
+      
+      let combinedAuditTrail = [];
+      
+      try {
+        const auditEntries = JSON.parse(auditData);
+        const confirmedEntries = JSON.parse(confirmedOrders);
+        const pendingEntries = JSON.parse(pendingOrders);
+        const movementEntries = JSON.parse(stockMovements);
+        
+        console.log('📦 Confirmed orders found:', confirmedEntries.length);
+        console.log('📦 Pending orders found:', pendingEntries.length);
+        
+        // Convert confirmed orders to audit trail format
+        const confirmedAuditEntries = confirmedEntries.map(order => ({
+          id: order.id,
+          product_name: order.receivingItems?.[0]?.product?.name || 'Multiple Items',
+          reason_code: 'receipt',
+          action: 'stock_received',
+          quantity_change: order.receivingItems?.reduce((sum, item) => sum + parseFloat(item.quantity || 0), 0) || 0,
+          performed_by: order.supplierName || 'System',
+          timestamp: order.confirmedAt || order.createdAt,
+          notes: `Order ${order.id} confirmed - ${order.supplierName}`,
+          supplier_invoice: order.invoiceNumber,
+          reference_number: order.reference
+        }));
+        
+        // Convert pending orders to audit trail format (showing as pending)
+        const pendingAuditEntries = pendingEntries.map(order => ({
+          id: order.id,
+          product_name: order.receivingItems?.[0]?.product?.name || 'Multiple Items',
+          reason_code: 'pending_review',
+          action: 'order_created',
+          quantity_change: order.receivingItems?.reduce((sum, item) => sum + parseFloat(item.quantity || 0), 0) || 0,
+          performed_by: order.supplierName || 'System',
+          timestamp: order.createdAt,
+          notes: `Pending order ${order.id} - ${order.supplierName}`,
+          supplier_invoice: order.invoiceNumber,
+          reference_number: order.reference
+        }));
+        
+        // Combine all audit data
+        combinedAuditTrail = [
+          ...auditEntries,
+          ...confirmedAuditEntries,
+          ...pendingAuditEntries,
+          ...movementEntries
+        ];
+        
+        console.log('📊 Combined audit trail from storage:', combinedAuditTrail);
+        console.log('📊 Confirmed entries:', confirmedAuditEntries.length);
+        console.log('📊 Pending entries:', pendingAuditEntries.length);
+      } catch (parseError) {
+        console.warn('⚠️ Failed to parse audit data:', parseError);
+        combinedAuditTrail = [];
+      }
+      
+      setAuditTrail(combinedAuditTrail);
       
     } catch (error) {
       console.error('❌ Error loading audit trail:', error);
@@ -957,7 +1036,7 @@ const InventoryAuditTrailScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#0f172a',
     ...Platform.select({
       web: {
         height: '100vh',
@@ -983,9 +1062,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 16,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#1e293b',
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: '#374151',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -998,12 +1077,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   headerTitle: {
-    color: '#fff',
+    color: '#ffffff',
     fontSize: 20,
     fontWeight: 'bold',
   },
   refreshButton: {
-    color: '#3b82f6',
+    color: '#ffffff',
     fontSize: 24,
   },
   loadingContainer: {
@@ -1044,22 +1123,22 @@ const styles = StyleSheet.create({
     }),
   },
   filtersContainer: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#1e293b',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: '#374151',
   },
   searchContainer: {
     marginBottom: 12,
   },
   searchInput: {
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#374151',
     borderRadius: 8,
     padding: 12,
-    color: '#fff',
+    color: '#ffffff',
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#444',
+    borderColor: '#4b5563',
   },
   filterScroll: {
     marginBottom: 8,
@@ -1074,13 +1153,13 @@ const styles = StyleSheet.create({
     })
   },
   filterButton: {
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#374151',
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 20,
     marginRight: 8,
     borderWidth: 1,
-    borderColor: '#444',
+    borderColor: '#4b5563',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
@@ -1100,20 +1179,20 @@ const styles = StyleSheet.create({
     borderColor: '#3b82f6',
   },
   filterButtonText: {
-    color: '#ccc',
+    color: '#e2e8f0',
     fontSize: 12,
     fontWeight: '600',
   },
   filterButtonTextActive: {
-    color: '#fff',
+    color: '#ffffff',
   },
   advancedFilters: {
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#374151',
     borderRadius: 8,
     padding: 12,
   },
   advancedFiltersTitle: {
-    color: '#fff',
+    color: '#f1f5f9',
     fontSize: 14,
     fontWeight: 'bold',
     marginBottom: 8,
@@ -1133,25 +1212,25 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   activeFilterText: {
-    color: '#fff',
+    color: '#ffffff',
     fontSize: 12,
     fontWeight: '600',
   },
   removeFilterText: {
-    color: '#fff',
+    color: '#ffffff',
     fontSize: 14,
     fontWeight: 'bold',
   },
   statsContainer: {
     flexDirection: 'row',
     padding: 16,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#1e293b',
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: '#374151',
   },
   statCard: {
     flex: 1,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#374151',
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
@@ -1174,21 +1253,21 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   statLabel: {
-    color: '#ccc',
+    color: '#94a3b8',
     fontSize: 12,
     textAlign: 'center',
   },
   actionButtonsContainer: {
     flexDirection: 'row',
     padding: 20,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#1e293b',
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: '#374151',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   actionButton: {
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#374151',
     borderRadius: 16,
     padding: 20,
     alignItems: 'center',
@@ -1199,7 +1278,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
     borderWidth: 2,
-    borderColor: '#374151',
+    borderColor: '#4b5563',
     minHeight: 80,
     justifyContent: 'center',
     // Web-specific styles
@@ -1216,14 +1295,14 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   actionButtonText: {
-    color: '#e5e7eb',
+    color: '#e2e8f0',
     fontSize: 16,
     fontWeight: '700',
     textAlign: 'center',
   },
   // Enhanced Standard Audit Entry Styles
   auditEntryCard: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#1e293b',
     borderRadius: 16,
     margin: 16,
     padding: 20,
@@ -1233,7 +1312,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 3,
     borderWidth: 1,
-    borderColor: '#333333',
+    borderColor: '#334155',
   },
   auditEntryHeader: {
     flexDirection: 'row',
@@ -1269,7 +1348,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   actionText: {
-    color: '#9ca3af',
+    color: '#94a3b8',
     fontSize: 14,
     fontWeight: '600',
     textTransform: 'uppercase',
@@ -1280,7 +1359,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   timestamp: {
-    color: '#9ca3af',
+    color: '#94a3b8',
     fontSize: 12,
     fontWeight: '600',
     marginBottom: 8,
@@ -1344,7 +1423,7 @@ const styles = StyleSheet.create({
 
   // Enhanced Receipt Card Styles - Modern Dark Theme
   receiptCard: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#1e293b',
     borderRadius: 16,
     margin: 16,
     padding: 20,
@@ -1354,7 +1433,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
     borderWidth: 1,
-    borderColor: '#333333',
+    borderColor: '#334155',
     position: 'relative',
     overflow: 'hidden',
   },
@@ -1380,13 +1459,13 @@ const styles = StyleSheet.create({
   },
   receiptDate: {
     fontSize: 14,
-    color: '#e5e7eb',
+    color: '#e2e8f0',
     fontWeight: '600',
     marginBottom: 2,
   },
   receiptId: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: '#94a3b8',
     fontWeight: '700',
     backgroundColor: '#374151',
     paddingHorizontal: 8,
@@ -1403,12 +1482,12 @@ const styles = StyleSheet.create({
     marginVertical: 8,
   },
   receiptItem: {
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#374151',
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#404040',
+    borderColor: '#4b5563',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -1425,7 +1504,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#374151',
+    backgroundColor: '#4b5563',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 8,
@@ -1438,7 +1517,7 @@ const styles = StyleSheet.create({
   },
   receiptUnitPrice: {
     fontSize: 14,
-    color: '#e5e7eb',
+    color: '#e2e8f0',
     fontWeight: '600',
   },
   receiptTotal: {
@@ -1450,7 +1529,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#374151',
+    backgroundColor: '#4b5563',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 8,
@@ -1458,7 +1537,7 @@ const styles = StyleSheet.create({
   },
   receiptInfoLabel: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: '#94a3b8',
     fontWeight: '600',
   },
   receiptInfoValue: {
@@ -1473,7 +1552,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingTop: 16,
     borderTopWidth: 1,
-    borderTopColor: '#404040',
+    borderTopColor: '#4b5563',
   },
   receiptStatus: {
     fontSize: 14,
@@ -1488,20 +1567,20 @@ const styles = StyleSheet.create({
   },
   receiptTimestamp: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: '#94a3b8',
     fontWeight: '600',
   },
   receiptNotes: {
     marginTop: 16,
     padding: 16,
-    backgroundColor: '#374151',
+    backgroundColor: '#4b5563',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#4b5563',
+    borderColor: '#6b7280',
   },
   receiptNotesLabel: {
     fontSize: 12,
-    color: '#e5e7eb',
+    color: '#e2e8f0',
     fontWeight: '700',
     marginBottom: 8,
     textTransform: 'uppercase',
@@ -1509,28 +1588,28 @@ const styles = StyleSheet.create({
   },
   receiptNotesText: {
     fontSize: 14,
-    color: '#d1d5db',
+    color: '#cbd5e1',
     fontStyle: 'italic',
     lineHeight: 20,
   },
   performedBy: {
-    color: '#9ca3af',
+    color: '#94a3b8',
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 8,
-    backgroundColor: '#374151',
+    backgroundColor: '#4b5563',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
     alignSelf: 'flex-start',
   },
   notes: {
-    color: '#d1d5db',
+    color: '#cbd5e1',
     fontSize: 14,
     marginBottom: 8,
     fontStyle: 'italic',
     lineHeight: 20,
-    backgroundColor: '#374151',
+    backgroundColor: '#4b5563',
     padding: 12,
     borderRadius: 8,
     borderLeftWidth: 4,
@@ -1559,10 +1638,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   reference: {
-    color: '#e5e7eb',
+    color: '#e2e8f0',
     fontSize: 14,
     fontWeight: '600',
-    backgroundColor: '#374151',
+    backgroundColor: '#4b5563',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
@@ -1571,7 +1650,7 @@ const styles = StyleSheet.create({
   emptyState: {
     alignItems: 'center',
     padding: 40,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#1e293b',
     borderRadius: 12,
     margin: 16,
     shadowColor: '#000',
@@ -1590,13 +1669,13 @@ const styles = StyleSheet.create({
     })
   },
   emptyTitle: {
-    color: '#fff',
+    color: '#ffffff',
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 8,
   },
   emptyText: {
-    color: '#999',
+    color: '#94a3b8',
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 20,
@@ -1605,9 +1684,9 @@ const styles = StyleSheet.create({
   // Tab Navigation Styles
   tabNavigation: {
     flexDirection: 'row',
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#1e293b',
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: '#374151',
   },
   tabButton: {
     flex: 1,
@@ -1618,10 +1697,10 @@ const styles = StyleSheet.create({
   },
   tabButtonActive: {
     borderBottomColor: '#3b82f6',
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#374151',
   },
   tabButtonText: {
-    color: '#9ca3af',
+    color: '#94a3b8',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -1631,7 +1710,7 @@ const styles = StyleSheet.create({
 
   // Presence Entry Styles
   presenceEntryCard: {
-    backgroundColor: '#2a2a2a',
+    backgroundColor: '#374151',
     borderRadius: 12,
     margin: 16,
     padding: 16,
@@ -1641,7 +1720,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
     borderWidth: 1,
-    borderColor: '#404040',
+    borderColor: '#4b5563',
   },
   presenceEntryHeader: {
     flexDirection: 'row',

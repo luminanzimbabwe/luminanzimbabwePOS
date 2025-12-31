@@ -12,6 +12,7 @@ import {
   RefreshControl,
   Animated,
   FlatList,
+  Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { shopAPI } from '../services/api';
@@ -68,7 +69,8 @@ const ProductManagementScreen = () => {
     min_stock_level: '5',
     supplier: '',
     currency: 'USD',
-    price_type: 'unit'
+    price_type: 'unit',
+    has_no_barcode: false
   });
 
   // Edit Product Modal states
@@ -87,7 +89,8 @@ const ProductManagementScreen = () => {
     min_stock_level: '5',
     supplier: '',
     currency: 'USD',
-    price_type: 'unit'
+    price_type: 'unit',
+    has_no_barcode: false
   });
 
   // Stock Receiving Modal states
@@ -221,6 +224,8 @@ const ProductManagementScreen = () => {
       }),
     ]).start();
   }, []);
+
+
 
   // Filter and search effect
   useEffect(() => {
@@ -799,7 +804,7 @@ const ProductManagementScreen = () => {
         price: parseFloat(newProduct.price),
         cost_price: parseFloat(newProduct.cost_price) || 0,
         category: newProduct.category,
-        barcode: newProduct.barcode.trim(),
+        barcode: newProduct.has_no_barcode ? null : newProduct.barcode.trim(),
         additional_barcodes: newProduct.additional_barcodes ? 
           newProduct.additional_barcodes.split(',').map(b => b.trim()).filter(b => b) : [],
         stock_quantity: parseFloat(newProduct.stock_quantity) || 0,
@@ -832,7 +837,8 @@ const ProductManagementScreen = () => {
         min_stock_level: '5',
         supplier: '',
         currency: 'USD',
-        price_type: 'unit'
+        price_type: 'unit',
+        has_no_barcode: false
       });
       setShowAddProductModal(false);
       
@@ -848,6 +854,25 @@ const ProductManagementScreen = () => {
 
   const handleEditProduct = (product) => {
     setEditingProduct(product);
+    const barcode = (product.barcode || '').toString().trim().toUpperCase();
+    const lineCode = (product.line_code || '').toString().trim().toUpperCase();
+    const hasNoBarcode = (
+      !barcode || 
+      barcode === 'N/A' || 
+      barcode === 'NA' || 
+      barcode === 'NONE' || 
+      barcode === 'NULL' || 
+      barcode === 'UNDEFINED' ||
+      barcode === ''
+    ) && (
+      !lineCode || 
+      lineCode === 'N/A' || 
+      lineCode === 'NA' || 
+      lineCode === 'NONE' || 
+      lineCode === 'NULL' || 
+      lineCode === 'UNDEFINED' ||
+      lineCode === ''
+    );
     setEditedProduct({
       name: product.name || '',
       description: product.description || '',
@@ -861,7 +886,8 @@ const ProductManagementScreen = () => {
       min_stock_level: product.min_stock_level?.toString() || '5',
       supplier: product.supplier || '',
       currency: product.currency || 'USD',
-      price_type: product.price_type || 'unit'
+      price_type: product.price_type || 'unit',
+      has_no_barcode: hasNoBarcode
     });
     setShowEditProductModal(true);
   };
@@ -884,7 +910,7 @@ const ProductManagementScreen = () => {
         price: parseFloat(editedProduct.price),
         cost_price: parseFloat(editedProduct.cost_price) || 0,
         category: editedProduct.category,
-        barcode: editedProduct.barcode.trim(),
+        barcode: editedProduct.has_no_barcode ? null : editedProduct.barcode.trim(),
         additional_barcodes: editedProduct.additional_barcodes ? 
           editedProduct.additional_barcodes.split(',').map(b => b.trim()).filter(b => b) : [],
         stock_quantity: parseFloat(editedProduct.stock_quantity) || 0,
@@ -1141,11 +1167,23 @@ const ProductManagementScreen = () => {
 
   return (
     <Animated.View style={[styles.container, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
-      {/* Live Stock Notifications */}
+      {/* Success/Error Screen */}
+      {showSuccessScreen && successScreenData && (
+        <SuccessScreen
+          title={successScreenData.title}
+          subtitle={successScreenData.subtitle}
+          details={successScreenData.details}
+          buttonText={successScreenData.buttonText}
+          onContinue={successScreenData.onContinue}
+          isError={successScreenData.isError}
+        />
+      )}
+
+      {/* Live Stock Notifications - Fixed position at top, outside scroll */}
       {showNotification && currentNotification && (
         <Animated.View 
           style={[
-            styles.notificationContainer,
+            styles.notificationContainerFixed,
             { 
               backgroundColor: currentNotification.backgroundColor,
               opacity: notificationFadeAnim,
@@ -1165,24 +1203,23 @@ const ProductManagementScreen = () => {
         </Animated.View>
       )}
 
-      {/* Success/Error Screen */}
-      {showSuccessScreen && successScreenData && (
-        <SuccessScreen
-          title={successScreenData.title}
-          subtitle={successScreenData.subtitle}
-          details={successScreenData.details}
-          buttonText={successScreenData.buttonText}
-          onContinue={successScreenData.onContinue}
-          isError={successScreenData.isError}
-        />
-      )}
-
       {/* Manual Refresh Bar - At the very top */}
       {renderRefreshBar()}
 
       {/* Main Scrollable Content - Everything scrolls together */}
       <ScrollView 
-        style={styles.mainScrollView}
+        style={[styles.mainScrollView, Platform.OS === 'web' && styles.webScrollView]}
+        contentContainerStyle={Platform.OS === 'web' ? styles.webScrollContentContainer : styles.scrollContentContainer}
+        showsVerticalScrollIndicator={Platform.OS === 'web'}
+        scrollEventThrottle={16}
+        nestedScrollEnabled={Platform.OS === 'web'}
+        removeClippedSubviews={false}
+        onScroll={(event) => {
+          if (Platform.OS === 'web') {
+            const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+            const isAtBottom = contentOffset.y >= (contentSize.height - layoutMeasurement.height - 10);
+          }
+        }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
@@ -1396,10 +1433,21 @@ const ProductManagementScreen = () => {
                     value={newProduct.barcode}
                     onChangeText={(text) => setNewProduct({...newProduct, barcode: text})}
                     placeholder="Enter primary product barcode"
+                    editable={!newProduct.has_no_barcode}
                   />
                   <Text style={styles.formHelperText}>
                     Primary barcode for scanning products during sales
                   </Text>
+                </View>
+                
+                <View style={styles.checkboxField}>
+                  <TouchableOpacity 
+                    style={[styles.checkbox, newProduct.has_no_barcode && styles.checkboxChecked]}
+                    onPress={() => setNewProduct({...newProduct, has_no_barcode: !newProduct.has_no_barcode, barcode: !newProduct.has_no_barcode ? '' : newProduct.barcode})}
+                  >
+                    {newProduct.has_no_barcode && <Text style={styles.checkboxCheck}>✓</Text>}
+                  </TouchableOpacity>
+                  <Text style={styles.checkboxLabel}>This product has no barcode (will appear in Quick Products)</Text>
                 </View>
                 
                 <View style={styles.formField}>
@@ -1615,10 +1663,21 @@ const ProductManagementScreen = () => {
                     value={editedProduct.barcode}
                     onChangeText={(text) => setEditedProduct({...editedProduct, barcode: text})}
                     placeholder="Enter primary product barcode"
+                    editable={!editedProduct.has_no_barcode}
                   />
                   <Text style={styles.formHelperText}>
                     Primary barcode for scanning products during sales
                   </Text>
+                </View>
+                
+                <View style={styles.checkboxField}>
+                  <TouchableOpacity 
+                    style={[styles.checkbox, editedProduct.has_no_barcode && styles.checkboxChecked]}
+                    onPress={() => setEditedProduct({...editedProduct, has_no_barcode: !editedProduct.has_no_barcode, barcode: !editedProduct.has_no_barcode ? '' : editedProduct.barcode})}
+                  >
+                    {editedProduct.has_no_barcode && <Text style={styles.checkboxCheck}>✓</Text>}
+                  </TouchableOpacity>
+                  <Text style={styles.checkboxLabel}>This product has no barcode (will appear in Quick Products)</Text>
                 </View>
                 
                 <View style={styles.formField}>
@@ -1952,9 +2011,41 @@ const ProductManagementScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: '#0a0a0a' 
+  container: {
+    flex: 1,
+    backgroundColor: '#0a0a0a',
+    ...Platform.select({
+      web: {
+        height: '100vh',
+        overflow: 'hidden',
+        position: 'relative',
+      },
+    }),
+  },
+  webContainer: {
+    ...Platform.select({
+      web: {
+        height: '100vh',
+        maxHeight: '100vh',
+        overflow: 'auto',
+        WebkitOverflowScrolling: 'auto',
+        scrollBehavior: 'smooth',
+      },
+    }),
+  },
+  mainScrollView: {
+    flex: 1,
+  },
+  webScrollView: {
+    ...Platform.select({
+      web: {
+        height: '100vh',
+        overflow: 'auto',
+        WebkitOverflowScrolling: 'auto',
+        scrollBehavior: 'smooth',
+        position: 'relative',
+      },
+    }),
   },
   header: {
     flexDirection: 'row',
@@ -2118,16 +2209,30 @@ const styles = StyleSheet.create({
     flex: 1, 
     justifyContent: 'center', 
     alignItems: 'center',
-    backgroundColor: '#0a0a0a'
+    backgroundColor: '#0a0a0a',
+    height: '100%',
   },
   loadingText: { 
     color: '#fff', 
     marginTop: 16,
     fontSize: 16
   },
-  // Main Scrollable Content
-  mainScrollView: {
-    flex: 1,
+  scrollContentContainer: {
+    flexGrow: 1,
+    paddingBottom: Platform.OS === 'web' ? 100 : 0,
+  },
+  webScrollContentContainer: {
+    flexGrow: 1,
+    paddingBottom: 100,
+    minHeight: '100vh',
+    width: '100%',
+    ...Platform.select({
+      web: {
+        overflow: 'auto',
+        WebkitOverflowScrolling: 'auto',
+        scrollBehavior: 'smooth',
+      },
+    }),
   },
   tableContainer: {
     margin: 16,
@@ -2238,11 +2343,7 @@ const styles = StyleSheet.create({
 
   // Live Notification Styles
   notificationContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 1000,
+    marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -2254,7 +2355,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 16,
-    paddingTop: 50,
   },
   notificationText: {
     color: '#fff',
@@ -2671,6 +2771,38 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: 'bold',
+  },
+
+  // Checkbox styles
+  checkboxField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderWidth: 2,
+    borderColor: '#666',
+    borderRadius: 4,
+    marginRight: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  checkboxChecked: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#3b82f6',
+  },
+  checkboxCheck: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  checkboxLabel: {
+    color: '#ccc',
+    fontSize: 14,
+    flex: 1,
   },
 });
 

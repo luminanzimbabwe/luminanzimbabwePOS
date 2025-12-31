@@ -150,6 +150,7 @@ class SaleSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'status', 'refund_reason', 'refund_type', 'refund_amount', 'refunded_at', 'refunded_by', 'refunded_by_name', 'created_at']
 
 class CreateSaleSerializer(serializers.Serializer):
+    cashier_id = serializers.IntegerField()
     items = serializers.ListField(
         child=serializers.DictField(
             child=serializers.CharField()

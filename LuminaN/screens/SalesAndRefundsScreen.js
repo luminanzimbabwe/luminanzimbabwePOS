@@ -9,13 +9,12 @@ import {
   ActivityIndicator,
   TextInput,
   Modal,
-  FlatList,
   Platform,
-  Switch,
   RefreshControl,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { shopAPI } from '../services/api';
+import refundService from '../services/refundService';
 import { shopStorage } from '../services/storage';
 
 const SalesAndRefundsScreen = () => {
@@ -24,7 +23,6 @@ const SalesAndRefundsScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [salesHistory, setSalesHistory] = useState([]);
   const [filteredSales, setFilteredSales] = useState([]);
-  const [shopCredentials, setShopCredentials] = useState(null);
 
   // Filter states
   const [searchQuery, setSearchQuery] = useState('');
@@ -32,24 +30,20 @@ const SalesAndRefundsScreen = () => {
   const [dateFilter, setDateFilter] = useState('All');
   const [showFilters, setShowFilters] = useState(false);
 
-  // Receipt view states
-  const [showReceiptModal, setShowReceiptModal] = useState(false);
-  const [selectedSale, setSelectedSale] = useState(null);
-
   // Receipt search states
   const [receiptSearchQuery, setReceiptSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [showSearchResults, setShowSearchResults] = useState(false);
 
-  useEffect(() => {
-    loadShopCredentials();
-  }, []);
+  // Receipt view states
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [selectedSale, setSelectedSale] = useState(null);
+
+
 
   useEffect(() => {
-    if (shopCredentials) {
-      loadSalesHistory();
-    }
-  }, [shopCredentials]);
+    loadSalesHistory();
+  }, []);
 
   useEffect(() => {
     filterSalesHistory();
@@ -64,43 +58,54 @@ const SalesAndRefundsScreen = () => {
     }
   }, [receiptSearchQuery, salesHistory]);
 
-  const loadShopCredentials = async () => {
-    try {
-      const credentials = await shopStorage.getCredentials();
-      if (credentials) {
-        setShopCredentials(credentials);
-      } else {
-        navigation.replace('Login');
-      }
-    } catch (error) {
-      console.error('❌ Error loading credentials:', error);
-      navigation.replace('Login');
-    }
-  };
+
 
   const loadSalesHistory = async () => {
     try {
-      const authData = {
-        email: shopCredentials.email,
-        password: shopCredentials.shop_owner_master_password,
-      };
+      setLoading(true);
+      
+      // Get current cashier credentials
+      const credentials = await shopStorage.getCredentials();
+      if (!credentials) {
+        Alert.alert('Error', 'No cashier session found. Please log in again.');
+        return;
+      }
 
-      // Try to load from API, but provide mock data if endpoint doesn't exist
+      // Get today's date for filtering
+      const today = new Date().toISOString().slice(0, 10);
+      
+      // Try to load from API with today's filter
       let response;
       try {
-        response = await shopAPI.getCustomEndpoint('/sales-history/', authData);
-        console.log('💰 Sales history loaded from API:', response.data);
-        setSalesHistory(response.data || []);
-      } catch (apiError) {
-        console.log('⚠️ API endpoint not found, using mock data for demonstration');
+        // Add date filter to API call
+        response = await shopAPI.getSales({ date: today });
+        console.log('💰 Today\'s sales loaded from API:', response.data);
         
-        // Provide mock data for demonstration
-        const mockSalesHistory = [
+        let todaySales = response.data?.results || response.data || [];
+        
+        // Filter by current cashier if we have credentials
+        if (credentials.name) {
+          todaySales = todaySales.filter(sale => 
+            sale.cashier_name === credentials.name ||
+            sale.cashier?.name === credentials.name
+          );
+        }
+        
+        // Apply refunds to API data using refund service
+        const updatedApiSales = await refundService.applyRefundsToSales(todaySales);
+        
+        setSalesHistory(updatedApiSales);
+      } catch (apiError) {
+        console.log('⚠️ API endpoint not available, using demo data for today');
+        
+        // Provide demo data for today only
+        const now = new Date();
+        const todaySales = [
           {
             id: 1,
-            receipt_number: 'R001',
+            receipt_number: `R${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}`,
             created_at: new Date().toISOString(),
-            cashier_name: 'John Doe',
+            cashier_name: credentials.name || 'Current Cashier',
             payment_method: 'cash',
             customer_name: 'Alice Smith',
             total_amount: 45.99,
@@ -113,9 +118,9 @@ const SalesAndRefundsScreen = () => {
           },
           {
             id: 2,
-            receipt_number: 'R002',
-            created_at: new Date(Date.now() - 3600000).toISOString(), // 1 hour ago
-            cashier_name: 'Jane Smith',
+            receipt_number: `R${(now.getHours() + 1).toString().padStart(2, '0')}${(now.getMinutes() + 15).toString().padStart(2, '0')}`,
+            created_at: new Date(Date.now() - 3600000).toISOString(),
+            cashier_name: credentials.name || 'Current Cashier',
             payment_method: 'card',
             customer_name: 'Bob Johnson',
             total_amount: 89.50,
@@ -127,9 +132,9 @@ const SalesAndRefundsScreen = () => {
           },
           {
             id: 3,
-            receipt_number: 'R003',
-            created_at: new Date(Date.now() - 7200000).toISOString(), // 2 hours ago
-            cashier_name: 'Mike Wilson',
+            receipt_number: `R${(now.getHours() + 2).toString().padStart(2, '0')}${(now.getMinutes() + 30).toString().padStart(2, '0')}`,
+            created_at: new Date(Date.now() - 7200000).toISOString(),
+            cashier_name: credentials.name || 'Current Cashier',
             payment_method: 'mobile',
             total_amount: 25.75,
             status: 'completed',
@@ -138,38 +143,13 @@ const SalesAndRefundsScreen = () => {
               { product_id: 7, product_name: 'Bananas', quantity: 2, unit_price: 1.25 },
               { product_id: 8, product_name: 'Orange Juice', quantity: 1, unit_price: 15.99 }
             ]
-          },
-          {
-            id: 4,
-            receipt_number: 'R004',
-            created_at: new Date(Date.now() - 86400000).toISOString(), // 1 day ago
-            cashier_name: 'Sarah Davis',
-            payment_method: 'cash',
-            customer_name: 'Tom Brown',
-            total_amount: 67.30,
-            status: 'refunded',
-            items: [
-              { product_id: 9, product_name: 'Steak', quantity: 1, unit_price: 45.99 },
-              { product_id: 10, product_name: 'Potatoes', quantity: 5, unit_price: 4.26 }
-            ]
-          },
-          {
-            id: 5,
-            receipt_number: 'R005',
-            created_at: new Date(Date.now() - 172800000).toISOString(), // 2 days ago
-            cashier_name: 'John Doe',
-            payment_method: 'card',
-            total_amount: 156.80,
-            status: 'completed',
-            items: [
-              { product_id: 11, product_name: 'Salmon', quantity: 2, unit_price: 35.99 },
-              { product_id: 12, product_name: 'Vegetables', quantity: 1, unit_price: 25.99 },
-              { product_id: 13, product_name: 'Wine', quantity: 2, unit_price: 29.41 }
-            ]
           }
         ];
         
-        setSalesHistory(mockSalesHistory);
+        // Apply refunds to demo data using refund service
+        const updatedSalesHistory = await refundService.applyRefundsToSales(todaySales);
+        
+        setSalesHistory(updatedSalesHistory);
       }
       
     } catch (error) {
@@ -184,40 +164,12 @@ const SalesAndRefundsScreen = () => {
   const filterSalesHistory = () => {
     let filtered = [...salesHistory];
 
-    // Search filter
+    // Simple search filter (only for receipt number and customer name)
     if (searchQuery.trim()) {
       filtered = filtered.filter(sale =>
-        sale.cashier_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        sale.payment_method?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        sale.receipt_number?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         sale.customer_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        sale.receipt_number?.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-    }
-
-    // Payment method filter
-    if (selectedPaymentMethod !== 'All') {
-      filtered = filtered.filter(sale => sale.payment_method === selectedPaymentMethod);
-    }
-
-    // Date filter
-    if (dateFilter !== 'All') {
-      const now = new Date();
-      const filterDate = new Date();
-      
-      switch (dateFilter) {
-        case 'today':
-          filterDate.setHours(0, 0, 0, 0);
-          break;
-        case 'week':
-          filterDate.setDate(now.getDate() - 7);
-          break;
-        case 'month':
-          filterDate.setMonth(now.getMonth() - 1);
-          break;
-      }
-      
-      filtered = filtered.filter(sale => 
-        new Date(sale.created_at) >= filterDate
+        sale.id?.toString().includes(searchQuery)
       );
     }
 
@@ -297,23 +249,61 @@ const SalesAndRefundsScreen = () => {
     setShowReceiptModal(true);
   };
 
-  const printReceipt = (sale) => {
-    // In a real implementation, this would send the receipt to a printer
-    Alert.alert(
-      'Print Receipt',
-      `Receipt #${sale.receipt_number || sale.id} will be sent to the printer.`,
-      [{ text: 'OK' }]
-    );
+  const handleProcessRefund = (sale) => {
+    console.log('🔄 Processing refund for sale:', sale.id);
+    
+    // Process refund immediately without modal
+    processRefundDirect(sale);
   };
 
-  const shareReceipt = (sale) => {
-    // In a real implementation, this would open share options
-    Alert.alert(
-      'Share Receipt',
-      `Receipt #${sale.receipt_number || sale.id} sharing options would appear here.`,
-      [{ text: 'OK' }]
-    );
+  const processRefundDirect = async (sale) => {
+    try {
+      // Get current cashier credentials
+      const credentials = await shopStorage.getCredentials();
+      if (!credentials || !credentials.id) {
+        Alert.alert('Error', 'No cashier session found. Please log in again.');
+        return;
+      }
+
+      // Simulate processing delay
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Process refund using the new simple API (async)
+      const success = await refundService.processRefund(
+        sale.id, 
+        'Customer request - processed directly', 
+        sale.total_amount,
+        credentials.id, // Pass cashier ID
+        (errorMessage) => {
+          Alert.alert('Error', errorMessage);
+        }
+      );
+      
+      if (success) {
+        // Update local state
+        const updatedSales = [];
+        for (const s of salesHistory) {
+          if (s.id === sale.id) {
+            updatedSales.push({ ...s, status: 'refunded', refund_reason: 'Customer request - processed directly', is_refunded: true });
+          } else {
+            const isRefunded = await refundService.isRefunded(s.id);
+            updatedSales.push({ ...s, is_refunded: isRefunded });
+          }
+        }
+        
+        setSalesHistory(updatedSales);
+        Alert.alert('Success', `Refund processed successfully for ${sale.receipt_number || sale.id}!`);
+      } else {
+        Alert.alert('Error', 'Failed to process refund. Please try again.');
+      }
+      
+    } catch (error) {
+      console.error('❌ Error processing refund:', error);
+      Alert.alert('Error', 'Failed to process refund. Please try again.');
+    }
   };
+
+
 
   const renderSaleCard = ({ item: sale }) => (
     <View style={styles.saleCard}>
@@ -368,7 +358,7 @@ const SalesAndRefundsScreen = () => {
         <View style={styles.itemsSection}>
           <Text style={styles.itemsTitle}>🛍️ Items ({sale.items.length})</Text>
           {sale.items.slice(0, 3).map((item, index) => (
-            <View key={index} style={styles.itemRow}>
+            <View key={`${sale.id}-item-${item.product_id || item.product_name}-${index}`} style={styles.itemRow}>
               <Text style={styles.itemName}>{item.product_name}</Text>
               <View style={styles.itemDetails}>
                 <Text style={styles.itemQuantity}>Qty: {item.quantity}</Text>
@@ -390,12 +380,14 @@ const SalesAndRefundsScreen = () => {
           <Text style={styles.viewReceiptText}>🧾 View Receipt</Text>
         </TouchableOpacity>
         
-        <TouchableOpacity 
-          style={styles.printButton}
-          onPress={() => printReceipt(sale)}
-        >
-          <Text style={styles.printText}>🖨️ Print</Text>
-        </TouchableOpacity>
+        {sale.status === 'completed' && (
+          <TouchableOpacity 
+            style={styles.refundButton}
+            onPress={() => handleProcessRefund(sale)}
+          >
+            <Text style={styles.refundButtonText}>🔄 Process Refund</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -457,7 +449,7 @@ const SalesAndRefundsScreen = () => {
               <View style={styles.receiptItemsSection}>
                 <Text style={styles.receiptItemsTitle}>🛍️ Items Purchased</Text>
                 {selectedSale.items && selectedSale.items.map((item, index) => (
-                  <View key={index} style={styles.receiptItem}>
+                  <View key={`receipt-${selectedSale.id}-item-${item.product_id || item.product_name}-${index}`} style={styles.receiptItem}>
                     <View style={styles.receiptItemMain}>
                       <Text style={styles.receiptItemName}>{item.product_name}</Text>
                       <Text style={styles.receiptItemQuantity}>Qty: {item.quantity}</Text>
@@ -476,24 +468,46 @@ const SalesAndRefundsScreen = () => {
             </>
           )}
         </ScrollView>
-
-        <View style={styles.receiptModalActions}>
-          <TouchableOpacity
-            style={styles.shareButton}
-            onPress={() => selectedSale && shareReceipt(selectedSale)}
-          >
-            <Text style={styles.shareButtonText}>📤 Share</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={styles.printReceiptButton}
-            onPress={() => selectedSale && printReceipt(selectedSale)}
-          >
-            <Text style={styles.printReceiptButtonText}>🖨️ Print</Text>
-          </TouchableOpacity>
-        </View>
       </View>
     </Modal>
+  );
+
+
+
+  const renderReceiptSearch = () => (
+    <View style={styles.receiptSearchContainer}>
+      <Text style={styles.receiptSearchTitle}>🔍 Search Receipt by Number</Text>
+      <View style={styles.receiptSearchInputContainer}>
+        <TextInput
+          style={styles.receiptSearchInput}
+          placeholder="Enter receipt number..."
+          value={receiptSearchQuery}
+          onChangeText={setReceiptSearchQuery}
+          placeholderTextColor="#999"
+        />
+      </View>
+
+      {showSearchResults && searchResults.length > 0 && (
+        <View style={styles.searchResults}>
+          <Text style={styles.searchResultsTitle}>Search Results ({searchResults.length})</Text>
+          {searchResults.map((sale) => (
+            <TouchableOpacity
+              key={sale.id}
+              style={styles.searchResultItem}
+              onPress={() => {
+                setSearchQuery(sale.receipt_number || sale.id.toString());
+                setShowSearchResults(false);
+              }}
+            >
+              <Text style={styles.searchResultReceipt}>#{sale.receipt_number || sale.id}</Text>
+              <Text style={styles.searchResultDetails}>
+                {formatDate(sale.created_at)} - {formatCurrency(sale.total_amount)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    </View>
   );
 
   const renderFilters = () => (
@@ -501,111 +515,58 @@ const SalesAndRefundsScreen = () => {
       <View style={styles.searchContainer}>
         <TextInput
           style={styles.searchInput}
-          placeholder="Search sales, cashiers, customers..."
+          placeholder="Search by receipt number or customer..."
           value={searchQuery}
           onChangeText={setSearchQuery}
           placeholderTextColor="#999"
         />
       </View>
-
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll}>
-        {/* Date Filter */}
-        <TouchableOpacity
-          style={[
-            styles.filterButton,
-            dateFilter !== 'All' && styles.filterButtonActive
-          ]}
-          onPress={() => {
-            const filters = ['All', 'today', 'week', 'month'];
-            const currentIndex = filters.indexOf(dateFilter);
-            const nextIndex = (currentIndex + 1) % filters.length;
-            setDateFilter(filters[nextIndex]);
-          }}
-        >
-          <Text style={[
-            styles.filterButtonText,
-            dateFilter !== 'All' && styles.filterButtonTextActive
-          ]}>
-            📅 {dateFilter === 'All' ? 'All Time' : dateFilter.charAt(0).toUpperCase() + dateFilter.slice(1)}
-          </Text>
-        </TouchableOpacity>
-
-        {/* Payment Method Filter */}
-        <TouchableOpacity
-          style={[
-            styles.filterButton,
-            selectedPaymentMethod !== 'All' && styles.filterButtonActive
-          ]}
-          onPress={() => {
-            const methods = ['All', 'cash', 'card', 'mobile'];
-            const currentIndex = methods.indexOf(selectedPaymentMethod);
-            const nextIndex = (currentIndex + 1) % methods.length;
-            setSelectedPaymentMethod(methods[nextIndex]);
-          }}
-        >
-          <Text style={[
-            styles.filterButtonText,
-            selectedPaymentMethod !== 'All' && styles.filterButtonTextActive
-          ]}>
-            💳 {selectedPaymentMethod === 'All' ? 'All Payments' : selectedPaymentMethod.toUpperCase()}
-          </Text>
-        </TouchableOpacity>
-
-        {/* Toggle Filters */}
-        <TouchableOpacity
-          style={styles.filterButton}
-          onPress={() => setShowFilters(!showFilters)}
-        >
-          <Text style={styles.filterButtonText}>
-            {showFilters ? '👆 Hide' : '👇 More'}
-          </Text>
-        </TouchableOpacity>
-      </ScrollView>
-
-      {/* Advanced Filters */}
-      {showFilters && (
-        <View style={styles.advancedFilters}>
-          <Text style={styles.advancedFiltersTitle}>Active Filters:</Text>
-          <View style={styles.activeFilters}>
-            {searchQuery && (
-              <View style={styles.activeFilter}>
-                <Text style={styles.activeFilterText}>Search: "{searchQuery}"</Text>
-                <TouchableOpacity onPress={() => setSearchQuery('')}>
-                  <Text style={styles.removeFilterText}>✕</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-            {dateFilter !== 'All' && (
-              <View style={styles.activeFilter}>
-                <Text style={styles.activeFilterText}>Date: {dateFilter}</Text>
-                <TouchableOpacity onPress={() => setDateFilter('All')}>
-                  <Text style={styles.removeFilterText}>✕</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-            {selectedPaymentMethod !== 'All' && (
-              <View style={styles.activeFilter}>
-                <Text style={styles.activeFilterText}>Payment: {selectedPaymentMethod}</Text>
-                <TouchableOpacity onPress={() => setSelectedPaymentMethod('All')}>
-                  <Text style={styles.removeFilterText}>✕</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-        </View>
-      )}
+      
+      {/* Show current date and cashier info */}
+      <View style={styles.infoContainer}>
+        <Text style={styles.infoText}>📅 Today: {new Date().toLocaleDateString()}</Text>
+        <Text style={styles.infoText}>👤 Current Cashier: Sales Only</Text>
+      </View>
     </View>
   );
+
+  const clearAllRefunds = async () => {
+    Alert.alert(
+      'Clear All Refunds',
+      'Are you sure you want to clear all refund statuses? This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear All',
+          style: 'destructive',
+          onPress: async () => {
+            const success = await refundService.clearAllRefunds();
+            if (success) {
+              loadSalesHistory(); // Reload to reset to original state
+              Alert.alert('Success', 'All refund statuses have been cleared.');
+            } else {
+              Alert.alert('Error', 'Failed to clear refund statuses.');
+            }
+          }
+        }
+      ]
+    );
+  };
 
   const renderHeader = () => (
     <View style={styles.header}>
       <TouchableOpacity onPress={() => navigation.goBack()}>
         <Text style={styles.backButton}>← Back</Text>
       </TouchableOpacity>
-      <Text style={styles.headerTitle}>💰 Sales History</Text>
-      <TouchableOpacity onPress={() => setRefreshing(true) || loadSalesHistory()}>
-        <Text style={styles.refreshButton}>🔄</Text>
-      </TouchableOpacity>
+      <Text style={styles.headerTitle}>💰 Sales & Refunds</Text>
+      <View style={styles.headerActions}>
+        <TouchableOpacity onPress={clearAllRefunds} style={styles.clearButton}>
+          <Text style={styles.clearButtonText}>🗑️ Clear</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setRefreshing(true) || loadSalesHistory()}>
+          <Text style={styles.refreshButton}>🔄</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 
@@ -615,6 +576,7 @@ const SalesAndRefundsScreen = () => {
     const cashSales = filteredSales.filter(sale => sale.payment_method === 'cash').length;
     const cardSales = filteredSales.filter(sale => sale.payment_method === 'card').length;
     const mobileSales = filteredSales.filter(sale => sale.payment_method === 'mobile').length;
+    const refundedSales = filteredSales.filter(sale => sale.status === 'refunded').length;
     const avgTransaction = totalSales > 0 ? totalRevenue / totalSales : 0;
 
     return (
@@ -645,52 +607,13 @@ const SalesAndRefundsScreen = () => {
           <Text style={styles.statLabel}>Mobile Pay</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statIcon}>📈</Text>
-          <Text style={styles.statValue}>{formatCurrency(avgTransaction)}</Text>
-          <Text style={styles.statLabel}>Avg Transaction</Text>
+          <Text style={styles.statIcon}>🔄</Text>
+          <Text style={styles.statValue}>{refundedSales}</Text>
+          <Text style={styles.statLabel}>Refunds</Text>
         </View>
       </View>
     );
   };
-
-  const renderReceiptSearch = () => (
-    <View style={styles.receiptSearchContainer}>
-      <Text style={styles.receiptSearchTitle}>🔍 Search Receipt by Number</Text>
-      <View style={styles.receiptSearchInputContainer}>
-        <TextInput
-          style={styles.receiptSearchInput}
-          placeholder="Enter receipt number..."
-          value={receiptSearchQuery}
-          onChangeText={setReceiptSearchQuery}
-          placeholderTextColor="#999"
-        />
-        <TouchableOpacity style={styles.searchButton} onPress={searchReceipts}>
-          <Text style={styles.searchButtonText}>Search</Text>
-        </TouchableOpacity>
-      </View>
-
-      {showSearchResults && searchResults.length > 0 && (
-        <View style={styles.searchResults}>
-          <Text style={styles.searchResultsTitle}>Search Results ({searchResults.length})</Text>
-          {searchResults.map((sale) => (
-            <TouchableOpacity
-              key={sale.id}
-              style={styles.searchResultItem}
-              onPress={() => {
-                setSearchQuery(sale.receipt_number || sale.id.toString());
-                setShowSearchResults(false);
-              }}
-            >
-              <Text style={styles.searchResultReceipt}>#{sale.receipt_number || sale.id}</Text>
-              <Text style={styles.searchResultDetails}>
-                {formatDate(sale.created_at)} - {formatCurrency(sale.total_amount)}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-    </View>
-  );
 
   if (loading) {
     return (
@@ -705,7 +628,7 @@ const SalesAndRefundsScreen = () => {
   }
 
   return (
-    <View style={styles.container}>
+    <>
       <ScrollView 
         style={[styles.container, Platform.OS === 'web' && styles.webContainer]}
         contentContainerStyle={styles.scrollContentContainer}
@@ -713,6 +636,15 @@ const SalesAndRefundsScreen = () => {
         scrollEventThrottle={16}
         nestedScrollEnabled={Platform.OS === 'web'}
         removeClippedSubviews={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              loadSalesHistory();
+            }}
+          />
+        }
         onScroll={(event) => {
           if (Platform.OS === 'web') {
             const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
@@ -727,11 +659,11 @@ const SalesAndRefundsScreen = () => {
         
         {filteredSales.length === 0 ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>💰 No Sales Found</Text>
+            <Text style={styles.emptyTitle}>💰 No Sales Today</Text>
             <Text style={styles.emptyText}>
-              {searchQuery || selectedPaymentMethod !== 'All' || dateFilter !== 'All'
-                ? 'Try adjusting your search or filter criteria.'
-                : 'No sales have been recorded yet.'
+              {searchQuery.trim() 
+                ? `No receipts found matching "${searchQuery}" for today.`
+                : 'No sales have been recorded today yet.'
               }
             </Text>
           </View>
@@ -752,7 +684,7 @@ const SalesAndRefundsScreen = () => {
       
       {/* Receipt Modal */}
       {renderReceiptModal()}
-    </View>
+    </>
   );
 };
 
@@ -818,9 +750,23 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  clearButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  clearButtonText: {
+    color: '#ef4444',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   refreshButton: {
     color: '#3b82f6',
-    fontSize: 24,
+    fontSize: 20,
   },
   loadingContainer: {
     flex: 1,
@@ -857,17 +803,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#444',
-  },
-  searchButton: {
-    backgroundColor: '#3b82f6',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-    justifyContent: 'center',
-  },
-  searchButtonText: {
-    color: '#fff',
-    fontWeight: '600',
   },
   searchResults: {
     marginTop: 16,
@@ -914,6 +849,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#444',
   },
+  infoContainer: {
+    marginTop: 12,
+    paddingHorizontal: 4,
+  },
+  infoText: {
+    color: '#9ca3af',
+    fontSize: 12,
+    marginBottom: 4,
+  },
   filterScroll: {
     marginBottom: 8,
   },
@@ -938,41 +882,6 @@ const styles = StyleSheet.create({
   filterButtonTextActive: {
     color: '#fff',
   },
-  advancedFilters: {
-    backgroundColor: '#2a2a2a',
-    borderRadius: 8,
-    padding: 12,
-  },
-  advancedFiltersTitle: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  activeFilters: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  activeFilter: {
-    backgroundColor: '#3b82f6',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 12,
-    gap: 4,
-  },
-  activeFilterText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  removeFilterText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
   statsContainer: {
     flexDirection: 'row',
     padding: 16,
@@ -986,7 +895,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
-    marginHorizontal: 4,
+    marginHorizontal: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -994,19 +903,19 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   statIcon: {
-    fontSize: 24,
-    marginBottom: 8,
+    fontSize: 20,
+    marginBottom: 6,
     color: '#3b82f6',
   },
   statValue: {
     color: '#3b82f6',
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: 'bold',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   statLabel: {
     color: '#ccc',
-    fontSize: 11,
+    fontSize: 10,
     textAlign: 'center',
   },
 
@@ -1164,21 +1073,168 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  printButton: {
+  refundButton: {
     flex: 1,
-    backgroundColor: '#3b82f6',
+    backgroundColor: '#ef4444',
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 8,
     alignItems: 'center',
   },
-  printText: {
+  refundButtonText: {
     color: '#ffffff',
     fontSize: 14,
     fontWeight: '600',
   },
+  emptyState: {
+    alignItems: 'center',
+    padding: 40,
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+    margin: 16,
+    marginTop: 50,
+  },
+  emptyTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  emptyText: {
+    color: '#999',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
 
-  // Receipt Modal Styles
+  // Modal Styles
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#0a0a0a',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: '#1a1a1a',
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  modalTitle: {
+    color: '#ffffff',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  closeButton: {
+    color: '#ef4444',
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  modalContent: {
+    flex: 1,
+    padding: 20,
+  },
+  sectionTitle: {
+    color: '#e5e7eb',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  refundTypeSection: {
+    marginBottom: 20,
+  },
+  refundTypeOptions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  refundTypeButton: {
+    flex: 1,
+    backgroundColor: '#2a2a2a',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#374151',
+  },
+  refundTypeButtonActive: {
+    borderColor: '#ef4444',
+    backgroundColor: '#7f1d1d',
+  },
+  refundTypeIcon: {
+    fontSize: 24,
+    marginBottom: 8,
+  },
+  refundTypeText: {
+    color: '#9ca3af',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  refundTypeTextActive: {
+    color: '#ffffff',
+  },
+  refundAmountSection: {
+    marginBottom: 20,
+  },
+  refundAmountInput: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 8,
+    padding: 12,
+    color: '#ffffff',
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#444',
+  },
+  refundReasonSection: {
+    marginBottom: 20,
+  },
+  refundReasonInput: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 8,
+    padding: 12,
+    color: '#ffffff',
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#444',
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    padding: 20,
+    backgroundColor: '#1a1a1a',
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+    gap: 12,
+  },
+  cancelButton: {
+    flex: 1,
+    backgroundColor: '#374151',
+    paddingVertical: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  processButton: {
+    flex: 1,
+    backgroundColor: '#ef4444',
+    paddingVertical: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  processButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  disabledButton: {
+    opacity: 0.6,
+  },
   receiptHeader: {
     backgroundColor: '#1a1a1a',
     borderRadius: 12,
@@ -1276,230 +1332,6 @@ const styles = StyleSheet.create({
   receiptTimestamp: {
     color: '#9ca3af',
     fontSize: 12,
-  },
-  receiptModalActions: {
-    flexDirection: 'row',
-    padding: 20,
-    backgroundColor: '#1a1a1a',
-    borderTopWidth: 1,
-    borderTopColor: '#333',
-    gap: 12,
-  },
-  shareButton: {
-    flex: 1,
-    backgroundColor: '#8b5cf6',
-    paddingVertical: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  shareButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  printReceiptButton: {
-    flex: 1,
-    backgroundColor: '#3b82f6',
-    paddingVertical: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  printReceiptButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  emptyState: {
-    alignItems: 'center',
-    padding: 40,
-    backgroundColor: '#1a1a1a',
-    borderRadius: 12,
-    margin: 16,
-    marginTop: 50,
-  },
-  emptyTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  emptyText: {
-    color: '#999',
-    fontSize: 14,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-
-  // Modal Styles
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#0a0a0a',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    backgroundColor: '#1a1a1a',
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
-  },
-  modalTitle: {
-    color: '#ffffff',
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  closeButton: {
-    color: '#ef4444',
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  modalContent: {
-    flex: 1,
-    padding: 20,
-  },
-  saleSummary: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-  },
-  saleSummaryTitle: {
-    color: '#e5e7eb',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  saleSummaryText: {
-    color: '#9ca3af',
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  sectionTitle: {
-    color: '#e5e7eb',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  refundTypeSection: {
-    marginBottom: 20,
-  },
-  refundTypeOptions: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  refundTypeButton: {
-    flex: 1,
-    backgroundColor: '#2a2a2a',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#374151',
-  },
-  refundTypeButtonActive: {
-    borderColor: '#3b82f6',
-    backgroundColor: '#1e3a8a',
-  },
-  refundTypeIcon: {
-    fontSize: 24,
-    marginBottom: 8,
-  },
-  refundTypeText: {
-    color: '#9ca3af',
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  refundTypeTextActive: {
-    color: '#ffffff',
-  },
-  refundAmountSection: {
-    marginBottom: 20,
-  },
-  refundAmountInput: {
-    backgroundColor: '#2a2a2a',
-    borderRadius: 8,
-    padding: 12,
-    color: '#ffffff',
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#444',
-  },
-  refundReasonSection: {
-    marginBottom: 20,
-  },
-  refundReasonInput: {
-    backgroundColor: '#2a2a2a',
-    borderRadius: 8,
-    padding: 12,
-    color: '#ffffff',
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#444',
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  itemsSelectionSection: {
-    marginBottom: 20,
-  },
-  itemSelectionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#2a2a2a',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
-  },
-  itemInfo: {
-    flex: 1,
-  },
-  itemControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  refundQuantityInput: {
-    backgroundColor: '#374151',
-    borderRadius: 6,
-    padding: 8,
-    color: '#ffffff',
-    fontSize: 14,
-    width: 60,
-    textAlign: 'center',
-  },
-  modalActions: {
-    flexDirection: 'row',
-    padding: 20,
-    backgroundColor: '#1a1a1a',
-    borderTopWidth: 1,
-    borderTopColor: '#333',
-    gap: 12,
-  },
-  cancelButton: {
-    flex: 1,
-    backgroundColor: '#374151',
-    paddingVertical: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  processButton: {
-    flex: 1,
-    backgroundColor: '#dc2626',
-    paddingVertical: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  processButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
   },
 });
 

@@ -2,19 +2,21 @@ import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
-  TouchableOpacity,
   StyleSheet,
   ScrollView,
-  ActivityIndicator,
+  TouchableOpacity,
+  Dimensions,
   Alert,
-  FlatList,
-  RefreshControl,
+  Platform,
 } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
-import { shopStorage } from '../services/storage';
-import { shopAPI } from '../services/api';
+import { useNavigation } from '@react-navigation/native';
 
-const OrderConfirmationScreen = () => {
+import Icon from 'react-native-vector-icons/MaterialIcons';
+
+const { width } = Dimensions.get('window');
+
+const OrderConfirmationScreen = ({ route, navigation }) => {
+  const [orderData, setOrderData] = useState(null);
   const navigation = useNavigation();
   const route = useRoute();
   
@@ -496,50 +498,119 @@ const OrderConfirmationScreen = () => {
     const currentOrders = selectedTab === 'pending' ? pendingOrders : confirmedOrders;
     
     return (
-      <View style={styles.container}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Text style={styles.backButton}>← Back</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>✅ Order Confirmations</Text>
-          <TouchableOpacity onPress={onRefresh} style={styles.refreshButton} disabled={refreshing}>
-            <Text style={styles.refreshButtonText}>{refreshing ? '⏳' : '🔄'}</Text>
-          </TouchableOpacity>
+      <ScrollView 
+        style={[styles.container, Platform.OS === 'web' && styles.webContainer]}
+        contentContainerStyle={styles.scrollContentContainer}
+        showsVerticalScrollIndicator={true}
+        scrollEventThrottle={16}
+        nestedScrollEnabled={Platform.OS === 'web'}
+        removeClippedSubviews={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
+        {/* Ultimate Order Command Center Header */}
+        <View style={styles.ultimateHeader}>
+          {/* Header Background Overlay */}
+          <View style={styles.headerBackgroundOverlay} />
+          
+          {/* Command Center Badge */}
+          <View style={styles.commandCenterBadge}>
+            <Icon name="military-tech" size={20} color="#fbbf24" />
+            <Text style={styles.commandCenterBadgeText}>ORDER CENTER</Text>
+          </View>
+          
+          {/* Main Title */}
+          <Text style={styles.ultimateHeaderTitle}>🚀 Order Management Command Center</Text>
+          
+          {/* Subtitle with Enhanced Styling */}
+          <View style={styles.ultimateHeaderSubtitleContainer}>
+            <Icon name="assignment" size={16} color="#8b5cf6" />
+            <Text style={styles.ultimateHeaderSubtitle}>Enterprise Order Processing & Inventory Control</Text>
+            <Icon name="auto-awesome" size={16} color="#10b981" />
+          </View>
+          
+          {/* Premium Status Metrics */}
+          <View style={styles.ultimateGrowthMetrics}>
+            <View style={styles.growthMetricCard}>
+              <View style={styles.growthMetricIconContainer}>
+                <Icon name="assignment" size={16} color="#fbbf24" />
+              </View>
+              <View style={styles.growthMetricContent}>
+                <Text style={styles.growthMetricLabel}>Pending Orders</Text>
+                <Text style={styles.growthMetricValue}>{pendingOrders.length}</Text>
+              </View>
+              <View style={styles.growthTrendIndicator}>
+                <Icon name="hourglass-empty" size={14} color="#fbbf24" />
+              </View>
+            </View>
+            
+            <View style={styles.growthMetricCard}>
+              <View style={styles.growthMetricIconContainer}>
+                <Icon name="check-circle" size={16} color="#10b981" />
+              </View>
+              <View style={styles.growthMetricContent}>
+                <Text style={styles.growthMetricLabel}>Confirmed Orders</Text>
+                <Text style={styles.growthMetricValue}>{confirmedOrders.length}</Text>
+              </View>
+              <View style={styles.growthTrendIndicator}>
+                <Icon name="trending-up" size={14} color="#10b981" />
+              </View>
+            </View>
+          </View>
+          
+          {/* Real-time Status Indicator */}
+          <View style={styles.realtimeStatus}>
+            <View style={styles.statusDot} />
+            <Text style={styles.statusText}>Live Order Management Active</Text>
+            <Icon name="sync" size={14} color="#10b981" />
+          </View>
+          
+          {/* Performance Summary */}
+          <View style={styles.performanceSummary}>
+            <Text style={styles.performanceSummaryText}>
+              🏆 Elite Order Processing • {pendingOrders.length + confirmedOrders.length} Total Orders • {((confirmedOrders.length / Math.max(pendingOrders.length + confirmedOrders.length, 1)) * 100).toFixed(1)}% Completion Rate
+            </Text>
+          </View>
         </View>
 
-        {/* Tab Switcher */}
-        <View style={styles.tabContainer}>
-          <TouchableOpacity 
-            style={[styles.tab, selectedTab === 'pending' && styles.activeTab]}
-            onPress={() => setSelectedTab('pending')}
-          >
-            <Text style={[styles.tabText, selectedTab === 'pending' && styles.activeTabText]}>
-              ⏳ Pending ({pendingOrders.length})
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.tab, selectedTab === 'confirmed' && styles.activeTab]}
-            onPress={() => setSelectedTab('confirmed')}
-          >
-            <Text style={[styles.tabText, selectedTab === 'confirmed' && styles.activeTabText]}>
-              ✅ Confirmed ({confirmedOrders.length})
-            </Text>
-          </TouchableOpacity>
+        {/* Enterprise Tab Management System */}
+        <View style={styles.section}>
+          <View style={styles.categorySectionHeader}>
+            <Text style={styles.sectionTitle}>📋 Enterprise Order Management</Text>
+            <View style={styles.categoryStatusBadge}>
+              <Icon name="business" size={16} color="#8b5cf6" />
+              <Text style={styles.categoryStatusText}>Order Processing Intelligence</Text>
+            </View>
+          </View>
+          
+          <View style={styles.tabContainer}>
+            <TouchableOpacity 
+              style={[styles.tab, selectedTab === 'pending' && styles.activeTab]}
+              onPress={() => setSelectedTab('pending')}
+            >
+              <Icon name="hourglass-empty" size={16} color={selectedTab === 'pending' ? '#fff' : '#999'} />
+              <Text style={[styles.tabText, selectedTab === 'pending' && styles.activeTabText]}>
+                Pending ({pendingOrders.length})
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.tab, selectedTab === 'confirmed' && styles.activeTab]}
+              onPress={() => setSelectedTab('confirmed')}
+            >
+              <Icon name="check-circle" size={16} color={selectedTab === 'confirmed' ? '#fff' : '#999'} />
+              <Text style={[styles.tabText, selectedTab === 'confirmed' && styles.activeTabText]}>
+                Confirmed ({confirmedOrders.length})
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Orders List */}
-        <FlatList
-          data={currentOrders}
-          keyExtractor={(item, index) => `${item.id}-${index}`}
-          renderItem={renderOrderItem}
-          style={styles.ordersList}
-          contentContainerStyle={styles.ordersListContent}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-          ListEmptyComponent={
+        <View style={styles.ordersListContent}>
+          {currentOrders.length === 0 ? (
             <View style={styles.emptyContainer}>
+              <Icon name="inbox" size={64} color="#666" />
               <Text style={styles.emptyText}>
                 {selectedTab === 'pending' ? 'No pending orders' : 'No confirmed orders'}
               </Text>
@@ -550,9 +621,127 @@ const OrderConfirmationScreen = () => {
                 }
               </Text>
             </View>
-          }
-        />
-      </View>
+          ) : (
+            currentOrders.map((order, index) => (
+              <TouchableOpacity 
+                key={`${order.id}-${index}`}
+                style={[
+                  styles.ultimateOrderCard,
+                  order.status === 'confirmed' ? styles.confirmedOrderCard : styles.pendingOrderCard
+                ]}
+                onPress={() => handleViewOrder(order)}
+              >
+                {/* Elite Order Header */}
+                <View style={styles.ultimateOrderHeader}>
+                  <View style={styles.orderRankContainer}>
+                    <View style={[
+                      styles.eliteOrderRankBadge, 
+                      { backgroundColor: order.status === 'confirmed' ? '#10b981' : '#fbbf24' }
+                    ]}>
+                      <Text style={styles.eliteOrderRankText}>#{index + 1}</Text>
+                    </View>
+                    <View style={[styles.orderBadge, { backgroundColor: order.status === 'confirmed' ? '#10b981' : '#fbbf24'}]}>
+                      <Icon name={order.status === 'confirmed' ? 'check-circle' : 'hourglass-empty'} size={12} color="#ffffff" />
+                      <Text style={styles.orderBadgeText}>{order.status === 'confirmed' ? 'CONFIRMED' : 'PENDING'}</Text>
+                    </View>
+                  </View>
+                  <View style={[styles.orderPerformanceCrown, { backgroundColor: order.status === 'confirmed' ? '#10b981' : '#fbbf24'}]}>
+                    <Icon name="assignment" size={16} color="#ffffff" />
+                  </View>
+                </View>
+                
+                {/* Order Name */}
+                <Text style={styles.ultimateOrderName}>📋 Order {order.id}</Text>
+                
+                {/* Elite Order Metrics */}
+                <View style={styles.ultimateOrderMetrics}>
+                  <View style={styles.orderMetricRow}>
+                    <View style={styles.orderMetricIconContainer}>
+                      <Icon name="business" size={14} color="#3b82f6" />
+                    </View>
+                    <View style={styles.orderMetricContent}>
+                      <Text style={styles.orderMetricLabel}>Supplier</Text>
+                      <Text style={styles.orderMetricValue}>{order.supplierName}</Text>
+                    </View>
+                  </View>
+                  
+                  <View style={styles.orderMetricRow}>
+                    <View style={styles.orderMetricIconContainer}>
+                      <Icon name="inventory" size={14} color="#8b5cf6" />
+                    </View>
+                    <View style={styles.orderMetricContent}>
+                      <Text style={styles.orderMetricLabel}>Items</Text>
+                      <Text style={styles.orderMetricValue}>{order.receivingItems?.length || 0}</Text>
+                    </View>
+                  </View>
+                  
+                  <View style={styles.orderMetricRow}>
+                    <View style={styles.orderMetricIconContainer}>
+                      <Icon name="attach-money" size={14} color="#10b981" />
+                    </View>
+                    <View style={styles.orderMetricContent}>
+                      <Text style={styles.orderMetricLabel}>Total Value</Text>
+                      <Text style={[styles.orderMetricValue, { color: '#10b981'}]}>${order.totals?.totalValue?.toFixed(2) || '0.00'}</Text>
+                    </View>
+                  </View>
+                  
+                  <View style={styles.orderMetricRow}>
+                    <View style={styles.orderMetricIconContainer}>
+                      <Icon name="schedule" size={14} color="#f59e0b" />
+                    </View>
+                    <View style={styles.orderMetricContent}>
+                      <Text style={styles.orderMetricLabel}>Date</Text>
+                      <Text style={styles.orderMetricValue}>{new Date(order.createdAt).toLocaleDateString()}</Text>
+                    </View>
+                  </View>
+                </View>
+                
+                {/* Elite Order Progress */}
+                <View style={styles.ultimateOrderProgress}>
+                  <View style={styles.orderProgressBarBg}>
+                    <View 
+                      style={[
+                        styles.orderProgressBarFill,
+                        { 
+                          width: order.status === 'confirmed' ? '100%' : '60%',
+                          backgroundColor: order.status === 'confirmed' ? '#10b981' : '#fbbf24'
+                        }
+                      ]} 
+                    />
+                  </View>
+                  <Text style={styles.orderProgressLabel}>
+                    {order.status === 'confirmed' ? 'Order Completed' : 'Awaiting Confirmation'}
+                  </Text>
+                </View>
+                
+                {/* Elite Order Stats */}
+                <View style={styles.ultimateOrderStats}>
+                  <View style={styles.orderStatItem}>
+                    <Text style={styles.orderStatLabel}>Reference</Text>
+                    <Text style={styles.orderStatValue}>{order.reference || 'N/A'}</Text>
+                  </View>
+                  <View style={styles.orderStatItem}>
+                    <Text style={styles.orderStatLabel}>Invoice</Text>
+                    <Text style={styles.orderStatValue}>{order.invoiceNumber || 'N/A'}</Text>
+                  </View>
+                  <View style={styles.orderStatItem}>
+                    <Text style={styles.orderStatLabel}>Status</Text>
+                    <Text style={[styles.orderStatValue, { color: order.status === 'confirmed' ? '#10b981' : '#fbbf24'}]}>
+                      {order.status === 'confirmed' ? '✅ Complete' : '⏳ Pending'}
+                    </Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ))
+          )}
+        </View>
+        
+        {/* Bottom padding for web scrolling */}
+        <View style={{ 
+          height: Platform.OS === 'web' ? 100 : 20,
+          minHeight: Platform.OS === 'web' ? 100 : 0
+        }} />
+      </ScrollView>
     );
   };
 
@@ -571,8 +760,18 @@ const OrderConfirmationScreen = () => {
     
     if (!order || !order.receivingItems || order.receivingItems.length === 0) {
       return (
-        <View style={styles.container}>
+        <View style={[styles.container, Platform.OS === 'web' && styles.webContainer]}>
+          <View style={styles.ultimateHeader}>
+            <View style={styles.headerBackgroundOverlay} />
+            <TouchableOpacity onPress={viewingOrder ? handleBackToList : () => navigation.goBack()} style={styles.backButton}>
+              <Icon name="arrow-back" size={24} color="#fff" />
+              <Text style={styles.backButtonText}>Back</Text>
+            </TouchableOpacity>
+            <Text style={styles.ultimateHeaderTitle}>⚠️ Order Not Found</Text>
+            <Text style={styles.ultimateHeaderSubtitle}>Invalid Order Data</Text>
+          </View>
           <View style={styles.errorContainer}>
+            <Icon name="error-outline" size={64} color="#ef4444" />
             <Text style={styles.errorTitle}>⚠️ Invalid Order</Text>
             <Text style={styles.errorText}>
               No order data found. Please go back and create an order first.
@@ -581,6 +780,7 @@ const OrderConfirmationScreen = () => {
               style={styles.errorButton}
               onPress={() => navigation.goBack()}
             >
+              <Icon name="arrow-back" size={20} color="#fff" />
               <Text style={styles.errorButtonText}>← Go Back</Text>
             </TouchableOpacity>
           </View>
@@ -589,164 +789,611 @@ const OrderConfirmationScreen = () => {
     }
     
     return (
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={viewingOrder ? handleBackToList : () => navigation.goBack()}>
-            <Text style={styles.backButton}>← Back to {viewingOrder ? 'List' : 'Orders'}</Text>
+      <ScrollView 
+        style={[styles.container, Platform.OS === 'web' && styles.webContainer]}
+        contentContainerStyle={styles.scrollContentContainer}
+        showsVerticalScrollIndicator={true}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
+        {/* Ultimate Order Details Header */}
+        <View style={styles.ultimateHeader}>
+          <View style={styles.headerBackgroundOverlay} />
+          
+          <TouchableOpacity onPress={viewingOrder ? handleBackToList : () => navigation.goBack()} style={styles.backButton}>
+            <Icon name="arrow-back" size={24} color="#fff" />
+            <Text style={styles.backButtonText}>Back to Orders</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>📋 Order Details</Text>
-          <TouchableOpacity onPress={onRefresh} style={styles.refreshButton} disabled={refreshing}>
-            <Text style={styles.refreshButtonText}>{refreshing ? '⏳' : '🔄'}</Text>
-          </TouchableOpacity>
+          
+          <View style={styles.commandCenterBadge}>
+            <Icon name="assignment" size={20} color="#fbbf24" />
+            <Text style={styles.commandCenterBadgeText}>ORDER DETAILS</Text>
+          </View>
+          
+          <Text style={styles.ultimateHeaderTitle}>📋 Order {order.id}</Text>
+          
+          <View style={styles.ultimateHeaderSubtitleContainer}>
+            <Icon name="business" size={16} color="#3b82f6" />
+            <Text style={styles.ultimateHeaderSubtitle}>{order.supplierName}</Text>
+            <Icon name={order.status === 'confirmed' ? "check-circle" : "hourglass-empty"} size={16} color={order.status === 'confirmed' ? "#10b981" : "#fbbf24"} />
+          </View>
+          
+          {/* Premium Status Metrics */}
+          <View style={styles.ultimateGrowthMetrics}>
+            <View style={styles.growthMetricCard}>
+              <View style={styles.growthMetricIconContainer}>
+                <Icon name="inventory" size={16} color="#8b5cf6" />
+              </View>
+              <View style={styles.growthMetricContent}>
+                <Text style={styles.growthMetricLabel}>Total Items</Text>
+                <Text style={styles.growthMetricValue}>{order.receivingItems?.length || 0}</Text>
+              </View>
+              <View style={styles.growthTrendIndicator}>
+                <Icon name="trending-up" size={14} color="#8b5cf6" />
+              </View>
+            </View>
+            
+            <View style={styles.growthMetricCard}>
+              <View style={styles.growthMetricIconContainer}>
+                <Icon name="attach-money" size={16} color="#10b981" />
+              </View>
+              <View style={styles.growthMetricContent}>
+                <Text style={styles.growthMetricLabel}>Total Value</Text>
+                <Text style={styles.growthMetricValue}>${order.totals?.totalValue?.toFixed(2) || '0.00'}</Text>
+              </View>
+              <View style={styles.growthTrendIndicator}>
+                <Icon name="trending-up" size={14} color="#10b981" />
+              </View>
+            </View>
+          </View>
+          
+          {/* Real-time Status Indicator */}
+          <View style={styles.realtimeStatus}>
+            <View style={[styles.statusDot, { backgroundColor: order.status === 'confirmed' ? '#10b981' : '#fbbf24'}]} />
+            <Text style={[styles.statusText, { color: order.status === 'confirmed' ? '#10b981' : '#fbbf24'}]}>
+              {order.status === 'confirmed' ? 'Order Completed' : 'Pending Confirmation'}
+            </Text>
+            <Icon name={order.status === 'confirmed' ? "verified" : "schedule"} size={14} color={order.status === 'confirmed' ? "#10b981" : "#fbbf24"} />
+          </View>
+          
+          {/* Performance Summary */}
+          <View style={styles.performanceSummary}>
+            <Text style={styles.performanceSummaryText}>
+              📈 Order Intelligence • {order.receivingItems?.length || 0} Items • ${order.totals?.totalValue?.toFixed(2) || '0.00'} Value • {order.status === 'confirmed' ? '✅ Completed' : '⏳ In Progress'}
+            </Text>
+          </View>
         </View>
 
-        {/* Order Summary Card */}
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryTitle}>📋 Order Summary</Text>
+        {/* Enterprise Order Information Section */}
+        <View style={styles.section}>
+          <View style={styles.categorySectionHeader}>
+            <Text style={styles.sectionTitle}>📋 Order Information</Text>
+            <View style={styles.categoryStatusBadge}>
+              <Icon name="info" size={16} color="#3b82f6" />
+              <Text style={styles.categoryStatusText}>Order Intelligence</Text>
+            </View>
+          </View>
           
-          <View style={styles.orderInfo}>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Order ID:</Text>
-              <Text style={styles.infoValue}>{order.id}</Text>
+          <View style={styles.ultimateCategoryCard}>
+            <View style={styles.ultimateCategoryHeader}>
+              <View style={styles.categoryRankContainer}>
+                <Text style={styles.categoryRank}>#1</Text>
+                <View style={[styles.categoryBadge, { backgroundColor: '#3b82f6'}]}>
+                  <Icon name="assignment" size={12} color="#ffffff" />
+                  <Text style={styles.categoryBadgeText}>ORDER</Text>
+                </View>
+              </View>
+              <View style={[styles.categoryPerformanceIndicator, { backgroundColor: order.status === 'confirmed' ? '#10b981' : '#fbbf24'}]}>
+                <Icon name={order.status === 'confirmed' ? "check-circle" : "hourglass-empty"} size={14} color="#ffffff" />
+              </View>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Reference:</Text>
-              <Text style={styles.infoValue}>{order.reference}</Text>
+            
+            <Text style={styles.ultimateCategoryName}>Order {order.id}</Text>
+            
+            <View style={styles.ultimateCategoryMetrics}>
+              <View style={styles.categoryMetricRow}>
+                <View style={styles.categoryMetricIconContainer}>
+                  <Icon name="confirmation-number" size={14} color="#3b82f6" />
+                </View>
+                <View style={styles.categoryMetricContent}>
+                  <Text style={styles.categoryMetricLabel}>Order ID</Text>
+                  <Text style={[styles.categoryMetricValue, { color: '#3b82f6'}]}>{order.id}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.categoryMetricRow}>
+                <View style={styles.categoryMetricIconContainer}>
+                  <Icon name="receipt" size={14} color="#8b5cf6" />
+                </View>
+                <View style={styles.categoryMetricContent}>
+                  <Text style={styles.categoryMetricLabel}>Reference</Text>
+                  <Text style={[styles.categoryMetricValue, { color: '#8b5cf6'}]}>{order.reference || 'N/A'}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.categoryMetricRow}>
+                <View style={styles.categoryMetricIconContainer}>
+                  <Icon name="description" size={14} color="#f59e0b" />
+                </View>
+                <View style={styles.categoryMetricContent}>
+                  <Text style={styles.categoryMetricLabel}>Invoice</Text>
+                  <Text style={[styles.categoryMetricValue, { color: '#f59e0b'}]}>{order.invoiceNumber || 'N/A'}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.categoryMetricRow}>
+                <View style={styles.categoryMetricIconContainer}>
+                  <Icon name="business" size={14} color="#10b981" />
+                </View>
+                <View style={styles.categoryMetricContent}>
+                  <Text style={styles.categoryMetricLabel}>Supplier</Text>
+                  <Text style={[styles.categoryMetricValue, { color: '#10b981'}]}>{order.supplierName}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.categoryMetricRow}>
+                <View style={styles.categoryMetricIconContainer}>
+                  <Icon name="schedule" size={14} color="#ef4444" />
+                </View>
+                <View style={styles.categoryMetricContent}>
+                  <Text style={styles.categoryMetricLabel}>Date</Text>
+                  <Text style={[styles.categoryMetricValue, { color: '#ef4444'}]}>{order.receivingDate}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.categoryMetricRow}>
+                <View style={styles.categoryMetricIconContainer}>
+                  <Icon name={order.status === 'confirmed' ? "verified" : "pending"} size={14} color={order.status === 'confirmed' ? "#10b981" : "#fbbf24"} />
+                </View>
+                <View style={styles.categoryMetricContent}>
+                  <Text style={styles.categoryMetricLabel}>Status</Text>
+                  <Text style={[styles.categoryMetricValue, { color: order.status === 'confirmed' ? '#10b981' : '#fbbf24'}]}>
+                    {order.status === 'confirmed' ? 'Confirmed' : 'Pending Review'}
+                  </Text>
+                </View>
+              </View>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Invoice:</Text>
-              <Text style={styles.infoValue}>{order.invoiceNumber}</Text>
-            </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Supplier:</Text>
-              <Text style={styles.infoValue}>{order.supplierName}</Text>
-            </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Date:</Text>
-              <Text style={styles.infoValue}>{order.receivingDate}</Text>
-            </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Status:</Text>
-              <Text style={[
-                styles.infoValue, 
-                { color: order.status === 'confirmed' ? '#10b981' : '#fbbf24' }
-              ]}>
-                {order.status === 'confirmed' ? 'Confirmed' : 'Pending Review'}
+            
+            <View style={styles.ultimateCategoryProgress}>
+              <View style={styles.categoryProgressBarBg}>
+                <View 
+                  style={[
+                    styles.categoryProgressBarFill,
+                    { 
+                      width: order.status === 'confirmed' ? '100%' : '60%',
+                      backgroundColor: order.status === 'confirmed' ? '#10b981' : '#fbbf24'
+                    }
+                  ]} 
+                />
+              </View>
+              <Text style={styles.categoryProgressLabel}>
+                {order.status === 'confirmed' ? 'Order Completed' : 'Awaiting Confirmation'}
               </Text>
             </View>
           </View>
         </View>
 
-        {/* Items List */}
-        <View style={styles.itemsCard}>
-          <Text style={styles.itemsTitle}>📦 Items ({order.receivingItems?.length || 0})</Text>
-          
-          {order.receivingItems?.map((item, index) => (
-            <View key={item.id || index} style={styles.orderItem}>
-              <View style={styles.itemHeader}>
-                <Text style={styles.itemName}>{item.product?.name || `Product ${index + 1}`}</Text>
-                <Text style={styles.itemTotal}>${item.totalCost?.toFixed(2) || '0.00'}</Text>
-              </View>
-              
-              <View style={styles.itemDetails}>
-                <Text style={styles.itemDetail}>Quantity: {item.quantity}</Text>
-                <Text style={styles.itemDetail}>Unit Cost: ${item.costPrice?.toFixed(2) || '0.00'}</Text>
-              </View>
-
-              <View style={styles.itemMeta}>
-                {item.qualityRating && (
-                  <Text style={styles.qualityText}>⭐ Quality: {item.qualityRating}/5</Text>
-                )}
-                {item.damageCount > 0 && (
-                  <Text style={styles.damageText}>⚠️ {item.damageCount} damaged</Text>
-                )}
-                {item.updateBaseCost && (
-                  <Text style={styles.updateText}>📈 Will update base cost</Text>
-                )}
-              </View>
-
-              {item.damageNotes && (
-                <Text style={styles.notesText}>Note: {item.damageNotes}</Text>
-              )}
+        {/* Enterprise Items Analysis Section */}
+        <View style={styles.section}>
+          <View style={styles.topProductsSectionHeader}>
+            <Text style={styles.sectionTitle}>📦 Items Analysis</Text>
+            <View style={styles.topProductsStatusBadge}>
+              <Icon name="inventory" size={16} color="#f59e0b" />
+              <Text style={styles.topProductsStatusText}>Product Intelligence</Text>
             </View>
-          ))}
+          </View>
+          
+          <View style={[
+            styles.ultimateProductGrid, 
+            order.receivingItems?.length > 4 ? styles.singleColumnUltimateProductGrid : null
+          ]}>
+            {order.receivingItems?.map((item, index) => {
+              const maxValue = Math.max(...(order.receivingItems?.map(i => i.totalCost) || [1]));
+              const valuePercentage = (item.totalCost / maxValue) * 100;
+              const performanceColor = valuePercentage > 80 ? '#10b981' : valuePercentage > 50 ? '#f59e0b' : '#3b82f6';
+              
+              return (
+                <View key={item.id || index} style={[
+                  styles.ultimateProductCard,
+                  { borderLeftColor: performanceColor },
+                  index < 3 && styles.topRankCard,
+                  order.receivingItems?.length > 4 ? styles.singleColumnUltimateProductCard : null
+                ]}>
+                  {/* Elite Rank Badge */}
+                  <View style={styles.ultimateProductHeader}>
+                    <View style={styles.productRankContainer}>
+                      <View style={[
+                        styles.eliteRankBadge, 
+                        { backgroundColor: performanceColor }
+                      ]}>
+                        <Text style={styles.eliteRankText}>#{index + 1}</Text>
+                      </View>
+                      <View style={[styles.categoryBadge, { backgroundColor: performanceColor}]}>
+                        <Icon name="local-offer" size={10} color="#ffffff" />
+                        <Text style={styles.categoryBadgeText}>ITEM</Text>
+                      </View>
+                    </View>
+                    <View style={[styles.performanceCrown, { backgroundColor: performanceColor}]}>
+                      <Icon name="inventory" size={14} color="#ffffff" />
+                    </View>
+                  </View>
+                  
+                  {/* Product Name */}
+                  <Text style={styles.ultimateProductName}>{item.product?.name || `Product ${index + 1}`}</Text>
+                  
+                  {/* Elite Metrics */}
+                  <View style={styles.ultimateProductMetrics}>
+                    <View style={styles.productMetricRow}>
+                      <View style={styles.productMetricIconContainer}>
+                        <Icon name="attach-money" size={14} color={performanceColor} />
+                      </View>
+                      <View style={styles.productMetricContent}>
+                        <Text style={styles.productMetricLabel}>Total Cost</Text>
+                        <Text style={[styles.productMetricValue, { color: performanceColor}]}>${item.totalCost?.toFixed(2) || '0.00'}</Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.productMetricRow}>
+                      <View style={styles.productMetricIconContainer}>
+                        <Icon name="scale" size={14} color="#3b82f6" />
+                      </View>
+                      <View style={styles.productMetricContent}>
+                        <Text style={styles.productMetricLabel}>Quantity</Text>
+                        <Text style={styles.productMetricValue}>{item.quantity}</Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.productMetricRow}>
+                      <View style={styles.productMetricIconContainer}>
+                        <Icon name="calculate" size={14} color="#8b5cf6" />
+                      </View>
+                      <View style={styles.productMetricContent}>
+                        <Text style={styles.productMetricLabel}>Unit Cost</Text>
+                        <Text style={styles.productMetricValue}>${item.costPrice?.toFixed(2) || '0.00'}</Text>
+                      </View>
+                    </View>
+                  </View>
+                  
+                  {/* Elite Performance Bar */}
+                  <View style={styles.ultimateProductProgress}>
+                    <View style={styles.productProgressBarBg}>
+                      <View 
+                        style={[
+                          styles.productProgressBarFill,
+                          { 
+                            width: `${valuePercentage}%`,
+                            backgroundColor: performanceColor
+                          }
+                        ]} 
+                      />
+                    </View>
+                    <Text style={styles.productProgressLabel}>{valuePercentage.toFixed(0)}% of highest value</Text>
+                  </View>
+                  
+                  {/* Elite Stats */}
+                  <View style={styles.ultimateProductStats}>
+                    <View style={styles.productStatItem}>
+                      <Text style={styles.productStatLabel}>Value Share</Text>
+                      <Text style={styles.productStatValue}>{((item.totalCost / (order.totals?.totalValue || 1)) * 100).toFixed(1)}%</Text>
+                    </View>
+                    <View style={styles.productStatItem}>
+                      <Text style={styles.productStatLabel}>Quality</Text>
+                      <Text style={styles.productStatValue}>{item.qualityRating ? `${item.qualityRating}/5` : 'N/A'}</Text>
+                    </View>
+                    <View style={styles.productStatItem}>
+                      <Text style={styles.productStatLabel}>Status</Text>
+                      <Text style={[styles.productStatValue, { color: performanceColor}]}>
+                        {item.damageCount > 0 ? '⚠️ Damaged' : '✅ Good'}
+                      </Text>
+                    </View>
+                  </View>
+                  
+                  {/* Additional Info */}
+                  {item.updateBaseCost && (
+                    <View style={styles.aiInsightRecommendation}>
+                      <Text style={styles.aiRecommendationText}>📈 Will update base cost</Text>
+                    </View>
+                  )}
+                  
+                  {item.damageNotes && (
+                    <View style={styles.notesCard}>
+                      <Text style={styles.notesText}>Note: {item.damageNotes}</Text>
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+          </View>
         </View>
 
-        {/* Totals Summary */}
-        <View style={styles.totalsCard}>
-          <Text style={styles.totalsTitle}>💰 Order Totals</Text>
+        {/* Enterprise Financial Analysis Section */}
+        <View style={styles.section}>
+          <View style={styles.currencySectionHeader}>
+            <Text style={styles.sectionTitle}>💰 Financial Analysis</Text>
+            <View style={styles.currencyStatusBadge}>
+              <Icon name="account-balance" size={16} color="#10b981" />
+              <Text style={styles.currencyStatusText}>Financial Intelligence</Text>
+            </View>
+          </View>
           
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total Items:</Text>
-            <Text style={styles.totalValue}>{order.totals?.totalItems || order.receivingItems?.length || 0}</Text>
-          </View>
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total Quantity:</Text>
-            <Text style={styles.totalValue}>{order.totals?.totalQuantity || '0'}</Text>
-          </View>
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total Value:</Text>
-            <Text style={[styles.totalValue, styles.totalHighlight]}>
-              ${order.totals?.totalValue?.toFixed(2) || '0.00'}
-            </Text>
-          </View>
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total Damaged:</Text>
-            <Text style={styles.totalValue}>{order.totals?.totalDamage || '0'}</Text>
+          <View style={[
+            styles.ultimateCurrencyGrid, 
+            2 ? styles.singleColumnCurrencyGrid : null
+          ]}>
+            {/* Total Items */}
+            <View style={[
+              styles.ultimateCurrencyCard,
+              { borderLeftColor: '#3b82f6' },
+              styles.singleColumnCurrencyCard
+            ]}>
+              <View style={styles.ultimateCurrencyHeader}>
+                <View style={styles.currencyRankContainer}>
+                  <View style={[styles.eliteCurrencyRankBadge, { backgroundColor: '#3b82f6'}]}>
+                    <Text style={styles.eliteCurrencyRankText}>#1</Text>
+                  </View>
+                  <View style={[styles.currencyFlagBadge, { backgroundColor: '#3b82f6'}]}>
+                    <Text style={styles.currencyFlagText}>📦</Text>
+                  </View>
+                  <View style={[styles.currencyBadge, { backgroundColor: '#3b82f6'}]}>
+                    <Text style={styles.currencyBadgeText}>ITEMS</Text>
+                  </View>
+                </View>
+                <View style={[styles.currencyPerformanceCrown, { backgroundColor: '#3b82f6'}]}>
+                  <Icon name="inventory" size={16} color="#ffffff" />
+                </View>
+              </View>
+              
+              <View style={styles.currencyNameContainer}>
+                <Text style={styles.ultimateCurrencyName}>Total Items</Text>
+                <Text style={styles.currencySubtitle}>Order quantity analysis</Text>
+              </View>
+              
+              <View style={styles.ultimateCurrencyMetrics}>
+                <View style={styles.currencyMetricRow}>
+                  <View style={styles.currencyMetricIconContainer}>
+                    <Icon name="inventory" size={16} color="#3b82f6" />
+                  </View>
+                  <View style={styles.currencyMetricContent}>
+                    <Text style={styles.currencyMetricLabel}>Total Items</Text>
+                    <Text style={[styles.currencyMetricValue, { color: '#3b82f6'}]}>{order.totals?.totalItems || order.receivingItems?.length || 0}</Text>
+                  </View>
+                </View>
+                
+                <View style={styles.currencyMetricRow}>
+                  <View style={styles.currencyMetricIconContainer}>
+                    <Icon name="scale" size={16} color="#8b5cf6" />
+                  </View>
+                  <View style={styles.currencyMetricContent}>
+                    <Text style={styles.currencyMetricLabel}>Total Quantity</Text>
+                    <Text style={[styles.currencyMetricValue, { color: '#8b5cf6'}]}>{order.totals?.totalQuantity || '0'}</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+            
+            {/* Total Value */}
+            <View style={[
+              styles.ultimateCurrencyCard,
+              { borderLeftColor: '#10b981' },
+              styles.singleColumnCurrencyCard
+            ]}>
+              <View style={styles.ultimateCurrencyHeader}>
+                <View style={styles.currencyRankContainer}>
+                  <View style={[styles.eliteCurrencyRankBadge, { backgroundColor: '#10b981'}]}>
+                    <Text style={styles.eliteCurrencyRankText}>#2</Text>
+                  </View>
+                  <View style={[styles.currencyFlagBadge, { backgroundColor: '#10b981'}]}>
+                    <Text style={styles.currencyFlagText}>💰</Text>
+                  </View>
+                  <View style={[styles.currencyBadge, { backgroundColor: '#10b981'}]}>
+                    <Text style={styles.currencyBadgeText}>VALUE</Text>
+                  </View>
+                </View>
+                <View style={[styles.currencyPerformanceCrown, { backgroundColor: '#10b981'}]}>
+                  <Icon name="attach-money" size={16} color="#ffffff" />
+                </View>
+              </View>
+              
+              <View style={styles.currencyNameContainer}>
+                <Text style={styles.ultimateCurrencyName}>Total Value</Text>
+                <Text style={styles.currencySubtitle}>Order financial total</Text>
+              </View>
+              
+              <View style={styles.ultimateCurrencyMetrics}>
+                <View style={styles.currencyMetricRow}>
+                  <View style={styles.currencyMetricIconContainer}>
+                    <Icon name="attach-money" size={16} color="#10b981" />
+                  </View>
+                  <View style={styles.currencyMetricContent}>
+                    <Text style={styles.currencyMetricLabel}>Total Value</Text>
+                    <Text style={[styles.currencyMetricValue, { color: '#10b981', fontSize: 16}]}>${order.totals?.totalValue?.toFixed(2) || '0.00'}</Text>
+                  </View>
+                </View>
+                
+                <View style={styles.currencyMetricRow}>
+                  <View style={styles.currencyMetricIconContainer}>
+                    <Icon name="warning" size={16} color="#ef4444" />
+                  </View>
+                  <View style={styles.currencyMetricContent}>
+                    <Text style={styles.currencyMetricLabel}>Total Damaged</Text>
+                    <Text style={[styles.currencyMetricValue, { color: '#ef4444'}]}>{order.totals?.totalDamage || '0'}</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
           </View>
         </View>
 
         {/* Notes Section */}
         {order.notes && (
-          <View style={styles.notesCard}>
-            <Text style={styles.notesTitle}>📝 Order Notes</Text>
-            <Text style={styles.notesText}>{order.notes}</Text>
+          <View style={styles.section}>
+            <View style={styles.aiInsightsHeader}>
+              <Text style={styles.sectionTitle}>📝 Order Notes</Text>
+              <View style={styles.aiStatusBadge}>
+                <Icon name="note" size={16} color="#8b5cf6" />
+                <Text style={styles.aiStatusText}>Additional Information</Text>
+              </View>
+            </View>
+            
+            <View style={styles.notesCard}>
+              <View style={styles.recommendationIconContainer}>
+                <Icon name="note" size={16} color="#8b5cf6" />
+              </View>
+              <View style={styles.recommendationContent}>
+                <Text style={styles.recommendationTitle}>Order Notes</Text>
+                <Text style={styles.recommendationDescription}>{order.notes}</Text>
+              </View>
+            </View>
           </View>
         )}
 
         {/* Action Buttons */}
         {(!viewingOrder || viewingOrder.status === 'pending_review') && (
-          <View style={styles.actionButtons}>
-            {!viewingOrder && (
-              <TouchableOpacity
-                style={[styles.actionButton, styles.editButton]}
-                onPress={handleEditOrder}
-              >
-                <Text style={styles.editButtonText}>✏️ Edit Order</Text>
-              </TouchableOpacity>
-            )}
+          <View style={styles.section}>
+            <View style={styles.aiInsightsHeader}>
+              <Text style={styles.sectionTitle}>🚀 Order Actions</Text>
+              <View style={styles.aiStatusBadge}>
+                <Icon name="settings" size={16} color="#f59e0b" />
+                <Text style={styles.aiStatusText}>Order Management</Text>
+              </View>
+            </View>
             
-            <TouchableOpacity
-              style={[styles.actionButton, styles.confirmButton]}
-              onPress={() => viewingOrder ? handleConfirmOrder(viewingOrder) : handleConfirmOrderFromParams()}
-              disabled={savingState}
-            >
-              {savingState ? (
-                <ActivityIndicator size="small" color="#ffffff" />
-              ) : (
-                <Text style={styles.confirmButtonText}>✅ Confirm & Submit Order</Text>
+            <View style={[
+              styles.enhancedPaymentGrid, 
+              2 ? styles.singleColumnPaymentGrid : null
+            ]}>
+              {!viewingOrder && (
+                <TouchableOpacity
+                  style={[
+                    styles.enhancedPaymentCard,
+                    { borderLeftColor: '#6b7280' },
+                    styles.singleColumnPaymentCard
+                  ]}
+                  onPress={handleEditOrder}
+                >
+                  <View style={styles.enhancedPaymentHeader}>
+                    <View style={styles.paymentRankContainer}>
+                      <Text style={styles.paymentRank}>#1</Text>
+                      <View style={[styles.paymentBadge, { backgroundColor: '#6b7280'}]}>
+                        <Icon name="edit" size={12} color="#ffffff" />
+                      </View>
+                    </View>
+                    <View style={[styles.paymentPerformanceIndicator, { backgroundColor: '#6b7280'}]}>
+                      <Icon name="edit" size={14} color="#ffffff" />
+                    </View>
+                  </View>
+                  
+                  <Text style={styles.enhancedPaymentMethod}>Edit Order</Text>
+                  
+                  <View style={styles.enhancedPaymentMetrics}>
+                    <View style={styles.paymentMetricRow}>
+                      <View style={styles.paymentMetricIconContainer}>
+                        <Icon name="edit" size={14} color="#6b7280" />
+                      </View>
+                      <View style={styles.paymentMetricContent}>
+                        <Text style={styles.paymentMetricLabel}>Action</Text>
+                        <Text style={[styles.paymentMetricValue, { color: '#6b7280'}]}>Modify Order</Text>
+                      </View>
+                    </View>
+                  </View>
+                </TouchableOpacity>
               )}
-            </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={[
+                  styles.enhancedPaymentCard,
+                  { borderLeftColor: '#10b981' },
+                  styles.singleColumnPaymentCard
+                ]}
+                onPress={() => viewingOrder ? handleConfirmOrder(viewingOrder) : handleConfirmOrderFromParams()}
+                disabled={savingState}
+              >
+                <View style={styles.enhancedPaymentHeader}>
+                  <View style={styles.paymentRankContainer}>
+                    <Text style={styles.paymentRank}>#2</Text>
+                    <View style={[styles.paymentBadge, { backgroundColor: '#10b981'}]}>
+                      <Icon name="check-circle" size={12} color="#ffffff" />
+                    </View>
+                  </View>
+                  <View style={[styles.paymentPerformanceIndicator, { backgroundColor: '#10b981'}]}>
+                    <Icon name="verified" size={14} color="#ffffff" />
+                  </View>
+                </View>
+                
+                <Text style={styles.enhancedPaymentMethod}>
+                  {savingState ? 'Confirming...' : 'Confirm & Submit'}
+                </Text>
+                
+                <View style={styles.enhancedPaymentMetrics}>
+                  <View style={styles.paymentMetricRow}>
+                    <View style={styles.paymentMetricIconContainer}>
+                      <Icon name="verified" size={14} color="#10b981" />
+                    </View>
+                    <View style={styles.paymentMetricContent}>
+                      <Text style={styles.paymentMetricLabel}>Status</Text>
+                      <Text style={[styles.paymentMetricValue, { color: '#10b981'}]}>
+                        {savingState ? 'Processing...' : 'Confirm Order'}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+                
+                {savingState && (
+                  <View style={styles.predictiveConfidence}>
+                    <View style={styles.confidenceBar}>
+                      <View style={[styles.confidenceFill, { width: '100%'}]} />
+                    </View>
+                    <Text style={styles.confidenceText}>Processing Order...</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
         {/* Warning */}
-        <View style={styles.warningCard}>
-          <Text style={styles.warningText}>
-            ⚠️ Once confirmed, this order will be submitted for processing and cannot be easily modified.
-          </Text>
+        <View style={styles.section}>
+          <View style={styles.criticalInsightsSection}>
+            <Text style={styles.sectionSubtitle}>⚠️ Important Notice</Text>
+            <View style={[styles.criticalInsightCard, styles.alertCard]}>
+              <View style={styles.criticalInsightHeader}>
+                <Icon name="warning" size={20} color="#ef4444" />
+                <Text style={styles.criticalInsightTitle}>Order Confirmation Notice</Text>
+              </View>
+              <Text style={styles.criticalInsightValue}>Irreversible Action</Text>
+              <Text style={styles.criticalInsightText}>
+                Once confirmed, this order will be submitted for processing and cannot be easily modified. Please review all details carefully.
+              </Text>
+              <View style={styles.criticalInsightAction}>
+                <Text style={styles.criticalActionText}>⚠️ Confirm Carefully</Text>
+              </View>
+            </View>
+          </View>
         </View>
+        
+        {/* Bottom padding for web scrolling */}
+        <View style={{ 
+          height: Platform.OS === 'web' ? 100 : 20,
+          minHeight: Platform.OS === 'web' ? 100 : 0
+        }} />
       </ScrollView>
     );
   };
 
   if (loading) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, Platform.OS === 'web' && styles.webContainer]}>
+        <View style={styles.ultimateHeader}>
+          <View style={styles.headerBackgroundOverlay} />
+          <Text style={styles.ultimateHeaderTitle}>🚀 Loading Order Center</Text>
+          <Text style={styles.ultimateHeaderSubtitle}>Initializing Order Management System</Text>
+        </View>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#3b82f6" />
-          <Text style={styles.loadingText}>Loading orders...</Text>
+          <View style={styles.aiInsightIconContainer}>
+            <Icon name="sync" size={32} color="#3b82f6" />
+          </View>
+          <Text style={styles.loadingText}>Loading order data...</Text>
         </View>
       </View>
     );
@@ -764,16 +1411,236 @@ const OrderConfirmationScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#0f172a',
+    ...Platform.select({
+      web: {
+        height: '100vh',
+        overflow: 'auto',
+        WebkitOverflowScrolling: 'auto',
+        scrollBehavior: 'smooth',
+      },
+    }),
+  },
+  webContainer: {
+    ...Platform.select({
+      web: {
+        height: '100vh',
+        maxHeight: '100vh',
+        overflow: 'auto',
+        WebkitOverflowScrolling: 'auto',
+        scrollBehavior: 'smooth',
+      },
+    }),
+  },
+  scrollContentContainer: {
+    flexGrow: 1,
+    paddingBottom: Platform.OS === 'web' ? 100 : 0,
+    ...Platform.select({
+      web: {
+        minHeight: '100vh',
+        width: '100%',
+        flexGrow: 1,
+      },
+    }),
   },
   header: {
+    backgroundColor: '#1e293b',
+    padding: 20,
+    paddingTop: 20,
+  },
+
+  // Ultimate Header Styles
+  ultimateHeader: {
+    backgroundColor: '#1e293b',
+    padding: 24,
+    paddingTop: 24,
+    position: 'relative',
+    overflow: 'hidden',
+    borderBottomWidth: 2,
+    borderBottomColor: '#374151',
+  },
+  headerBackgroundOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+    opacity: 0.95,
+  },
+  commandCenterBadge: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: 'rgba(251, 191, 36, 0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 25,
+    borderWidth: 1,
+    borderColor: '#fbbf24',
+    alignSelf: 'flex-start',
+    marginBottom: 16,
+    elevation: 3,
+    shadowColor: '#fbbf24',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  commandCenterBadgeText: {
+    color: '#fbbf24',
+    fontSize: 10,
+    fontWeight: 'bold',
+    marginLeft: 8,
+    letterSpacing: 1,
+  },
+  ultimateHeaderTitle: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 12,
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+    position: 'relative',
+    zIndex: 1,
+  },
+  ultimateHeaderSubtitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+    position: 'relative',
+    zIndex: 1,
+  },
+  ultimateHeaderSubtitle: {
+    fontSize: 18,
+    color: '#e2e8f0',
+    marginHorizontal: 12,
+    fontWeight: '500',
+  },
+  ultimateGrowthMetrics: {
+    flexDirection: 'row',
     justifyContent: 'space-between',
+    marginBottom: 16,
+    position: 'relative',
+    zIndex: 1,
+  },
+  growthMetricCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 12,
+    padding: 12,
+    flex: 1,
+    marginHorizontal: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  growthMetricIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  growthMetricContent: {
+    flex: 1,
+  },
+  growthMetricLabel: {
+    fontSize: 11,
+    color: '#94a3b8',
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  growthMetricValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+  growthTrendIndicator: {
+    marginLeft: 8,
+  },
+  realtimeStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    position: 'relative',
+    zIndex: 1,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#10b981',
+    marginRight: 8,
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 4,
+  },
+  statusText: {
+    fontSize: 12,
+    color: '#10b981',
+    fontWeight: '600',
+    marginRight: 8,
+  },
+  performanceSummary: {
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+    position: 'relative',
+    zIndex: 1,
+  },
+  performanceSummaryText: {
+    fontSize: 13,
+    color: '#10b981',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 4,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+  },
+  section: {
     padding: 16,
-    backgroundColor: '#1a1a1a',
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    marginBottom: 8,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#f1f5f9',
+    marginBottom: 12,
+  },
+  categorySectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  categoryStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+  },
+  categoryStatusText: {
+    color: '#8b5cf6',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 6,
   },
   backButton: {
     color: '#3b82f6',
@@ -801,31 +1668,42 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
   },
-  // Tab styles
+  // Enhanced Tab styles
   tabContainer: {
     flexDirection: 'row',
-    backgroundColor: '#1a1a1a',
-    marginHorizontal: 16,
-    marginTop: 16,
-    borderRadius: 8,
+    backgroundColor: 'rgba(30, 41, 59, 0.8)',
+    borderRadius: 12,
     padding: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.3)',
+    backdropFilter: 'blur(10px)',
   },
   tab: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 6,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    gap: 8,
   },
   activeTab: {
     backgroundColor: '#3b82f6',
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
   },
   tabText: {
-    color: '#999',
+    color: '#94a3b8',
     fontSize: 14,
     fontWeight: '600',
   },
   activeTabText: {
-    color: '#fff',
+    color: '#ffffff',
+    fontWeight: 'bold',
   },
   // Order list styles
   ordersList: {
@@ -834,6 +1712,175 @@ const styles = StyleSheet.create({
   ordersListContent: {
     padding: 16,
   },
+  
+  // Ultimate Order Card Styles
+  ultimateOrderCard: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderLeftWidth: 6,
+    boxShadow: '0 8px 16px rgba(0, 0, 0, 0.4)',
+    elevation: 6,
+    borderTopWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 2,
+    borderColor: '#334155',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  pendingOrderCard: {
+    borderLeftColor: '#fbbf24',
+  },
+  confirmedOrderCard: {
+    borderLeftColor: '#10b981',
+  },
+  ultimateOrderHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  orderRankContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  eliteOrderRankBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+  },
+  eliteOrderRankText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: 'bold',
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  orderBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    gap: 4,
+  },
+  orderBadgeText: {
+    color: '#ffffff',
+    fontSize: 9,
+    fontWeight: '600',
+  },
+  orderPerformanceCrown: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+  },
+  ultimateOrderName: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 12,
+    lineHeight: 18,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  ultimateOrderMetrics: {
+    marginBottom: 12,
+  },
+  orderMetricRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  orderMetricIconContainer: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  orderMetricContent: {
+    flex: 1,
+  },
+  orderMetricLabel: {
+    fontSize: 10,
+    color: '#94a3b8',
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  orderMetricValue: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+  ultimateOrderProgress: {
+    marginBottom: 12,
+  },
+  orderProgressBarBg: {
+    height: 8,
+    backgroundColor: '#374151',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 6,
+  },
+  orderProgressBarFill: {
+    height: '100%',
+    borderRadius: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+  orderProgressLabel: {
+    fontSize: 10,
+    color: '#9ca3af',
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  ultimateOrderStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#374151',
+  },
+  orderStatItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  orderStatLabel: {
+    fontSize: 9,
+    color: '#6b7280',
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  orderStatValue: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+
+  // Legacy Order Card Styles (kept for compatibility)
   orderCard: {
     backgroundColor: '#1a1a1a',
     borderRadius: 12,
@@ -881,19 +1928,26 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 60,
+    backgroundColor: 'rgba(30, 41, 59, 0.5)',
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: 'rgba(59, 130, 246, 0.2)',
+    borderStyle: 'dashed',
+    margin: 16,
   },
   emptyText: {
-    color: '#999',
+    color: '#94a3b8',
     fontSize: 18,
     fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: 8,
   },
   emptySubtext: {
-    color: '#666',
+    color: '#64748b',
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 20,
+    maxWidth: 280,
   },
   // Existing styles
   summaryCard: {
@@ -1105,11 +2159,22 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#0f172a',
   },
   loadingText: {
-    color: '#fff',
+    fontSize: 18,
+    color: '#94a3b8',
     marginTop: 16,
-    fontSize: 16,
+    fontWeight: '600',
+  },
+  aiInsightIconContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
   },
   errorContainer: {
     flex: 1,

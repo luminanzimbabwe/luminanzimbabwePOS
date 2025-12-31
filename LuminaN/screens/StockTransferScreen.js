@@ -184,11 +184,42 @@ const StockTransferScreen = () => {
         headers: headers
       });
       
+      // Handle validation response
       if (response.data.success) {
-        setValidationResult(response.data);
+        // Normal validation success
+        setValidationResult({
+          success: true,
+          can_proceed: true,
+          requires_confirmation: false,
+          errors: response.data.errors || [],
+          warnings: response.data.warnings || [],
+          is_valid: true,
+          conversion_ratio: response.data.conversion_ratio || 1,
+          from_product_info: response.data.from_product_info,
+          to_product_info: response.data.to_product_info
+        });
+        setShowPreview(true);
+      } else if (response.data.can_proceed && response.data.requires_confirmation) {
+        // Transfer has warnings but can proceed
+        setValidationResult({
+          success: false, // Still shows as not success to trigger confirmation flow
+          can_proceed: true,
+          requires_confirmation: true,
+          errors: response.data.errors || [],
+          warnings: response.data.warnings || [],
+          is_valid: true, // But is valid for proceeding
+          conversion_ratio: response.data.conversion_ratio || 1,
+          from_product_info: response.data.from_product_info,
+          to_product_info: response.data.to_product_info
+        });
         setShowPreview(true);
       } else {
-        Alert.alert('Validation Failed', response.data.error || 'Unknown error');
+        // Critical errors - cannot proceed
+        let errorMessage = response.data.error || 'Unknown error';
+        if (response.data.errors && response.data.errors.length > 0) {
+          errorMessage += '\n\nErrors:\n' + response.data.errors.join('\n');
+        }
+        Alert.alert('Validation Failed', errorMessage);
       }
     } catch (error) {
       console.error('❌ Error validating transfer:', error);
@@ -199,7 +230,7 @@ const StockTransferScreen = () => {
   };
 
   const processTransfer = async () => {
-    if (!validationResult || !validationResult.is_valid) {
+    if (!validationResult || !validationResult.can_proceed) {
       Alert.alert('Error', 'Transfer validation failed');
       return;
     }
@@ -225,12 +256,23 @@ const StockTransferScreen = () => {
       
       console.log('🔍 DEBUG: Transfer data:', transferData);
       
-      const response = await shopAPI.createTransfer(transferData, {
-        headers: headers
-      });
+      // Use different endpoint based on whether confirmation is required
+      let response;
+      if (validationResult.requires_confirmation) {
+        // Use confirm_transfer endpoint for transfers with warnings
+        console.log('🔍 DEBUG: Using confirm_transfer endpoint');
+        response = await shopAPI.confirmTransfer(transferData, {
+          headers: headers
+        });
+      } else {
+        // Use regular createTransfer endpoint for clean transfers
+        console.log('🔍 DEBUG: Using createTransfer endpoint');
+        response = await shopAPI.createTransfer(transferData, {
+          headers: headers
+        });
+      }
       
       console.log('🔍 DEBUG: Transfer response:', response);
-      
       console.log('🔍 DEBUG: Response data:', response.data);
       
       if (response.data.success) {
@@ -239,6 +281,14 @@ const StockTransferScreen = () => {
         // Show success with financial impact summary
         const data = response.data.data;
         let successMessage = response.data.message || 'Stock transfer completed successfully!';
+        
+        // Add warnings info if this was a confirmed transfer
+        if (validationResult.requires_confirmation && response.data.warnings) {
+          successMessage += '\n\n⚠️ TRANSFER CONFIRMED WITH WARNINGS:';
+          response.data.warnings.forEach(warning => {
+            successMessage += `\n• ${warning}`;
+          });
+        }
         
         // Add financial impact to success message if available
         if (data.financial_impact) {
@@ -270,19 +320,13 @@ const StockTransferScreen = () => {
         console.log('❌ DEBUG: Transfer failed!');
         console.log('❌ DEBUG: Error details:', response.data);
         
-        // Show more detailed error information with special handling for critical errors
+        // Show more detailed error information
         let errorMessage = response.data.error || 'Unknown error';
+        if (response.data.errors && response.data.errors.length > 0) {
+          errorMessage += '\n\nErrors:\n' + response.data.errors.join('\n');
+        }
         if (response.data.details && Array.isArray(response.data.details)) {
-          // Filter for critical errors
-          const criticalErrors = response.data.details.filter(detail => 
-            detail.includes('CRITICAL') || detail.includes('SHRINKAGE') || detail.includes('$0.00 cost')
-          );
-          
-          if (criticalErrors.length > 0) {
-            errorMessage = '🚨 CRITICAL BUSINESS ALERT:\n\n' + criticalErrors.join('\n');
-          } else {
-            errorMessage += '\n\nDetails:\n' + response.data.details.join('\n');
-          }
+          errorMessage += '\n\nDetails:\n' + response.data.details.join('\n');
         }
         
         Alert.alert('Transfer Failed', errorMessage);
@@ -452,14 +496,28 @@ const StockTransferScreen = () => {
           
           {validationResult && (
             <View style={styles.modalBody}>
-              {validationResult.errors && validationResult.errors.length > 0 ? (
+              {/* Show Critical Errors */}
+              {validationResult.errors && validationResult.errors.length > 0 && (
                 <View style={styles.errorContainer}>
-                  <Text style={styles.errorTitle}>⚠️ Validation Errors:</Text>
+                  <Text style={styles.errorTitle}>❌ Critical Errors:</Text>
                   {validationResult.errors.map((error, index) => (
                     <Text key={index} style={styles.errorText}>• {error}</Text>
                   ))}
                 </View>
-              ) : (
+              )}
+              
+              {/* Show Warnings */}
+              {validationResult.warnings && validationResult.warnings.length > 0 && (
+                <View style={styles.warningContainer}>
+                  <Text style={styles.warningTitle}>⚠️ Validation Warnings:</Text>
+                  {validationResult.warnings.map((warning, index) => (
+                    <Text key={index} style={styles.warningText}>• {warning}</Text>
+                  ))}
+                </View>
+              )}
+              
+              {/* Show Transfer Details if no critical errors */}
+              {(!validationResult.errors || validationResult.errors.length === 0) && (
                 <>
                   <Text style={styles.successTitle}>✅ Transfer Details</Text>
                   
@@ -498,6 +556,15 @@ const StockTransferScreen = () => {
                       <Text style={styles.previewText}>{reason}</Text>
                     </View>
                   )}
+                  
+                  {/* Show confirmation message if there are warnings */}
+                  {validationResult.requires_confirmation && (
+                    <View style={styles.confirmationContainer}>
+                      <Text style={styles.confirmationText}>
+                        ⚠️ This transfer has warnings but can be processed. Click "Confirm Transfer" to proceed.
+                      </Text>
+                    </View>
+                  )}
                 </>
               )}
             </View>
@@ -514,13 +581,14 @@ const StockTransferScreen = () => {
             <TouchableOpacity
               style={[
                 styles.confirmButton,
-                (!validationResult || !validationResult.is_valid) && styles.confirmButtonDisabled
+                (!validationResult || !validationResult.can_proceed) && styles.confirmButtonDisabled
               ]}
               onPress={processTransfer}
-              disabled={!validationResult || !validationResult.is_valid}
+              disabled={!validationResult || !validationResult.can_proceed}
             >
               <Text style={styles.confirmButtonText}>
-                {loading ? 'Processing...' : '✅ Confirm Transfer'}
+                {loading ? 'Processing...' : 
+                 validationResult?.requires_confirmation ? '⚠️ Confirm Transfer' : '✅ Confirm Transfer'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -552,7 +620,6 @@ const StockTransferScreen = () => {
         <View style={styles.transferTypeContainer}>
           {[
             { value: 'CONVERSION', label: '🔄 Conversion', desc: 'Transform product' },
-            { value: 'SPLIT', label: '✂️ Split', desc: 'Divide into smaller units' },
             { value: 'TRANSFER', label: '📦 Transfer', desc: 'Move between locations' },
             { value: 'ADJUSTMENT', label: '⚖️ Adjustment', desc: 'Manual correction' }
           ].map((type) => (
@@ -828,19 +895,27 @@ const styles = StyleSheet.create({
   // Modal styles
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
   },
   modalContent: {
     backgroundColor: '#1a1a1a',
-    borderRadius: 12,
-    width: '90%',
-    maxWidth: 500,
-    maxHeight: '80%',
-    borderWidth: 1,
-    borderColor: '#333',
+    borderRadius: 16,
+    width: '95%',
+    maxWidth: 600,
+    maxHeight: '85%',
+    borderWidth: 2,
+    borderColor: '#3b82f6',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 15,
+    elevation: 10,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -889,6 +964,49 @@ const styles = StyleSheet.create({
     color: '#7f1d1d',
     fontSize: 14,
     marginBottom: 4,
+  },
+  warningContainer: {
+    backgroundColor: '#fef3c7',
+    borderRadius: 12,
+    padding: 16,
+    borderLeftWidth: 6,
+    borderLeftColor: '#f59e0b',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#fbbf24',
+    shadowColor: '#f59e0b',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  warningTitle: {
+    color: '#92400e',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  warningText: {
+    color: '#78350f',
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  confirmationContainer: {
+    backgroundColor: '#dbeafe',
+    borderRadius: 8,
+    padding: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#3b82f6',
+    marginTop: 16,
+  },
+  confirmationText: {
+    color: '#1e40af',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   successTitle: {
     color: '#10b981',
@@ -962,17 +1080,30 @@ const styles = StyleSheet.create({
   confirmButton: {
     flex: 1,
     backgroundColor: '#10b981',
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: 12,
+    padding: 16,
     alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#059669',
+    shadowColor: '#10b981',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   confirmButtonDisabled: {
     backgroundColor: '#6b7280',
+    borderColor: '#9ca3af',
+    shadowOpacity: 0.1,
   },
   confirmButtonText: {
     color: '#fff',
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: 'bold',
+    textAlign: 'center',
   },
 });
 

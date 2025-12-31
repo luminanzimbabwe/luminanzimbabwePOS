@@ -54,19 +54,21 @@ export const shopAPI = {
   resetCashierPassword: (data) => api.post('/cashiers/reset-password/', data),
   getOwnerDashboard: () => api.get('/dashboard/'),
   
-  // Staff management methods
+  // Staff management methods - NO AUTHENTICATION REQUIRED
   registerCashier: (data) => api.post('/cashiers/', data),
   registerCashierSelf: (data) => api.post('/cashiers/register/', data), // Self-registration endpoint
-  getPendingStaff: (data) => api.post('/staff/pending/', data),
-  getApprovedStaff: (data) => api.post('/staff/approved/', data),
+  getPendingStaff: (data) => api.post('/staff/pending/', {}), // No credentials needed
+  getApprovedStaff: (data) => api.post('/staff/approved/', {}), // No credentials needed
   approveStaff: (data) => api.post('/staff/approve/', data),
   rejectStaff: (data) => api.post('/staff/reject/', data),
   deactivateCashier: (data) => api.post('/staff/deactivate/', data),
   deleteCashier: (data) => api.post('/staff/delete/', data),
-  getInactiveStaff: (data) => api.post('/staff/inactive/', data),
+  getInactiveStaff: (data) => api.post('/staff/inactive/', {}), // No credentials needed
   reactivateCashier: (data) => api.post('/staff/reactivate/', data),
   getCashierDetails: (data) => api.post('/staff/details/', data),
   editCashier: (data) => api.post('/staff/edit/', data),
+
+
   
   // Product management methods
   getProducts: () => api.get('/products/'),
@@ -80,6 +82,10 @@ export const shopAPI = {
   getProductsByCategory: (category) => api.get(`/products/bulk/?category=${encodeURIComponent(category)}`),
   lookupBarcode: (barcode) => api.get(`/products/barcode-lookup/?barcode=${encodeURIComponent(barcode)}`),
   
+  // Product Splitting methods
+  validateProductSplit: (data, config = {}) => api.post('/product-splits/validate_split/', data, config),
+  createSplitProduct: (data, config = {}) => api.post('/product-splits/create_split_product/', data, config),
+  
   // Sales methods
   createSale: (data) => api.post('/sales/', data),
   getSales: () => api.get('/sales/'),
@@ -88,11 +94,18 @@ export const shopAPI = {
   // Inventory audit trail methods
   getAuditTrail: () => api.get('/audit-trail/'),
   getProductAuditHistory: (productId) => api.get(`/products/${productId}/audit-history/`),
-  getCustomEndpoint: (endpoint, authData) => api.get(endpoint, { 
-    headers: { 
-      'Authorization': `Basic ${btoa(`${authData.email}:${authData.password}`)}` 
-    } 
-  }),
+  getCustomEndpoint: (endpoint, authData) => {
+    const config = {};
+    if (authData) {
+      config.headers = {
+        'Authorization': `Basic ${btoa(`${authData.email}:${authData.password}`)}`
+      };
+    }
+    return api.get(endpoint, config);
+  },
+  
+  // Anonymous endpoint method (no authentication required)
+  getAnonymousEndpoint: (endpoint) => api.get(endpoint),
   
   // Inventory management methods
   receiveInventory: (data) => api.post('/inventory/receive/', data),
@@ -149,6 +162,7 @@ export const shopAPI = {
   findProductForTransfer: (data, config = {}) => api.post('/stock-transfers/find_product/', data, config),
   validateTransfer: (data, config = {}) => api.post('/stock-transfers/validate_transfer/', data, config),
   createTransfer: (data, config = {}) => api.post('/stock-transfers/', data, config),
+  confirmTransfer: (data, config = {}) => api.post('/stock-transfers/confirm_transfer/', data, config),
   getTransfers: (config = {}) => api.get('/stock-transfers/', config),
 
   // Waste/Wastage management methods
@@ -163,6 +177,38 @@ export const shopAPI = {
   getWasteBatchDetail: (batchId, config = {}) => api.get(`/waste-batches/${batchId}/`, config),
   addWasteToBatch: (batchId, data, config = {}) => api.post(`/waste-batches/${batchId}/`, data, config),
   updateWasteBatch: (batchId, data, config = {}) => api.patch(`/waste-batches/${batchId}/`, data, config),
+
+  // Shop Day Management methods
+  getShopStatus: () => api.get('/shop-status/'),
+  startDay: (data) => api.post('/start-day/', data),
+  endDay: (data) => api.post('/end-day/', data),
+
+  // Cash Float Management methods
+  getCashFloat: () => api.get('/cash-float/'),
+  setCashFloat: (data) => api.post('/cash-float/', data),
+  activateDrawer: (cashierId) => api.post('/cash-float/activate/', { cashier_id: cashierId }),
+  addDrawerSale: (cashierId, amount, paymentMethod) => api.post('/cash-float/sale/', {
+    cashier_id: cashierId,
+    amount: amount,
+    payment_method: paymentMethod
+  }),
+
+  settleDrawer: (cashierId, actualCashCounted) => api.post('/cash-float/settle/', {
+    cashier_id: cashierId,
+    actual_cash_counted: actualCashCounted
+  }),
+  getAllDrawersStatus: () => api.get('/cash-float/all-status/'),
+
+  getSalesHistory: (config = {}) => api.get('/sales-history/', config),
+  getSaleDetails: (saleId, config = {}) => api.get(`/sales/${saleId}/`, config),
+
+  // Enhanced EOD Reconciliation methods
+  getEnhancedReconciliation: (config = {}) => api.get('/reconciliation/enhanced/', config),
+  getCashierCount: (cashierId, date, config = {}) => api.get(`/reconciliation/count/?cashier_id=${cashierId}&date=${date}`, config),
+  saveCashierCount: (countData, config = {}) => api.post('/reconciliation/count/', countData, config),
+  getReconciliationSession: (date, config = {}) => api.get(`/reconciliation/session/?date=${date}`, config),
+  startReconciliationSession: (data, config = {}) => api.post('/reconciliation/session/', { ...data, action: 'start' }, config),
+  completeReconciliationSession: (data, config = {}) => api.post('/reconciliation/session/', { ...data, action: 'complete' }, config),
 };
 
 export default api;

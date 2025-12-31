@@ -22,7 +22,20 @@ export const ROUTES = {
   STOCK_VALUATION: 'StockValuation',
   POS_PRICE: 'POSPrice',
   SALES_AND_REFUNDS: 'SalesAndRefunds',
-  OWNER_SALES: 'OwnerSales',
+  CASHIER_SALES: 'CashierSales',
+  QUICK_PRODUCTS: 'QuickProducts',
+  // Sales Command Center routes
+  SALES_DASHBOARD: 'SalesDashboard',
+  SALES_LEDGER: 'SalesLedger',
+  SALES_AUDIT_TRAIL: 'SalesAuditTrail',
+
+  EOD_RECONCILIATION: 'EODReconciliation',
+  WASTE_SCREEN: 'WasteScreen',
+  START_OF_DAY: 'StartOfDay',
+  PRODUCT_SPLIT: 'ProductSplit',
+  HALF_PRODUCTS: 'HalfProducts',
+  PRODUCT_MANAGEMENT: 'ProductManagement',
+  WEIGHT_PRODUCTS: 'WeightProducts',
 };
 
 // Screen titles
@@ -49,5 +62,17 @@ export const SCREEN_TITLES = {
   [ROUTES.STOCK_VALUATION]: 'Stock Valuation',
   [ROUTES.POS_PRICE]: 'POS Price Labels',
   [ROUTES.SALES_AND_REFUNDS]: 'Sales & Refunds',
-  [ROUTES.OWNER_SALES]: 'Today\'s Sales',
+  [ROUTES.QUICK_PRODUCTS]: 'Quick Products',
+  // Sales Command Center titles
+  [ROUTES.SALES_DASHBOARD]: 'Sales Dashboard',
+  [ROUTES.SALES_LEDGER]: 'Sales Ledger',
+  [ROUTES.SALES_AUDIT_TRAIL]: 'Sales Audit Trail',
+
+  [ROUTES.EOD_RECONCILIATION]: 'EOD Reconciliation',
+  [ROUTES.WASTE_SCREEN]: 'Waste Management',
+  [ROUTES.START_OF_DAY]: 'Start of Day',
+  [ROUTES.PRODUCT_SPLIT]: 'Product Split',
+  [ROUTES.HALF_PRODUCTS]: 'Half Products',
+  [ROUTES.PRODUCT_MANAGEMENT]: 'Product Management',
+  [ROUTES.WEIGHT_PRODUCTS]: 'Weight Products',
 };

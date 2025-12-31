@@ -64,30 +64,94 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
   ).current;
 
   const features = [
+    // Sales Command Center Section
     {
-      id: 'today-sales',
-      title: '📊 Today\'s Sales',
-      description: 'View today\'s sales by category & personnel',
-      icon: '📊',
-      screen: 'OwnerSales',
+      id: 'start-of-day',
+      title: '🏪 Start of Day',
+      description: 'Open/close shop & manage business day',
+      icon: '🏪',
+      screen: 'StartOfDay',
+      color: '#22c55e',
+      section: 'shop-management'
+    },
+    {
+      id: 'dashboard',
+      title: '🏠 Main Dashboard',
+      description: 'Overview of business operations',
+      icon: '🏠',
+      screen: 'OwnerDashboard',
       color: '#06b6d4',
+      section: 'shop-management'
     },
     {
-      id: 'sales-refunds',
-      title: '💰 Sales & Refunds',
-      description: 'View sales history & manage refunds',
-      icon: '💰',
-      screen: 'SalesAndRefunds',
+      id: 'staff-management',
+      title: '👥 Staff Management',
+      description: 'Manage staff & permissions',
+      icon: '👥',
+      screen: 'StaffManagement',
+      color: '#8b5cf6',
+      section: 'shop-management'
+    },
+    {
+      id: 'order-confirmations',
+      title: '✅ Order Confirmations',
+      description: 'Review & confirm pending orders',
+      icon: '✅',
+      screen: 'OrderConfirmation',
       color: '#10b981',
+      section: 'shop-management'
+    },
+
+    {
+      id: 'sales-dashboard',
+      title: '📊 Sales Dashboard',
+      description: 'Real-time sales overview & analytics',
+      icon: '📊',
+      screen: 'SalesDashboard',
+      color: '#06b6d4',
+      section: 'sales'
     },
     {
-      id: 'pos-price',
-      title: '🏷️ POS Price Labels',
-      description: 'Print product price tags',
-      icon: '🏷️',
-      screen: 'POSPrice',
-      color: '#f59e0b',
+      id: 'sales-ledger',
+      title: '📋 Sales Ledger',
+      description: 'Detailed transaction records',
+      icon: '📋',
+      screen: 'SalesLedger',
+      color: '#10b981',
+      section: 'sales'
     },
+    {
+      id: 'sales-audit-trail',
+      title: '🔍 Sales Audit Trail',
+      description: 'Track all sales modifications',
+      icon: '🔍',
+      screen: 'SalesAuditTrail',
+      color: '#f59e0b',
+      section: 'sales'
+    },
+
+    {
+      id: 'eod-reconciliation',
+      title: '🔄 EOD Reconciliation',
+      description: 'End-of-day cash reconciliation',
+      icon: '🔄',
+      screen: 'EODReconciliation',
+      color: '#8b5cf6',
+      section: 'sales'
+    },
+    {
+      id: 'waste-management',
+      title: '🗑️ Waste Management',
+      description: 'Track & manage product waste',
+      icon: '🗑️',
+      screen: 'WasteScreen',
+      color: '#f97316',
+      section: 'sales'
+    },
+    // Analytics & Reports Section
+
+    // Inventory Management Section
+
     {
       id: 'stock-valuation',
       title: '💎 Stock Valuation',
@@ -95,6 +159,7 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
       icon: '💎',
       screen: 'StockValuation',
       color: '#22c55e',
+      section: 'inventory'
     },
     {
       id: 'restock-manager',
@@ -103,6 +168,7 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
       icon: '📦',
       screen: 'RestockManager',
       color: '#f59e0b',
+      section: 'inventory'
     },
     {
       id: 'stock-transfer',
@@ -111,6 +177,7 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
       icon: '🔄',
       screen: 'StockTransfer',
       color: '#8b5cf6',
+      section: 'inventory'
     },
     {
       id: 'stock-transfer-history',
@@ -119,7 +186,26 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
       icon: '📊',
       screen: 'StockTransferHistory',
       color: '#06b6d4',
+      section: 'inventory'
     },
+    {
+      id: 'product-split',
+      title: '✂️ Product Split',
+      description: 'Split products into smaller units',
+      icon: '✂️',
+      screen: 'ProductSplit',
+      color: '#f97316',
+      section: 'inventory'
+    },
+    {
+      id: 'half-products',
+      title: '🥪 Half Products',
+      description: 'Quick access to split products (no barcodes)',
+      icon: '🥪',
+      screen: 'HalfProducts',
+      color: '#fbbf24',
+      section: 'inventory'
+     },
     {
       id: 'inventory-audit',
       title: '📋 Inventory Audit',
@@ -127,7 +213,29 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
       icon: '📋',
       screen: 'InventoryAuditTrail',
       color: '#3b82f6',
+      section: 'inventory'
     },
+    {
+      id: 'product-management',
+      title: '📦 Product Management',
+      description: 'Manage products & categories',
+      icon: '📦',
+      screen: 'ProductManagement',
+      color: '#ef4444',
+      section: 'inventory'
+    },
+    {
+      id: 'inventory-receiving',
+      title: '📥 Inventory Receiving',
+      description: 'Receive & process inventory',
+      icon: '📥',
+      screen: 'InventoryReceiving',
+      color: '#84cc16',
+      section: 'inventory'
+    },
+    // Customer Management Section
+
+    // Business Tools Section
     {
       id: 'low-stock-alerts',
       title: '⚠️ Low Stock Alerts',
@@ -135,6 +243,7 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
       icon: '⚠️',
       screen: 'LowStockAlerts',
       color: '#ef4444',
+      section: 'business'
     },
     {
       id: 'profit-analysis',
@@ -143,6 +252,7 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
       icon: '📊',
       screen: 'ProfitAnalysis',
       color: '#8b5cf6',
+      section: 'business'
     },
     {
       id: 'supplier-management',
@@ -151,6 +261,7 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
       icon: '🏢',
       screen: 'SupplierManagement',
       color: '#f59e0b',
+      section: 'business'
     },
     {
       id: 'stock-movements',
@@ -159,6 +270,7 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
       icon: '📦',
       screen: 'StockMovements',
       color: '#06b6d4',
+      section: 'business'
     },
     {
       id: 'price-comparison',
@@ -167,6 +279,7 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
       icon: '💲',
       screen: 'PriceComparison',
       color: '#84cc16',
+      section: 'business'
     },
     {
       id: 'demand-forecasting',
@@ -175,6 +288,16 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
       icon: '🔮',
       screen: 'DemandForecasting',
       color: '#ec4899',
+      section: 'business'
+    },
+    {
+      id: 'settings',
+      title: '⚙️ Settings',
+      description: 'App configuration & preferences',
+      icon: '⚙️',
+      screen: 'Settings',
+      color: '#6b7280',
+      section: 'business'
     },
   ];
 
@@ -182,25 +305,82 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
     onClose(); // Close sidebar first
     
     // Navigate to the feature screen
-    if (feature.screen === 'OwnerSales') {
-      navigation.navigate('OwnerSales');
-    } else if (feature.screen === 'StockValuation') {
-      navigation.navigate('StockValuation');
-    } else if (feature.screen === 'InventoryAuditTrail') {
-      navigation.navigate('Reports'); // This navigates to the reports tab
-    } else if (feature.screen === 'POSPrice') {
-      navigation.navigate('POSPrice');
-    } else if (feature.screen === 'SalesAndRefunds') {
-      navigation.navigate('SalesAndRefunds');
-    } else if (feature.screen === 'RestockManager') {
-      navigation.navigate('RestockManager');
-    } else if (feature.screen === 'StockTransfer') {
-      navigation.navigate('StockTransfer');
-    } else if (feature.screen === 'StockTransferHistory') {
-      navigation.navigate('StockTransferHistory');
-    } else {
-      // For other features, show a placeholder message
-      console.log(`🚀 Feature "${feature.title}" pressed - Coming soon!`);
+    switch (feature.screen) {
+      // Shop Management screens
+      case 'StartOfDay':
+        navigation.navigate('StartOfDay');
+        break;
+      case 'OwnerDashboard':
+        navigation.navigate('OwnerDashboard');
+        break;
+      case 'StaffManagement':
+        navigation.navigate('Staff');
+        break;
+      case 'OrderConfirmation':
+        navigation.navigate('Confirmations');
+        break;
+        
+      // Sales Command Center screens
+      case 'SalesDashboard':
+        navigation.navigate('SalesDashboard');
+        break;
+      case 'SalesLedger':
+        navigation.navigate('SalesLedger');
+        break;
+      case 'SalesAuditTrail':
+        navigation.navigate('SalesAuditTrail');
+        break;
+
+      case 'EODReconciliation':
+        navigation.navigate('EODReconciliation');
+        break;
+      case 'WasteScreen':
+        navigation.navigate('Waste');
+        break;
+      
+
+      
+
+      
+      // Inventory Management screens
+
+      case 'StockValuation':
+        navigation.navigate('StockValuation');
+        break;
+      case 'RestockManager':
+        navigation.navigate('RestockManager');
+        break;
+      case 'StockTransfer':
+        navigation.navigate('StockTransfer');
+        break;
+      case 'StockTransferHistory':
+        navigation.navigate('StockTransferHistory');
+        break;
+      case 'ProductSplit':
+        navigation.navigate('ProductSplit');
+        break;
+      case 'HalfProducts':
+        navigation.navigate('HalfProducts');
+        break;
+      case 'InventoryAuditTrail':
+        navigation.navigate('InventoryAuditTrail');
+        break;
+      case 'ProductManagement':
+        navigation.navigate('Products');
+        break;
+      case 'InventoryReceiving':
+        navigation.navigate('Receiving');
+        break;
+        
+      // Business Tools screens
+      case 'Settings':
+        navigation.navigate('Settings');
+        break;
+      
+      default:
+        // For other features, show a placeholder message
+        console.log(`🚀 Feature "${feature.title}" pressed - Coming soon!`);
+        break;
     }
   };
 
@@ -260,19 +440,32 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
 
         {/* Features List */}
         <ScrollView style={styles.featuresList} showsVerticalScrollIndicator={false}>
+          {/* Shop Management Section */}
           <View style={styles.featuresSection}>
-            <Text style={styles.sectionTitle}>📊 Analytics & Reports</Text>
-            {features.slice(0, 2).map(renderFeatureItem)}
+            <Text style={styles.sectionTitle}>🏢 Shop Management</Text>
+            {features.filter(f => f.section === 'shop-management').map(renderFeatureItem)}
           </View>
 
+          {/* Sales Command Center Section */}
+          <View style={styles.featuresSection}>
+            <Text style={styles.sectionTitle}>💰 Sales Command Center</Text>
+            {features.filter(f => f.section === 'sales').map(renderFeatureItem)}
+          </View>
+
+
+
+          {/* Inventory Management Section */}
           <View style={styles.featuresSection}>
             <Text style={styles.sectionTitle}>📦 Inventory Management</Text>
-            {features.slice(2, 5).map(renderFeatureItem)}
+            {features.filter(f => f.section === 'inventory').map(renderFeatureItem)}
           </View>
 
+
+
+          {/* Business Tools Section */}
           <View style={styles.featuresSection}>
             <Text style={styles.sectionTitle}>🏢 Business Tools</Text>
-            {features.slice(5).map(renderFeatureItem)}
+            {features.filter(f => f.section === 'business').map(renderFeatureItem)}
           </View>
         </ScrollView>
 

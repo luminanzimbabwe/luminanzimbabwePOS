@@ -508,7 +508,7 @@ const WasteScreen = () => {
       <Text style={styles.headerTitle}>🗑️ Waste Management</Text>
       <View style={styles.headerActions}>
         <TouchableOpacity onPress={handleRefresh} disabled={loading}>
-          <Text style={styles.refreshButton}>
+          <Text style={[styles.refreshButton, { opacity: loading ? 0.5 : 1 }]}>
             {loading ? '⟳' : '🔄'}
           </Text>
         </TouchableOpacity>
@@ -1200,7 +1200,6 @@ const styles = StyleSheet.create({
   },
   refreshButton: {
     fontSize: 18,
-    opacity: loading ? 0.5 : 1,
   },
   addButton: {
     color: '#10b981',

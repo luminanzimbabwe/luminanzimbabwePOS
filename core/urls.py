@@ -1,14 +1,25 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
+from rest_framework.response import Response
+from django.http import JsonResponse
 from . import views
 from .retrieve_credentials_view import RetrieveCredentialsView
 from .staff_views import PendingStaffListView, ApprovedStaffListView, ApproveStaffView, RejectStaffView, DeactivateCashierView, DeleteCashierView, InactiveStaffListView, ReactivateCashierView, CashierDetailsView, EditCashierView
 from .cashier_registration_view import CashierSelfRegistrationView
 from .waste_batch_views import WasteBatchListView, WasteBatchDetailView
+from .sales_command_center_views import InfiniteSalesFeedView, SaleAuditTrailView, SalesAnalyticsView, SalesExceptionReportView, EODReconciliationView, ShopDayManagementView
+from .cash_float_refund_view import add_drawer_refund
+from .reconciliation_views import CashierCountView, ReconciliationSessionView, EODReconciliationEnhancedView
+from .cashier_refund_view import process_cashier_refund, get_cashier_refunds
+# Import cash float API views
+from .models import cash_float_management, activate_cashier_drawer, update_drawer_sale, settle_drawer_at_eod, get_all_cashiers_drawer_status
+
+
 
 # Setup router for ViewSets
 router = DefaultRouter()
 router.register(r'stock-transfers', views.StockTransferViewSet, basename='stocktransfer')
+router.register(r'product-splits', views.ProductSplittingViewSet, basename='productsplit')
 
 urlpatterns = [
     # Include router URLs
@@ -58,6 +69,35 @@ urlpatterns = [
     path('sales-history/', views.SalesHistoryView.as_view(), name='sales-history'),
     path('sales/<int:sale_id>/', views.SaleDetailView.as_view(), name='sale-detail'),
     path('sale-items/<int:item_id>/', views.SaleItemDetailView.as_view(), name='sale-item-detail'),
+    
+    # Sales Command Center endpoints
+    path('sales/', InfiniteSalesFeedView.as_view(), name='infinite-sales-feed'),
+    path('sales/<int:sale_id>/audit/', SaleAuditTrailView.as_view(), name='sale-audit-trail'),
+    path('analytics/', SalesAnalyticsView.as_view(), name='sales-analytics'),
+    path('sales/exceptions/', SalesExceptionReportView.as_view(), name='sales-exceptions'),
+    path('reconciliation/', EODReconciliationView.as_view(), name='eod-reconciliation'),
+    
+    # Enhanced Reconciliation endpoints
+    path('reconciliation/enhanced/', EODReconciliationEnhancedView.as_view(), name='eod-reconciliation-enhanced'),
+    path('reconciliation/count/', CashierCountView.as_view(), name='cashier-count'),
+    path('reconciliation/session/', ReconciliationSessionView.as_view(), name='reconciliation-session'),
+    
+    # Shop Day Management endpoints
+    path('shop-status/', ShopDayManagementView.as_view(), name='shop-status-management'),
+    path('start-day/', ShopDayManagementView.as_view(), name='start-day'),
+    path('end-day/', ShopDayManagementView.as_view(), name='end-day'),
+    
+    # Cash Float Management endpoints
+    path('cash-float/', cash_float_management, name='cash-float-management'),
+    path('cash-float/activate/', activate_cashier_drawer, name='activate-cashier-drawer'),
+    path('cash-float/sale/', update_drawer_sale, name='update-drawer-sale'),
+    path('cash-float/refund/', add_drawer_refund, name='add-drawer-refund'),
+    path('cash-float/settle/', settle_drawer_at_eod, name='settle-drawer-eod'),
+    path('cash-float/all-status/', get_all_cashiers_drawer_status, name='all-cashiers-drawer-status'),
+    
+    # Simple Cashier Refund endpoints
+    path('cashier/refund/', process_cashier_refund, name='process-cashier-refund'),
+    path('cashier/refunds/', get_cashier_refunds, name='get-cashier-refunds'),
     path('customers/', views.CustomerListView.as_view(), name='customer-list'),
     path('discounts/', views.DiscountListView.as_view(), name='discount-list'),
     path('shifts/', views.ShiftListView.as_view(), name='shift-list'),

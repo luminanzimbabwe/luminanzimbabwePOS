@@ -16,6 +16,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { shopAPI } from '../services/api';
 import { shopStorage } from '../services/storage';
+import refundService from '../services/refundService';
 
 const { width } = Dimensions.get('window');
 
@@ -148,17 +149,21 @@ const OwnerSalesScreen = () => {
           console.log(`📊 Found ${filteredSales.length} sales for ${selectedPeriod} period`);
           setSalesData(filteredSales);
         } else {
-          // No sales data available from API, use mock data for demonstration
-          console.log('📊 No sales data from API, using mock data for demonstration');
-          const mockSales = generateMockSales();
-          setSalesData(mockSales);
+          // No sales data available from API
+          console.log('📊 No sales data from API');
+          setSalesData([]);
         }
       } catch (apiError) {
-        console.log('⚠️ API endpoint failed, using mock data for demonstration:', apiError.message);
+        console.error('❌ API endpoint failed:', apiError.message);
         
-        // Generate realistic mock data
-        const mockSales = generateMockSales();
-        setSalesData(mockSales);
+        // No demo data fallback - only real API data
+        setSalesData([]);
+        
+        Alert.alert(
+          'Connection Error', 
+          'Unable to connect to the server. Please check your internet connection and try again.',
+          [{ text: 'Retry', onPress: () => loadSalesData() }]
+        );
       }
     } catch (error) {
       console.error('❌ Error loading sales data:', error);
@@ -169,67 +174,7 @@ const OwnerSalesScreen = () => {
     }
   };
 
-  const generateMockSales = () => {
-    const categories = ['Food & Beverages', 'Household Items', 'Personal Care', 'Electronics', 'Clothing', 'Health & Wellness', 'Automotive'];
-    const cashiers = ['John Doe', 'Jane Smith', 'Mike Wilson', 'Sarah Davis', 'Alex Johnson', 'Emma Brown'];
-    const products = [
-      { name: 'Bread', category: 'Food & Beverages', price: 2.50 },
-      { name: 'Milk', category: 'Food & Beverages', price: 3.99 },
-      { name: 'Eggs', category: 'Food & Beverages', price: 4.50 },
-      { name: 'Chicken', category: 'Food & Beverages', price: 45.99 },
-      { name: 'Rice', category: 'Food & Beverages', price: 21.75 },
-      { name: 'Apples', category: 'Food & Beverages', price: 1.99 },
-      { name: 'Bananas', category: 'Food & Beverages', price: 1.25 },
-      { name: 'Orange Juice', category: 'Food & Beverages', price: 15.99 },
-      { name: 'Detergent', category: 'Household Items', price: 12.99 },
-      { name: 'Toothpaste', category: 'Personal Care', price: 5.99 },
-      { name: 'Shampoo', category: 'Personal Care', price: 8.99 },
-      { name: 'Phone Case', category: 'Electronics', price: 19.99 },
-      { name: 'T-Shirt', category: 'Clothing', price: 25.99 },
-      { name: 'Jeans', category: 'Clothing', price: 45.99 },
-      { name: 'Vitamins', category: 'Health & Wellness', price: 29.99 },
-      { name: 'Motor Oil', category: 'Automotive', price: 35.99 }
-    ];
 
-    const sales = [];
-    const dateRange = getDateRange(selectedPeriod);
-    const daysDiff = Math.ceil((dateRange.end - dateRange.start) / (1000 * 60 * 60 * 24));
-    const salesCount = Math.max(10, Math.floor(daysDiff * 3.5)); // Scale sales with time period
-    
-    for (let i = 0; i < salesCount; i++) {
-      const randomTime = dateRange.start.getTime() + Math.random() * (dateRange.end.getTime() - dateRange.start.getTime());
-      const saleTime = new Date(randomTime);
-      const itemsCount = Math.floor(Math.random() * 5) + 1;
-      const selectedProducts = [];
-      let totalAmount = 0;
-
-      for (let j = 0; j < itemsCount; j++) {
-        const product = products[Math.floor(Math.random() * products.length)];
-        const quantity = Math.floor(Math.random() * 3) + 1;
-        selectedProducts.push({
-          name: product.name,
-          category: product.category,
-          quantity: quantity,
-          unit_price: product.price,
-          total: product.price * quantity
-        });
-        totalAmount += product.price * quantity;
-      }
-
-      sales.push({
-        id: i + 1,
-        receipt_number: `R${String(i + 1).padStart(4, '0')}`,
-        created_at: saleTime.toISOString(),
-        cashier_name: cashiers[Math.floor(Math.random() * cashiers.length)],
-        payment_method: ['cash', 'card', 'mobile'][Math.floor(Math.random() * 3)],
-        total_amount: totalAmount,
-        items: selectedProducts,
-        customer_name: Math.random() > 0.8 ? `Customer ${i + 1}` : ''
-      });
-    }
-
-    return sales.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  };
 
   const calculateStats = () => {
     let filteredSales = [...salesData];
@@ -245,18 +190,38 @@ const OwnerSalesScreen = () => {
       filteredSales = filteredSales.filter(sale => sale.cashier_name === selectedPersonnel);
     }
 
+    // Load refund data and apply to calculations
+    const refundStats = refundService.getRefundStats();
+    
     const totalSales = filteredSales.length;
-    const totalRevenue = filteredSales.reduce((sum, sale) => sum + (sale.total_amount || 0), 0);
-    const averageTransaction = totalSales > 0 ? totalRevenue / totalSales : 0;
+    const grossRevenue = filteredSales.reduce((sum, sale) => sum + (sale.total_amount || 0), 0);
+    
+    // Calculate net revenue (after refunds)
+    let netRevenue = grossRevenue;
+    let netSalesCount = totalSales;
+    
+    // Apply refunds to individual sales
+    const salesWithRefunds = filteredSales.map(sale => {
+      const isRefunded = refundService.isRefunded(sale.id);
+      if (isRefunded) {
+        netRevenue -= sale.total_amount || 0;
+        netSalesCount -= 1;
+        return { ...sale, is_refunded: true, net_amount: 0 };
+      }
+      return { ...sale, is_refunded: false, net_amount: sale.total_amount || 0 };
+    });
+    
+    const averageTransaction = netSalesCount > 0 ? netRevenue / netSalesCount : 0;
 
-    // Calculate time-based breakdowns
+    // Calculate time-based breakdowns using net revenue
     const timeBreakdown = {};
     const dailyData = {};
     let cumulativeRevenue = 0;
     const cumulativeData = [];
 
-    filteredSales.forEach((sale, index) => {
+    salesWithRefunds.forEach((sale, index) => {
       const saleDate = new Date(sale.created_at);
+      const saleRevenue = sale.net_amount || 0;
       
       // Hourly breakdown (for today/week view)
       if (selectedPeriod === 'today' || selectedPeriod === 'week') {
@@ -264,8 +229,8 @@ const OwnerSalesScreen = () => {
         if (!timeBreakdown[hour]) {
           timeBreakdown[hour] = { sales: 0, revenue: 0 };
         }
-        timeBreakdown[hour].sales += 1;
-        timeBreakdown[hour].revenue += sale.total_amount || 0;
+        timeBreakdown[hour].sales += sale.is_refunded ? 0 : 1;
+        timeBreakdown[hour].revenue += saleRevenue;
       }
 
       // Daily breakdown
@@ -273,15 +238,16 @@ const OwnerSalesScreen = () => {
       if (!dailyData[dayKey]) {
         dailyData[dayKey] = { sales: 0, revenue: 0 };
       }
-      dailyData[dayKey].sales += 1;
-      dailyData[dayKey].revenue += sale.total_amount || 0;
+      dailyData[dayKey].sales += sale.is_refunded ? 0 : 1;
+      dailyData[dayKey].revenue += saleRevenue;
 
       // Cumulative data
-      cumulativeRevenue += sale.total_amount || 0;
+      cumulativeRevenue += saleRevenue;
       cumulativeData.push({
         date: saleDate,
         cumulativeRevenue,
-        dailyRevenue: sale.total_amount || 0
+        dailyRevenue: saleRevenue,
+        isRefunded: sale.is_refunded
       });
     });
 
@@ -300,46 +266,53 @@ const OwnerSalesScreen = () => {
       .map(([date, data]) => ({ date, ...data }))
       .sort((a, b) => new Date(a.date) - new Date(b.date));
 
-    // Find top category
+    // Find top category using net revenue
     const categoryRevenue = {};
-    filteredSales.forEach(sale => {
-      sale.items?.forEach(item => {
-        if (!categoryRevenue[item.category]) {
-          categoryRevenue[item.category] = 0;
-        }
-        categoryRevenue[item.category] += item.total;
-      });
+    salesWithRefunds.forEach(sale => {
+      if (!sale.is_refunded) {
+        sale.items?.forEach(item => {
+          if (!categoryRevenue[item.category]) {
+            categoryRevenue[item.category] = 0;
+          }
+          categoryRevenue[item.category] += item.total;
+        });
+      }
     });
 
     const topCategory = Object.keys(categoryRevenue).reduce((a, b) => 
       categoryRevenue[a] > categoryRevenue[b] ? a : b, '');
 
-    // Find top cashier
+    // Find top cashier using net revenue
     const cashierRevenue = {};
-    filteredSales.forEach(sale => {
+    salesWithRefunds.forEach(sale => {
       const cashier = sale.cashier_name || 'Unknown';
       if (!cashierRevenue[cashier]) {
         cashierRevenue[cashier] = 0;
       }
-      cashierRevenue[cashier] += sale.total_amount || 0;
+      cashierRevenue[cashier] += sale.net_amount || 0;
     });
 
     const topCashier = Object.keys(cashierRevenue).reduce((a, b) => 
       cashierRevenue[a] > cashierRevenue[b] ? a : b, '');
 
-    // Calculate growth (mock calculation for demo)
-    const growthPercentage = Math.random() * 40 - 10; // Random growth between -10% and +30%
-    const salesGrowth = Math.random() * 50 - 15; // Random sales growth
+    // Calculate growth based on real data
+    const growthPercentage = 0; // Will be calculated from comparison data when available
+    const salesGrowth = 0; // Will be calculated from comparison data when available
     
     setCurrentStats({
       totalSales,
-      totalRevenue,
+      grossRevenue,
+      netRevenue,
+      netSalesCount,
+      totalRefunds: grossRevenue - netRevenue,
+      refundCount: totalSales - netSalesCount,
       averageTransaction,
       topCategory,
       topCashier,
       hourlyBreakdown,
       dailyBreakdown,
       cumulativeRevenue: cumulativeData,
+      refundRate: totalSales > 0 ? ((totalSales - netSalesCount) / totalSales * 100) : 0,
       growth: {
         sales: salesGrowth,
         revenue: growthPercentage,
@@ -347,9 +320,9 @@ const OwnerSalesScreen = () => {
       }
     });
 
-    // Calculate comparison stats (mock data)
-    const previousRevenue = totalRevenue / (1 + growthPercentage / 100);
-    const previousSales = totalSales / (1 + salesGrowth / 100);
+    // Calculate comparison stats (from actual data when available)
+    const previousRevenue = 0; // Will be calculated when historical data is available
+    const previousSales = 0; // Will be calculated when historical data is available
     
     setComparisonStats({
       previousSales: Math.round(previousSales),
@@ -533,8 +506,9 @@ const OwnerSalesScreen = () => {
       
       <View style={styles.statCard}>
         <Text style={styles.statIcon}>💰</Text>
-        <Text style={styles.statValue}>{formatCurrency(currentStats.totalRevenue)}</Text>
-        <Text style={styles.statLabel}>Revenue</Text>
+        <Text style={styles.statValue}>{formatCurrency(currentStats.netRevenue)}</Text>
+        <Text style={styles.statLabel}>Net Revenue</Text>
+        <Text style={styles.statSubtext}>After refunds</Text>
         <View style={styles.growthIndicator}>
           <Text style={[
             styles.growthText,
@@ -553,10 +527,17 @@ const OwnerSalesScreen = () => {
       </View>
       
       <View style={styles.statCard}>
+        <Text style={styles.statIcon}>🔄</Text>
+        <Text style={styles.statValue}>{formatCurrency(currentStats.totalRefunds)}</Text>
+        <Text style={styles.statLabel}>Refunds</Text>
+        <Text style={styles.statSubtext}>{currentStats.refundCount} transactions</Text>
+      </View>
+      
+      <View style={styles.statCard}>
         <Text style={styles.statIcon}>🎯</Text>
-        <Text style={styles.statValue}>{formatCurrency(currentStats.totalRevenue / Math.max(currentStats.totalSales, 1))}</Text>
-        <Text style={styles.statLabel}>Hourly Avg</Text>
-        <Text style={styles.statSubtext}>estimated</Text>
+        <Text style={styles.statValue}>{formatCurrency(currentStats.netRevenue / Math.max(currentStats.netSalesCount, 1))}</Text>
+        <Text style={styles.statLabel}>Net Avg</Text>
+        <Text style={styles.statSubtext}>per transaction</Text>
       </View>
     </View>
   );
@@ -708,7 +689,7 @@ const OwnerSalesScreen = () => {
                 <View 
                   style={[
                     styles.progressFill, 
-                    { width: `${(day.revenue / currentStats.totalRevenue) * 100}%` }
+                    { width: `${currentStats.netRevenue > 0 ? (day.revenue / currentStats.netRevenue) * 100 : 0}%` }
                   ]} 
                 />
               </View>
@@ -777,11 +758,11 @@ const OwnerSalesScreen = () => {
           <Text style={styles.sectionTitle}>🎯 Key Performance Indicators</Text>
           <View style={styles.kpiGrid}>
             <View style={styles.kpiCard}>
-              <Text style={styles.kpiValue}>{formatCurrency(currentStats.totalRevenue / Math.max(currentStats.totalSales, 1))}</Text>
+              <Text style={styles.kpiValue}>{formatCurrency(currentStats.netRevenue / Math.max(currentStats.netSalesCount, 1))}</Text>
               <Text style={styles.kpiLabel}>Revenue per Sale</Text>
             </View>
             <View style={styles.kpiCard}>
-              <Text style={styles.kpiValue}>{currentStats.totalSales > 0 ? (currentStats.totalRevenue / currentStats.totalSales * 100).toFixed(1) : 0}%</Text>
+              <Text style={styles.kpiValue}>{currentStats.netSalesCount > 0 ? (currentStats.netRevenue / currentStats.netSalesCount * 100).toFixed(1) : 0}%</Text>
               <Text style={styles.kpiLabel}>Profit Margin Est.</Text>
             </View>
             <View style={styles.kpiCard}>
@@ -814,14 +795,14 @@ const OwnerSalesScreen = () => {
               <View style={styles.paymentMethodStats}>
                 <Text style={styles.paymentMethodCount}>{stats.count} transactions</Text>
                 <Text style={styles.paymentMethodPercentage}>
-                  {((stats.revenue / currentStats.totalRevenue) * 100).toFixed(1)}% of total
+                  {currentStats.netRevenue > 0 ? ((stats.revenue / currentStats.netRevenue) * 100).toFixed(1) : 0}% of net total
                 </Text>
               </View>
               <View style={styles.progressBar}>
                 <View 
                   style={[
                     styles.progressFill, 
-                    { width: `${(stats.revenue / currentStats.totalRevenue) * 100}%` }
+                    { width: `${currentStats.netRevenue > 0 ? (stats.revenue / currentStats.netRevenue) * 100 : 0}%` }
                   ]} 
                 />
               </View>
@@ -869,7 +850,10 @@ const OwnerSalesScreen = () => {
         name: person,
         sales: salesData.filter(sale => sale.cashier_name === person).length,
         revenue: salesData.filter(sale => sale.cashier_name === person)
-          .reduce((sum, sale) => sum + (sale.total_amount || 0), 0)
+          .reduce((sum, sale) => {
+            const isRefunded = refundService.isRefunded(sale.id);
+            return sum + (isRefunded ? 0 : (sale.total_amount || 0));
+          }, 0)
       }))
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 3);
@@ -1064,7 +1048,7 @@ const OwnerSalesScreen = () => {
               </View>
               <View style={styles.personnelStatItem}>
                 <Text style={styles.personnelStatValue}>
-                  {Math.round((person.revenue / todayStats.totalRevenue) * 100)}%
+                  {Math.round((person.revenue / currentStats.totalRevenue) * 100)}%
                 </Text>
                 <Text style={styles.personnelStatLabel}>Share</Text>
               </View>
@@ -1075,7 +1059,7 @@ const OwnerSalesScreen = () => {
                 <View 
                   style={[
                     styles.progressFill, 
-                    { width: `${(person.revenue / todayStats.totalRevenue) * 100}%` }
+                    { width: `${(person.revenue / currentStats.totalRevenue) * 100}%` }
                   ]} 
                 />
               </View>

@@ -9,23 +9,85 @@ import {
   Alert,
   Platform,
   TextInput,
+  RefreshControl,
+  Animated,
+  Dimensions,
+  PanResponder,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { shopStorage } from '../services/storage';
 import { shopAPI } from '../services/api';
+import { ROUTES } from '../constants/navigation';
 import BarcodeScanner from '../components/BarcodeScanner';
 import presenceService from '../services/presenceService';
+import Icon from 'react-native-vector-icons/MaterialIcons';
+import WeightInputModal from '../components/WeightInputModal';
+
+const { width, height } = Dimensions.get('window');
+const SIDEBAR_WIDTH = Math.min(width * 0.75, 350); // Cover up to 75% of screen, max 350px
 
 const CashierDashboardScreen = () => {
   const navigation = useNavigation();
+  const route = useRoute();
   const [loading, setLoading] = useState(true);
   const [cashierData, setCashierData] = useState(null);
   const [shopData, setShopData] = useState(null);
+  const [shopStatus, setShopStatus] = useState(null);
   
   // POS State
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
   const [paymentMethod, setPaymentMethod] = useState('cash');
+  
+  // Handle selected products from CashierProductsScreen
+  useEffect(() => {
+    if (route.params && route.params.selectedProducts) {
+      const selectedProducts = route.params.selectedProducts;
+      console.log('Adding selected products to cart:', selectedProducts);
+      
+      // Show success message
+      Alert.alert(
+        '✅ Products Added to Cart',
+        `${selectedProducts.length} product${selectedProducts.length !== 1 ? 's' : ''} added to your cart!`,
+        [{ text: 'OK' }]
+      );
+      
+      // Merge selected products into existing cart
+      setCart(prevCart => {
+        const newCart = [...prevCart];
+        selectedProducts.forEach(selectedProduct => {
+          const existingItem = newCart.find(item => item.id === selectedProduct.id);
+          if (existingItem) {
+            // Update quantity or weight if product already in cart
+            if (selectedProduct.price_type === 'unit') {
+              existingItem.quantity += selectedProduct.quantity;
+            } else {
+              // For weighable products, update weight
+              existingItem.weight = (existingItem.weight || 0) + (selectedProduct.weight || selectedProduct.quantity || 0);
+            }
+          } else {
+            // Add new product to cart
+            newCart.push(selectedProduct);
+          }
+        });
+        return newCart;
+      });
+      
+      // Clear the navigation param to prevent re-adding
+      navigation.setParams({ selectedProducts: undefined });
+    }
+
+    // Handle quick product selection from QuickProductsScreen
+    if (route.params && route.params.selectedQuickProduct) {
+      const selectedProduct = route.params.selectedQuickProduct;
+      console.log('Adding quick product to cart:', selectedProduct);
+      
+      addToCart(selectedProduct);
+      
+      // Clear the navigation param to prevent re-adding
+      navigation.setParams({ selectedQuickProduct: undefined });
+    }
+  }, [route.params, navigation]);
   const [amountReceived, setAmountReceived] = useState('');
   const [productsLoading, setProductsLoading] = useState(false);
   const [processingSale, setProcessingSale] = useState(false);
@@ -38,6 +100,27 @@ const CashierDashboardScreen = () => {
   const [presenceStatus, setPresenceStatus] = useState({ isOnline: false, lastActivity: null });
   const [barcodeInput, setBarcodeInput] = useState('');
   const [barcodeValidation, setBarcodeValidation] = useState(null); // Track validation state
+  const [backgroundScannerActive, setBackgroundScannerActive] = useState(false);
+
+  // Drawer Status State
+  const [drawerStatus, setDrawerStatus] = useState(null);
+  const [showDrawerStatus, setShowDrawerStatus] = useState(false);
+  const [refreshingDrawer, setRefreshingDrawer] = useState(false);
+  
+  // Sidebar State
+  const [showSidebar, setShowSidebar] = useState(false);
+  const [sidebarX] = useState(new Animated.Value(-SIDEBAR_WIDTH));
+  
+  // Cart View State
+  const [cartExpanded, setCartExpanded] = useState(false);
+  
+  // Products View State
+  const [productsExpanded, setProductsExpanded] = useState(false);
+
+  // Weight Input Modal State
+  const [showWeightModal, setShowWeightModal] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [weightInput, setWeightInput] = useState('');
 
 
   useEffect(() => {
@@ -47,6 +130,17 @@ const CashierDashboardScreen = () => {
     if (typeof window !== 'undefined') {
       window.addEventListener('presenceStatusChanged', handlePresenceChange);
     }
+    
+    // Set up background barcode scanner listening
+    setupBackgroundScanner();
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('presenceStatusChanged', handlePresenceChange);
+      }
+      // Clean up background scanner
+      cleanupBackgroundScanner();
+    };
     
     // Add web-specific scrolling CSS
     if (Platform.OS === 'web') {
@@ -68,6 +162,59 @@ const CashierDashboardScreen = () => {
       };
     }
   }, []);
+
+  // Auto-refresh drawer status when cashierData is available
+  useEffect(() => {
+    if (!cashierData) return;
+    const interval = setInterval(() => {
+      loadDrawerStatus(cashierData);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [cashierData]);
+
+  // Sidebar animation effect
+  useEffect(() => {
+    Animated.timing(sidebarX, {
+      toValue: showSidebar ? 0 : -SIDEBAR_WIDTH,
+      duration: 300,
+      useNativeDriver: true,
+    }).start();
+  }, [showSidebar]);
+
+  // Pan responder for swipe gestures
+  const panResponder = React.useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: (evt, gestureState) => {
+        return evt.nativeEvent.locationX < 50; // Only respond to touches near the left edge
+      },
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        return evt.nativeEvent.locationX < 50;
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        if (gestureState.dx > 0 && showSidebar) {
+          sidebarX.setValue(-SIDEBAR_WIDTH + gestureState.dx);
+        } else if (gestureState.dx < 0 && !showSidebar) {
+          sidebarX.setValue(-SIDEBAR_WIDTH + gestureState.dx);
+        }
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        if (gestureState.dx > 100) {
+          // Swipe right to open
+          setShowSidebar(true);
+        } else if (gestureState.dx < -50) {
+          // Swipe left to close
+          setShowSidebar(false);
+        } else {
+          // Reset to original position
+          Animated.timing(sidebarX, {
+            toValue: showSidebar ? 0 : -SIDEBAR_WIDTH,
+            duration: 200,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    })
+  ).current;
 
   // Filter products based on search and category
   useEffect(() => {
@@ -152,6 +299,12 @@ const CashierDashboardScreen = () => {
         // Load products for POS
         await loadProducts();
         
+        // Load shop status first
+        await loadShopStatus();
+        
+        // Load drawer status (pass credentials so we can pick the cashier's drawer)
+        await loadDrawerStatus(credentials);
+        
         // Test API connection and get fresh data
         try {
           const statusResponse = await shopAPI.checkStatus();
@@ -227,30 +380,422 @@ const CashierDashboardScreen = () => {
     }
   };
 
+  const loadShopStatus = async () => {
+    try {
+      console.log('🔍 Loading shop status...');
+      const response = await shopAPI.getShopStatus();
+      console.log('📊 Shop status response:', response);
+      
+      // Handle different response structures
+      let statusData = response.data;
+      
+      // If response is directly the status object
+      if (statusData && (statusData.is_open !== undefined || statusData.status)) {
+        // Normalize the status data structure
+        const normalizedStatus = {
+          is_open: statusData.is_open !== undefined ? statusData.is_open : (statusData.status !== 'CLOSED'),
+          status: statusData.is_open ? 'OPEN' : 'CLOSED',
+          ...statusData
+        };
+        
+        console.log('✅ Shop status loaded:', normalizedStatus);
+        setShopStatus(normalizedStatus);
+        
+        // If shop is closed, show warning but allow access
+        if (!normalizedStatus.is_open) {
+          console.log('⚠️ Shop is currently closed');
+        }
+      } else {
+        // If no valid status data, assume shop is open for cashier operations
+        console.log('⚠️ No shop status data found, assuming shop is open');
+        const defaultStatus = {
+          is_open: true,
+          status: 'OPEN',
+          message: 'Shop status not available - assuming open'
+        };
+        setShopStatus(defaultStatus);
+      }
+    } catch (error) {
+      console.error('Failed to load shop status:', error);
+      // Set default status to open so cashier can work
+      const fallbackStatus = {
+        is_open: true,
+        status: 'OPEN',
+        message: 'Shop status unavailable - allowing operations'
+      };
+      setShopStatus(fallbackStatus);
+      console.log('🔄 Using fallback shop status (OPEN) due to error');
+    }
+  };
+
+  const loadDrawerStatus = async (cashier = null) => {
+    try {
+      setRefreshingDrawer(true);
+      const response = await shopAPI.getCashFloat();
+      // Debug log to inspect backend shape during runtime
+      console.log('[/cash-float/] response:', response?.data);
+
+      if (response.data && response.data.success) {
+        // Prefer explicit `drawer` field (single-drawer payload), else use shop_status
+        const payload = response.data.drawer || response.data.shop_status || response.data;
+
+        // If shop is closed (from previously loaded shopStatus) or payload is for a previous date,
+        // present zeroed drawer to start fresh for the new day.
+        const today = new Date().toISOString().slice(0,10);
+        const payloadDate = payload?.date || payload?.current_shop_day?.date || null;
+        
+        // Only check shopStatus if it exists and has valid data
+        const currentShopStatus = shopStatus;
+        const isClosed = currentShopStatus && (currentShopStatus.status === 'CLOSED' || currentShopStatus.is_open === false);
+        
+        if (isClosed || (payloadDate && payloadDate !== today)) {
+          console.log('⚠️ Clearing drawer status because shop closed or payload is stale', { isClosed, payloadDate, today });
+          setDrawerStatus({
+            cashier: cashier?.name || 'Unknown',
+            float_amount: 0,
+            current_breakdown: { cash: 0, card: 0, ecocash: 0, transfer: 0, total: 0 },
+            session_sales: { cash: 0, card: 0, ecocash: 0, transfer: 0, total: 0 },
+            eod_expectations: { expected_cash: 0, variance: 0, efficiency: 100 },
+            status: 'INACTIVE',
+            last_activity: null
+          });
+          return;
+        }
+
+        const payloadShopStatus = payload;
+        if (payloadShopStatus && Array.isArray(payloadShopStatus.drawers)) {
+          // Create comprehensive cashier identifier for matching
+          const cashierIdentifiers = [
+            cashier?.name,
+            cashier?.username, 
+            cashier?.id,
+            cashier?.cashier_id,
+            cashier?.user_id,
+            cashier?.email,
+            cashier?.cashier_info?.id,
+            cashier?.cashier_info?.name
+          ].filter(Boolean);
+
+          console.log('🔍 DRAWER ATTRIBUTION DEBUG - Cashier Identifiers:', { cashier, cashierIdentifiers });
+
+          // Enhanced matching logic with multiple fallback strategies
+          const matched = payloadShopStatus.drawers.find(d => {
+            if (!d) return false;
+            
+            console.log('🔍 Checking drawer:', { drawer: d, cashier: d.cashier, cashierId: d.cashier_id });
+            
+            // Strategy 1: Exact cashier field match (case-insensitive)
+            if (typeof d.cashier === 'string' && cashierIdentifiers.length > 0) {
+              const exactMatch = cashierIdentifiers.some(id => 
+                d.cashier.toLowerCase() === String(id).toLowerCase()
+              );
+              if (exactMatch) {
+                console.log('✅ EXACT MATCH FOUND:', d.cashier);
+                return true;
+              }
+            }
+            
+            // Strategy 2: Cashier ID field match
+            if (d.cashier_id && cashier?.id && String(d.cashier_id) === String(cashier.id)) {
+              console.log('✅ CASHIER ID MATCH FOUND:', d.cashier_id);
+              return true;
+            }
+            
+            // Strategy 3: Try to match by cashier_info if available
+            if (d.cashier_info && cashier?.cashier_info) {
+              if (String(d.cashier_info.id) === String(cashier.cashier_info.id) ||
+                  d.cashier_info.name?.toLowerCase() === cashier.cashier_info.name?.toLowerCase()) {
+                console.log('✅ CASHIER_INFO MATCH FOUND:', d.cashier_info);
+                return true;
+              }
+            }
+            
+            // Strategy 4: Partial name matching (if cashier name contains drawer cashier name or vice versa)
+            if (typeof d.cashier === 'string' && cashier?.name) {
+              const drawerCashier = d.cashier.toLowerCase();
+              const currentCashier = cashier.name.toLowerCase();
+              if (drawerCashier.includes(currentCashier) || currentCashier.includes(drawerCashier)) {
+                console.log('✅ PARTIAL NAME MATCH FOUND:', { drawerCashier, currentCashier });
+                return true;
+              }
+            }
+            
+            return false;
+          });
+
+          if (matched) {
+            console.log('✅ DRAWER MATCHED TO CASHIER:', { drawer: matched.cashier, cashier: cashier?.name });
+            setDrawerStatus(matched);
+            return;
+          }
+
+          // If there is only one drawer for the shop, use it as fallback
+          if (shopStatus.drawers.length === 1) {
+            console.log('⚠️ SINGLE DRAWER FALLBACK - Using shop drawer for:', shopStatus.drawers[0].cashier);
+            setDrawerStatus(shopStatus.drawers[0]);
+            return;
+          }
+
+          // If no match found and multiple drawers exist, create a new drawer status for this cashier
+          if (cashierIdentifiers.length > 0) {
+            console.log('⚠️ NO MATCH FOUND - Creating drawer status for new cashier:', cashier?.name);
+            const newDrawerStatus = {
+              cashier: cashier?.name || 'Unknown Cashier',
+              cashier_id: cashier?.id || cashier?.cashier_id,
+              float_amount: 0,
+              current_breakdown: { cash: 0, card: 0, ecocash: 0, transfer: 0, total: 0 },
+              session_sales: { cash: 0, card: 0, ecocash: 0, transfer: 0, total: 0 },
+              eod_expectations: { expected_cash: 0, variance: 0, efficiency: 100 },
+              status: 'ACTIVE',
+              last_activity: new Date().toISOString()
+            };
+            setDrawerStatus(newDrawerStatus);
+            return;
+          }
+
+          // If no match found and no cashier identifiers, avoid overwriting existing drawerStatus
+          if (drawerStatus) {
+            console.log('⚠️ NO MATCH & NO CASHIER DATA - Keeping existing drawer status');
+            return;
+          }
+        }
+
+        // Fallback: if response provided a single drawer object, use it
+        if (response.data.drawer) {
+          setDrawerStatus(response.data.drawer);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load drawer status:', error);
+    } finally {
+      setRefreshingDrawer(false);
+    }
+  };
+
+  const refreshDrawerStatus = async () => {
+    await loadDrawerStatus();
+  };
+
+  // Sidebar features for cashiers
+  const sidebarFeatures = [
+    {
+      id: 'drawer-status',
+      title: '💰 Drawer Status',
+      description: 'View my cash float & sales',
+      icon: '💰',
+      type: 'drawer',
+      color: '#22c55e',
+      section: 'cashier-tools'
+    },
+    {
+      id: 'quick-products',
+      title: '⚡ Quick Products',
+      description: 'Products without barcodes',
+      icon: '⚡',
+      screen: 'QuickProducts',
+      color: '#10b981',
+      section: 'cashier-tools'
+    },
+    {
+      id: 'waste-management',
+      title: '🗑️ Waste Management',
+      description: 'Track product waste & shrinkage',
+      icon: '🗑️',
+      screen: 'WasteScreen',
+      color: '#f97316',
+      section: 'cashier-tools'
+    },
+    {
+      id: 'my-sales',
+      title: '📊 My Sales',
+      description: 'View my transaction history only',
+      icon: '📊',
+      screen: 'CashierSales',
+      color: '#10b981',
+      section: 'cashier-tools'
+    },
+    {
+      id: 'my-drawer',
+      title: '💰 My Drawer',
+      description: 'View float & cash breakdown',
+      icon: '💰',
+      screen: 'CashierDrawer',
+      color: '#22c55e',
+      section: 'cashier-tools'
+    },
+    {
+      id: 'stock-transfer',
+      title: '🔄 Stock Transfer',
+      description: 'Transfer & convert stock between products',
+      icon: '🔄',
+      screen: 'StockTransfer',
+      color: '#8b5cf6',
+      section: 'cashier-tools'
+    },
+    {
+      id: 'weight-products',
+      title: '⚖️ Weight Products',
+      description: 'Browse & manage weighable items',
+      icon: '⚖️',
+      screen: 'WeightProducts',
+      color: '#f97316',
+      section: 'cashier-tools'
+    },
+    {
+      id: 'transfer-history',
+      title: '📊 Transfer History',
+      description: 'View financial impact & analysis',
+      icon: '📊',
+      screen: 'StockTransferHistory',
+      color: '#06b6d4',
+      section: 'cashier-tools'
+    },
+  ];
+
+  const handleSidebarFeaturePress = (feature) => {
+    setShowSidebar(false); // Close sidebar first
+    
+    // Navigate to the feature screen
+    switch (feature.screen) {
+      case 'WasteScreen':
+        navigation.navigate(ROUTES.WASTE_SCREEN);
+        break;
+      case 'CashierSales':
+        navigation.navigate(ROUTES.CASHIER_SALES);
+        break;
+      case 'CashierDrawer':
+        navigation.navigate('CashierDrawer');
+        break;
+      case 'StockTransfer':
+        navigation.navigate(ROUTES.STOCK_TRANSFER);
+        break;
+      case 'StockTransferHistory':
+        navigation.navigate(ROUTES.STOCK_TRANSFER_HISTORY);
+        break;
+      case 'WeightProducts':
+        navigation.navigate(ROUTES.WEIGHT_PRODUCTS);
+        break;
+      case 'QuickProducts':
+        navigation.navigate(ROUTES.QUICK_PRODUCTS);
+        break;
+      default:
+        console.log(`Feature "${feature.title}" pressed`);
+        break;
+    }
+  };
+
+  const renderSidebarFeatureItem = (feature) => (
+    <TouchableOpacity
+      key={feature.id}
+      style={styles.sidebarFeatureItem}
+      onPress={() => handleSidebarFeaturePress(feature)}
+      activeOpacity={0.8}
+    >
+      <View style={[styles.sidebarFeatureIcon, { backgroundColor: feature.color }]}>
+        <Text style={styles.sidebarFeatureIconText}>{feature.icon}</Text>
+      </View>
+      <View style={styles.sidebarFeatureContent}>
+        <Text style={styles.sidebarFeatureTitle}>{feature.title}</Text>
+        <Text style={styles.sidebarFeatureDescription}>{feature.description}</Text>
+      </View>
+      <Text style={styles.sidebarFeatureArrow}>→</Text>
+    </TouchableOpacity>
+  );
+
   const addToCart = (product) => {
+    // For weighable products, show weight input modal
+    if (product.price_type !== 'unit') {
+      setSelectedProduct(product);
+      setWeightInput('');
+      setShowWeightModal(true);
+      return;
+    }
+
+    // For unit products, add directly to cart
     const existingItem = cart.find(item => item.id === product.id);
-    const currentQuantity = existingItem ? existingItem.quantity : 0;
-    const newQuantity = currentQuantity + 1;
     
     // Allow negative stock sales - no stock validation
     
     if (existingItem) {
+      // For unit products, increment quantity
       setCart(cart.map(item => 
         item.id === product.id 
           ? { ...item, quantity: item.quantity + 1 }
           : item
       ));
     } else {
+      // Add new product
       setCart([...cart, { ...product, quantity: 1 }]);
     }
+  };
+
+  // Handle weight addition from modal
+  const handleWeightAdd = (weight) => {
+    if (!selectedProduct || weight <= 0) {
+      setShowWeightModal(false);
+      setSelectedProduct(null);
+      setWeightInput('');
+      return;
+    }
+
+    const existingItem = cart.find(item => item.id === selectedProduct.id);
+    
+    if (existingItem) {
+      // Update existing item weight
+      setCart(cart.map(item => 
+        item.id === selectedProduct.id 
+          ? { ...item, weight: (item.weight || 0) + weight }
+          : item
+      ));
+    } else {
+      // Add new weighable product
+      setCart([...cart, { 
+        ...selectedProduct, 
+        quantity: 0, // Don't use quantity for weighable products
+        weight: weight
+      }]);
+    }
+    
+    // Close modal and reset state
+    setShowWeightModal(false);
+    setSelectedProduct(null);
+    setWeightInput('');
+  };
+
+  // Handle weight modal cancellation
+  const handleWeightCancel = () => {
+    setShowWeightModal(false);
+    setSelectedProduct(null);
+    setWeightInput('');
   };
 
   const removeFromCart = (productId) => {
     setCart(cart.filter(item => item.id !== productId));
   };
 
-  const updateQuantity = (productId, quantity) => {
-    if (quantity <= 0) {
+  const updateQuantity = (productId, newQuantity) => {
+    if (newQuantity <= 0) {
+      removeFromCart(productId);
+      return;
+    }
+    
+    // Allow negative stock sales - no stock validation
+    setCart(cart.map(item => {
+      if (item.id === productId) {
+        // For weighable products, update weight instead of quantity
+        if (item.price_type !== 'unit') {
+          return { ...item, weight: newQuantity };
+        }
+        // For unit products, update quantity
+        return { ...item, quantity: newQuantity };
+      }
+      return item;
+    }));
+  };
+
+  const updateWeight = (productId, weight) => {
+    const numWeight = parseFloat(weight) || 0;
+    if (numWeight <= 0) {
       removeFromCart(productId);
       return;
     }
@@ -258,13 +803,21 @@ const CashierDashboardScreen = () => {
     // Allow negative stock sales - no stock validation
     setCart(cart.map(item => 
       item.id === productId 
-        ? { ...item, quantity }
+        ? { ...item, weight: numWeight }
         : item
     ));
   };
 
   const getTotalAmount = () => {
-    return cart.reduce((total, item) => total + (item.price * item.quantity), 0);
+    return cart.reduce((total, item) => {
+      if (item.price_type === 'unit') {
+        // For unit products, use quantity
+        return total + (item.price * item.quantity);
+      } else {
+        // For weighable products, use weight
+        return total + (item.price * (item.weight || 0));
+      }
+    }, 0);
   };
 
   const getChange = () => {
@@ -279,21 +832,21 @@ const CashierDashboardScreen = () => {
     return ['all', ...categories];
   };
 
-  // Handle barcode scan
+  // Handle barcode scan - Auto add to cart
   const handleBarcodeScan = (barcode) => {
     const product = products.find(p => p.line_code === barcode || p.barcode === barcode);
     if (product) {
       addToCart(product);
-      showError(
-        '✅ PRODUCT ADDED', 
-        `${product.name} has been added to your cart!`,
-        'success'
+      Alert.alert(
+        '📷 SCAN SUCCESS', 
+        `${product.name} scanned and added to cart!`,
+        [{ text: 'OK' }]
       );
     } else {
-      showError(
+      Alert.alert(
         '❌ PRODUCT NOT FOUND', 
         `No product found with code: ${barcode}\n\nPlease check the barcode or add the product manually.`,
-        'error'
+        [{ text: 'OK' }]
       );
     }
     setShowScanner(false);
@@ -309,15 +862,15 @@ const CashierDashboardScreen = () => {
     }
   };
 
-  // Validate barcode when button is pressed
+  // Validate barcode and auto-add to cart
   const validateAndAddBarcode = () => {
     const barcode = barcodeInput.trim();
     
     if (barcode.length < 6) {
-      showError(
+      Alert.alert(
         '❌ INVALID BARCODE', 
         'Barcode must be at least 6 characters long.\n\nPlease enter a complete barcode.',
-        'error'
+        [{ text: 'OK' }]
       );
       return;
     }
@@ -341,25 +894,125 @@ const CashierDashboardScreen = () => {
     });
     
     if (!product) {
-      showError(
+      Alert.alert(
         '❌ PRODUCT NOT FOUND', 
         `No product found with barcode: ${barcode}\n\nPlease check the barcode or add the product manually.`,
-        'error'
+        [{ text: 'OK' }]
       );
       return;
     }
     
-    // Product exists - add to cart (SILENT - no modal)
+    // Product exists - add to cart and show success
     setBarcodeInput('');
     setBarcodeValidation(null);
     addToCart(product);
     
-    // NO SUCCESS MESSAGE - let cashier continue working
+    Alert.alert(
+      '✅ BARCODE ADDED', 
+      `${product.name} has been added to your cart!`,
+      [{ text: 'OK' }]
+    );
   };
 
   // Clear barcode input
   const clearBarcodeInput = () => {
     setBarcodeInput('');
+  };
+
+  // Background barcode scanner setup (like supermarket scanners)
+  let barcodeBuffer = '';
+  let lastKeystrokeTime = 0;
+  const SCANNER_TIMEOUT = 50; // Barcode scanners type very fast (50ms between chars)
+  const MIN_BARCODE_LENGTH = 6;
+  
+  const setupBackgroundScanner = () => {
+    if (typeof window === 'undefined') return;
+    
+    setBackgroundScannerActive(true);
+    
+    // Global keydown listener for background scanning
+    const handleGlobalKeydown = (event) => {
+      // Only process if not typing in an input field
+      if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+        return;
+      }
+      
+      const currentTime = Date.now();
+      const timeDiff = currentTime - lastKeystrokeTime;
+      
+      // If it's been too long since last keystroke, this might be a new barcode
+      if (timeDiff > SCANNER_TIMEOUT) {
+        barcodeBuffer = '';
+      }
+      
+      // Only accept printable characters
+      if (event.key.length === 1) {
+        barcodeBuffer += event.key;
+        lastKeystrokeTime = currentTime;
+        
+        // Check if we have a complete barcode
+        if (barcodeBuffer.length >= MIN_BARCODE_LENGTH) {
+          processBackgroundBarcode(barcodeBuffer);
+          barcodeBuffer = '';
+        }
+      }
+      
+      // Handle Enter key (some scanners end with Enter)
+      if (event.key === 'Enter' && barcodeBuffer.length >= MIN_BARCODE_LENGTH) {
+        processBackgroundBarcode(barcodeBuffer);
+        barcodeBuffer = '';
+      }
+    };
+    
+    window.addEventListener('keydown', handleGlobalKeydown);
+    
+    // Store cleanup function
+    window.cleanupBackgroundScanner = () => {
+      window.removeEventListener('keydown', handleGlobalKeydown);
+    };
+  };
+  
+  const cleanupBackgroundScanner = () => {
+    if (typeof window !== 'undefined' && window.cleanupBackgroundScanner) {
+      window.cleanupBackgroundScanner();
+    }
+    setBackgroundScannerActive(false);
+  };
+  
+  const processBackgroundBarcode = (barcode) => {
+    console.log('🔍 Background scanner detected barcode:', barcode);
+    
+    const product = products.find(p => {
+      // Check primary barcode
+      if (p.barcode === barcode) return true;
+      // Check line code
+      if (p.line_code === barcode) return true;
+      // Check additional barcodes
+      if (p.additional_barcodes) {
+        if (Array.isArray(p.additional_barcodes)) {
+          return p.additional_barcodes.includes(barcode);
+        } else if (typeof p.additional_barcodes === 'string') {
+          const barcodes = p.additional_barcodes.split(',').map(b => b.trim());
+          return barcodes.includes(barcode);
+        }
+      }
+      return false;
+    });
+    
+    if (product) {
+      addToCart(product);
+      Alert.alert(
+        '🛒 SCANNER ADDED', 
+        `${product.name} scanned and added to cart!`,
+        [{ text: 'OK', timeout: 1500 }]
+      );
+    } else {
+      Alert.alert(
+        '❌ PRODUCT NOT FOUND', 
+        `No product found with barcode: ${barcode}`,
+        [{ text: 'OK' }]
+      );
+    }
   };
 
   // Handle manual barcode submission via button click
@@ -385,10 +1038,7 @@ const CashierDashboardScreen = () => {
     // If barcode doesn't exist, do nothing silently
   };
 
-  // Handle scan button press
-  const handleScanPress = () => {
-    setShowScanner(true);
-  };
+
 
   // Show error modal function
   const showError = (title, message, type = 'error') => {
@@ -421,221 +1071,413 @@ const CashierDashboardScreen = () => {
     // Generate receipt verification barcode
     const verificationCode = `R${receiptNumber}${now.getTime().toString().slice(-6)}${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
     
-    // Create authentic business receipt HTML (like real restaurants/stores)
+    // Create enhanced professional receipt HTML optimized for printing
     const receiptHTML = `
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Receipt</title>
+        <title>Professional Receipt</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
+          /* Print-optimized CSS */
+          @media print {
+            body { 
+              margin: 0; 
+              padding: 0; 
+              background: white !important;
+              -webkit-print-color-adjust: exact;
+              color-adjust: exact;
+            }
+            .receipt-container {
+              box-shadow: none !important;
+              border: none !important;
+              background: white !important;
+              margin: 0 !important;
+              padding: 10px !important;
+              width: 100% !important;
+              max-width: none !important;
+            }
+            .cancel-button {
+              display: none !important;
+            }
+            .receipt {
+              padding: 0 !important;
+            }
+            .no-print {
+              display: none !important;
+            }
+          }
+          
+          /* Screen display styles */
           body {
-            font-family: 'Courier New', monospace;
-            background-color: #f5f5f5;
+            font-family: 'Courier New', 'Arial', sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
             color: #000000;
             margin: 0;
             padding: 20px;
-            width: 100%;
-            height: 100vh;
+            min-height: 100vh;
             display: flex;
             justify-content: center;
             align-items: flex-start;
-            line-height: 1.2;
-            font-size: 12px;
+            line-height: 1.4;
+            font-size: 16px;
           }
           
           .receipt-container {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-            width: 320px;
-            max-width: 90vw;
+            background: #ffffff;
+            padding: 15px;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.15), 0 0 0 1px rgba(255,255,255,0.8);
+            width: 350px;
+            max-width: 95vw;
+            position: relative;
+            overflow: hidden;
+          }
+          
+          .receipt-container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
           }
           
           .receipt {
-            padding: 0;
             background: white;
+            position: relative;
           }
           
+          /* Enhanced Header */
           .header {
             text-align: center;
-            border-bottom: 2px dashed #000;
-            padding-bottom: 10px;
+            border-bottom: 3px double #333;
+            padding-bottom: 12px;
             margin-bottom: 15px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            margin: -15px -15px 15px -15px;
+            padding: 15px;
+            border-radius: 12px 12px 0 0;
           }
           
           .company-name {
-            font-size: 20px;
+            font-size: 26px;
             font-weight: bold;
             margin-bottom: 8px;
-            letter-spacing: 2px;
+            letter-spacing: 1px;
             text-transform: uppercase;
-            color: #000;
+            color: #2c3e50;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
           }
           
           .company-info {
-            font-size: 10px;
-            margin-bottom: 3px;
+            font-size: 13px;
+            margin-bottom: 2px;
+            color: #555;
+            font-weight: 500;
           }
           
+          .business-tagline {
+            font-size: 11px;
+            font-style: italic;
+            color: #666;
+            margin-top: 4px;
+            font-weight: 400;
+          }
+          
+          /* System Information Box */
           .system-info {
-            font-size: 8px;
-            color: #333;
-            margin: 8px 0;
-            border: 1px dashed #ccc;
+            font-size: 11px;
+            color: #444;
+            margin: 10px 0;
+            border: 1px solid #ddd;
             padding: 8px;
-            background-color: #f9f9f9;
-            border-radius: 4px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 6px;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
           }
           
+          /* Enhanced Verification Code */
           .verification-barcode {
-            font-size: 10px;
+            font-size: 13px;
             font-weight: bold;
-            color: #1a472a;
-            background-color: #e8f5e8;
-            border: 2px solid #1a472a;
-            padding: 8px;
-            margin: 10px 0;
+            color: #1e3a8a;
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            border: 2px solid #3b82f6;
+            padding: 10px;
+            margin: 12px 0;
             text-align: center;
             letter-spacing: 1px;
-            border-radius: 4px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.2);
+            position: relative;
           }
           
-          .refund-policy {
-            font-size: 8px;
-            color: #666;
-            background-color: #fff8dc;
-            border: 1px dotted #daa520;
-            padding: 8px;
-            margin: 8px 0;
-            text-align: center;
-            border-radius: 4px;
+          .verification-barcode::before {
+            content: '🛡️';
+            position: absolute;
+            top: -8px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: white;
+            padding: 0 8px;
+            font-size: 12px;
           }
           
-          .divider {
-            text-align: center;
-            margin: 8px 0;
-            font-size: 10px;
-          }
-          
+          /* Receipt Information */
           .receipt-info {
-            margin-bottom: 15px;
+            margin-bottom: 12px;
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid #e9ecef;
           }
           
           .info-line {
             display: flex;
             justify-content: space-between;
-            margin-bottom: 3px;
-            font-size: 11px;
+            margin-bottom: 4px;
+            font-size: 14px;
+            font-weight: 500;
           }
           
+          .info-line span:first-child {
+            color: #555;
+          }
+          
+          .info-line span:last-child {
+            font-weight: 600;
+            color: #2c3e50;
+          }
+          
+          /* Enhanced Items Section */
           .items-section {
-            margin-bottom: 15px;
+            margin-bottom: 12px;
           }
           
           .items-header {
             text-align: center;
             font-weight: bold;
-            border-bottom: 1px dashed #000;
-            padding-bottom: 5px;
-            margin-bottom: 10px;
+            border-bottom: 2px solid #333;
+            padding-bottom: 4px;
+            margin-bottom: 8px;
+            font-size: 16px;
+            color: #2c3e50;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
           }
           
           .item-line {
             display: flex;
             justify-content: space-between;
-            margin-bottom: 5px;
+            margin-bottom: 4px;
+            padding: 2px 0;
+            border-bottom: 1px dotted #ccc;
           }
           
           .item-name {
             flex: 1;
-            font-size: 11px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #2c3e50;
           }
           
           .item-qty {
             width: 40px;
             text-align: center;
-            font-size: 11px;
+            font-size: 14px;
+            font-weight: bold;
+            color: #666;
           }
           
           .item-price {
-            width: 50px;
+            width: 60px;
             text-align: right;
-            font-size: 11px;
+            font-size: 14px;
+            font-weight: bold;
+            color: #2c3e50;
           }
           
+          .item-subtotal {
+            font-size: 12px;
+            color: #666;
+            text-align: right;
+            margin-top: -1px;
+          }
+          
+          /* Enhanced Totals Section */
           .totals-section {
-            border-top: 2px dashed #000;
-            padding-top: 10px;
-            margin-top: 10px;
+            border-top: 3px double #333;
+            padding-top: 8px;
+            margin-top: 8px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            padding: 10px;
+            border-radius: 6px;
           }
           
           .total-line {
             display: flex;
             justify-content: space-between;
-            margin-bottom: 5px;
-            font-size: 12px;
+            margin-bottom: 4px;
+            font-size: 14px;
           }
           
           .total-line.grand-total {
             font-weight: bold;
-            font-size: 14px;
-            border-top: 1px dashed #000;
-            padding-top: 5px;
-            margin-top: 5px;
+            font-size: 18px;
+            border-top: 2px solid #333;
+            padding-top: 4px;
+            margin-top: 4px;
+            color: #1e3a8a;
+            background: #dbeafe;
+            padding: 8px;
+            border-radius: 4px;
+            margin-left: -10px;
+            margin-right: -10px;
+            margin-bottom: -10px;
+            margin-top: 8px;
+          }
+          
+          /* Enhanced Footer */
+          .refund-policy {
+            font-size: 11px;
+            color: #444;
+            background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+            border: 1px solid #fbbf24;
+            padding: 8px;
+            margin: 8px 0;
+            text-align: center;
+            border-radius: 6px;
+            box-shadow: inset 0 1px 3px rgba(251, 191, 36, 0.2);
           }
           
           .footer {
             text-align: center;
-            border-top: 1px dashed #000;
-            padding-top: 10px;
-            margin-top: 15px;
+            border-top: 2px solid #333;
+            padding-top: 8px;
+            margin-top: 10px;
           }
           
           .thank-you {
             font-weight: bold;
-            margin-bottom: 5px;
+            font-size: 16px;
+            color: #059669;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+          }
+          
+          .lumina-footer {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px dashed #ccc;
+            text-align: center;
+          }
+          
+          .lumina-brand {
+            font-size: 11px;
+            font-weight: bold;
+            color: #6b7280;
+            margin-bottom: 2px;
+          }
+          
+          .powered-by {
+            font-size: 10px;
+            color: #9ca3af;
+            margin-bottom: 2px;
           }
           
           .website {
-            color: #000;
+            color: #3b82f6;
             text-decoration: none;
             font-size: 10px;
+            font-weight: 500;
           }
           
           .footer-text {
-            font-size: 9px;
-            margin-top: 8px;
-            line-height: 1.3;
+            font-size: 10px;
+            margin-top: 4px;
+            line-height: 1.2;
+            color: #6b7280;
           }
           
+          /* Enhanced Cancel Button */
           .cancel-button {
             position: fixed;
             bottom: 30px;
             right: 30px;
-            background-color: #dc2626;
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
             color: white;
             border: none;
-            padding: 12px 20px;
+            padding: 15px 25px;
             font-size: 14px;
             font-weight: bold;
             cursor: pointer;
-            border-radius: 5px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
             z-index: 1000;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
           }
           
           .cancel-button:hover {
-            background-color: #b91c1c;
+            background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(239, 68, 68, 0.6);
           }
           
-          .scan-instruction {
-            font-size: 8px;
-            color: #666;
+          .cancel-button:active {
+            transform: translateY(0);
+          }
+          
+          /* Print Button */
+          .print-button {
+            position: fixed;
+            bottom: 30px;
+            left: 30px;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            border: none;
+            padding: 15px 25px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+            z-index: 1000;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+          }
+          
+          .print-button:hover {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(16, 185, 129, 0.6);
+          }
+          
+          /* Divider */
+          .divider {
             text-align: center;
-            margin-top: 3px;
-            font-style: italic;
+            margin: 6px 0;
+            font-size: 12px;
+            color: #666;
+          }
+          
+          /* Payment method indicator */
+          .payment-method {
+            background: #e0f2fe;
+            border: 1px solid #0ea5e9;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            color: #0c4a6e;
+            text-align: center;
+            margin: 4px 0;
           }
         </style>
       </head>
@@ -648,6 +1490,7 @@ const CashierDashboardScreen = () => {
               <div class="company-info">📞 ${companyPhone}</div>
               <div class="company-info">📍 ${companyAddress}</div>
               <div class="company-info">🏢 Tax ID: ${companyTaxId}</div>
+              <div class="business-tagline">Professional Service Since ${new Date().getFullYear()}</div>
             </div>
             
             <div class="system-info">
@@ -660,10 +1503,12 @@ const CashierDashboardScreen = () => {
             <div class="verification-barcode">
               🔍 RECEIPT VERIFICATION CODE:<br>
               ${verificationCode}<br>
-              <div class="scan-instruction">Scan this code at our POS for instant verification</div>
+              <div style="font-size: 7px; color: #666; margin-top: 2px; font-style: italic;">
+                Scan this code at our POS for instant verification
+              </div>
             </div>
             
-            <div class="divider">====================================</div>
+            <div class="divider">◆ ◇ ◆ ◇ ◆ ◇ ◆ ◇ ◆ ◇ ◆</div>
             
             <div class="receipt-info">
               <div class="info-line">
@@ -672,7 +1517,7 @@ const CashierDashboardScreen = () => {
               </div>
               <div class="info-line">
                 <span>Date:</span>
-                <span>${now.toLocaleDateString()}</span>
+                <span>${now.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}</span>
               </div>
               <div class="info-line">
                 <span>Time:</span>
@@ -683,30 +1528,35 @@ const CashierDashboardScreen = () => {
                 <span>${cashierName}</span>
               </div>
               <div class="info-line">
-                <span>Timestamp:</span>
-                <span>${now.toISOString().split('T')[1].split('.')[0]}</span>
+                <span>Terminal:</span>
+                <span>${terminalId}</span>
               </div>
             </div>
             
-            <div class="divider">====================================</div>
+            <div class="divider">◆ ◇ ◆ ◇ ◆ ◇ ◆ ◇ ◆ ◇ ◆</div>
             
             <div class="items-section">
               <div class="items-header">🛒 ITEMS PURCHASED</div>
-              ${cart.map(item => `
-                <div class="item-line">
-                  <div class="item-name">${item.name}</div>
-                  <div class="item-qty">${item.quantity}</div>
-                  <div class="item-price">${formatCurrency(item.price * item.quantity)}</div>
-                </div>
-                <div class="item-line" style="font-size: 10px; color: #666;">
-                  <div style="width: 40px;"></div>
-                  <div style="width: 40px; text-align: center;">@ ${formatCurrency(item.price)}</div>
-                  <div style="width: 50px;"></div>
-                </div>
-              `).join('')}
+              ${cart.map(item => {
+                const itemTotal = item.price_type === 'unit' 
+                  ? item.price * item.quantity 
+                  : item.price * (item.weight || 0);
+                const itemDetail = item.price_type === 'unit'
+                  ? `${item.quantity} units @ ${formatCurrency(item.price)} each`
+                  : `${item.weight || 0} ${item.price_type} @ ${formatCurrency(item.price)}/${item.price_type}`;
+                
+                return `
+                  <div class="item-line">
+                    <div class="item-name">${item.name}</div>
+                    <div class="item-qty">${item.price_type === 'unit' ? item.quantity : (item.weight || 0) + ' ' + item.price_type}</div>
+                    <div class="item-price">${formatCurrency(itemTotal)}</div>
+                  </div>
+                  <div class="item-subtotal">${itemDetail}</div>
+                `;
+              }).join('')}
             </div>
             
-            <div class="divider">====================================</div>
+            <div class="divider">◆ ◇ ◆ ◇ ◆ ◇ ◆ ◇ ◆ ◇ ◆</div>
             
             <div class="totals-section">
               <div class="total-line">
@@ -714,19 +1564,17 @@ const CashierDashboardScreen = () => {
                 <span>${formatCurrency(total)}</span>
               </div>
               ${paymentMethod === 'cash' ? `
+                <div class="payment-method">💵 CASH PAYMENT</div>
                 <div class="total-line">
                   <span>Cash Received:</span>
                   <span>${formatCurrency(received)}</span>
                 </div>
                 <div class="total-line">
-                  <span>Change:</span>
-                  <span>${formatCurrency(change)}</span>
+                  <span>Change Due:</span>
+                  <span style="color: #059669;">${formatCurrency(change)}</span>
                 </div>
               ` : `
-                <div class="total-line">
-                  <span>Payment Method:</span>
-                  <span>${paymentMethod.toUpperCase()}</span>
-                </div>
+                <div class="payment-method">💳 ${paymentMethod.toUpperCase()} PAYMENT</div>
               `}
               <div class="total-line grand-total">
                 <span>TOTAL:</span>
@@ -734,18 +1582,22 @@ const CashierDashboardScreen = () => {
               </div>
             </div>
             
-            <div class="divider">====================================</div>
+            <div class="divider">◆ ◇ ◆ ◇ ◆ ◇ ◆ ◇ ◆ ◇ ◆</div>
             
             <div class="refund-policy">
               <strong>🔄 RETURN & REFUND POLICY</strong><br>
               • Items can be returned within 7 days with receipt<br>
               • Original packaging required for refunds<br>
               • Contact us with verification code: ${verificationCode}<br>
-              • Customer service: ${companyPhone}
+              • Customer service: ${companyPhone}<br>
+              • Thank you for your business!
             </div>
             
             <div class="footer">
               <div class="thank-you">🙏 THANK YOU!</div>
+              <div style="font-size: 9px; color: #666; margin-top: 4px;">
+                We appreciate your business
+              </div>
             </div>
             
             <div class="lumina-footer">
@@ -758,11 +1610,16 @@ const CashierDashboardScreen = () => {
               </div>
             </div>
             
-            <div class="divider">====================================</div>
+            <div class="divider">◆ ◇ ◆ ◇ ◆ ◇ ◆ ◇ ◆ ◇ ◆</div>
+            
+            <div style="text-align: center; font-size: 10px; color: #999; margin-top: 8px;">
+              Receipt generated on ${now.toLocaleString()}
+            </div>
           </div>
         </div>
         
-        <button class="cancel-button" onclick="window.close()">CANCEL</button>
+        <button class="print-button" onclick="window.print()">🖨️ PRINT</button>
+        <button class="cancel-button" onclick="window.close()">✕ CLOSE</button>
       </body>
       </html>
     `;
@@ -770,8 +1627,8 @@ const CashierDashboardScreen = () => {
     // Create a new window to display receipt (stays open until user cancels)
     const screenWidth = window.screen.width || 1200;
     const screenHeight = window.screen.height || 800;
-    const windowWidth = 450;
-    const windowHeight = 700;
+    const windowWidth = 480;
+    const windowHeight = 750;
     const leftPosition = (screenWidth - windowWidth) / 2;
     const topPosition = (screenHeight - windowHeight) / 2;
     
@@ -804,16 +1661,51 @@ const CashierDashboardScreen = () => {
 
     // Allow negative stock sales - no stock validation needed
 
-    // Get cashier ID with proper fallback handling
-    const cashierId = cashierData?.id || 
-                     cashierData?.cashier_info?.id || 
-                     cashierData?.cashier_id || 
-                     cashierData?.user_id ||
-                     1; // fallback to 1 if no ID found
+    // Get cashier ID with proper fallback handling - FIXED to match actual credentials structure
+    let cashierId = cashierData?.cashier_info?.id || 
+                   cashierData?.id || 
+                   cashierData?.cashier_id || 
+                   cashierData?.user_id ||
+                   cashierData?.cashierInfo?.id ||
+                   // Try to extract from the login response structure
+                   (cashierData?.cashier_info && cashierData.cashier_info.id) ||
+                   // Try from presence service data
+                   (window.currentUser && window.currentUser.id) ||
+                   // Fallback: extract from name if available (for debugging)
+                   null;
+    
+    // If still no ID found, try to extract from raw credentials structure
+    if (!cashierId && cashierData) {
+      // Check if credentials has nested structure
+      if (cashierData.cashier_info && cashierData.cashier_info.id) {
+        cashierId = cashierData.cashier_info.id;
+      } else if (cashierData.user_id) {
+        cashierId = cashierData.user_id;
+      } else if (cashierData.id) {
+        cashierId = cashierData.id;
+      }
+    }
+    
     console.log('Available cashier data:', { cashierData, cashierId });
+    console.log('Cashier data keys:', Object.keys(cashierData || {}));
+    console.log('Cashier info:', cashierData?.cashier_info);
     
     if (!cashierId) {
-      Alert.alert('Error', 'Cashier information not available. Please log out and log back in.');
+      console.error('CASHIER ID EXTRACTION FAILED:', {
+        cashierData,
+        cashierDataKeys: Object.keys(cashierData || {}),
+        cashierInfo: cashierData?.cashier_info,
+        cashierInfoKeys: cashierData?.cashier_info ? Object.keys(cashierData.cashier_info) : 'N/A'
+      });
+      
+      Alert.alert(
+        'Cashier Information Error', 
+        `Unable to extract cashier ID from stored credentials.\n\n` +
+        `Cashier Data Keys: ${Object.keys(cashierData || {}).join(', ')}\n` +
+        `Cashier Info: ${cashierData?.cashier_info ? 'Present' : 'Missing'}\n\n` +
+        `Please log out and log back in to resolve this issue.`,
+        [{ text: 'OK' }]
+      );
       return;
     }
 
@@ -922,13 +1814,20 @@ const CashierDashboardScreen = () => {
       cashier_id: cashierId,
       items: cart.map(item => ({
         product_id: item.id.toString(),
-        quantity: item.quantity.toString(),
+        quantity: item.price_type === 'unit' ? item.quantity.toString() : (item.weight || 0).toString(),
         unit_price: item.price.toString()
       })),
       payment_method: paymentMethod,
       customer_name: '',
       customer_phone: ''
     };
+    
+    console.log('🔍 SALE ATTRIBUTION DEBUG:', {
+      cashierId,
+      cashierName: cashierData?.name || cashierData?.cashier_info?.name || 'Unknown',
+      saleData,
+      timestamp: new Date().toISOString()
+    });
     
     try {
       setProcessingSale(true);
@@ -943,7 +1842,8 @@ const CashierDashboardScreen = () => {
         // Show success notification with stock update info
         const calculatedChange = Math.max(0, receivedAmount - total);
         const updatedItems = cart.map(item => `${item.name}: ${item.stock_quantity - item.quantity} remaining`).join('\n');
-        
+        // Note: Drawer updates are now handled automatically by the backend during sale creation
+
         Alert.alert(
           'SALE COMPLETED!',
           `Sale #${response.data.id} completed successfully!\n\n` +
@@ -1070,37 +1970,49 @@ const CashierDashboardScreen = () => {
       contentContainerStyle={Platform.OS === 'web' ? styles.webContentContainer : undefined}
       showsVerticalScrollIndicator={Platform.OS === 'web'}
       showsHorizontalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshingDrawer}
+          onRefresh={() => refreshDrawerStatus()}
+        />
+      }
     >
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.headerTitle}>✨ Cashier Dashboard ✨</Text>
-          <Text style={styles.headerSubtitle}>
-            Welcome, {cashierData?.name || 'Cashier'}
-          </Text>
-          {/* Presence Status Indicator */}
-          <View style={styles.presenceIndicator}>
-            <View style={[
-              styles.presenceDot,
-              presenceStatus.isOnline ? styles.presenceDotOnline : styles.presenceDotOffline
-            ]} />
-            <Text style={styles.presenceText}>
-              {presenceStatus.isOnline ? '🟢 Online' : '🔴 Offline'}
-            </Text>
-            {presenceStatus.lastActivity && (
-              <Text style={styles.presenceActivityTime}>
-                Last activity: {new Date(presenceStatus.lastActivity).toLocaleTimeString()}
-              </Text>
-            )}
+      {/* Compact Cashier Header with Integrated Buttons */}
+      <View style={styles.compactCashierHeader}>
+        <View style={styles.compactHeaderContent}>
+          {/* Compact Title with Integrated Buttons */}
+          <View style={styles.compactTitleWithButtons}>
+            <TouchableOpacity 
+              style={styles.inlineMenuButton} 
+              onPress={() => setShowSidebar(!showSidebar)}
+            >
+              <Icon name="menu" size={18} color="#fff" />
+              <Text style={styles.inlineMenuButtonText}>Menu</Text>
+            </TouchableOpacity>
+            
+            <Text style={styles.compactHeaderTitle}>🛒 Cashier Terminal</Text>
+            
+            <TouchableOpacity onPress={() => loadDrawerStatus(cashierData)} style={styles.headerRefreshButtonInline}>
+              <Icon name="refresh" size={18} color="#fff" />
+            </TouchableOpacity>
+          </View>
+          
+          {/* Compact Status */}
+          <View style={styles.compactStatusRow}>
+            <View style={styles.compactStatusItem}>
+              <Text style={styles.compactStatusLabel}>Items:</Text>
+              <Text style={styles.compactStatusValue}>{cart.length}</Text>
+            </View>
+            <View style={styles.compactStatusItem}>
+              <Text style={styles.compactStatusLabel}>Total:</Text>
+              <Text style={styles.compactStatusValue}>{formatCurrency(getTotalAmount())}</Text>
+            </View>
+            <View style={styles.compactStatusItem}>
+              <View style={styles.compactStatusDot} />
+              <Text style={styles.compactStatusText}>{shopStatus?.is_open ? 'OPEN' : 'CLOSED'}</Text>
+            </View>
           </View>
         </View>
-        <View style={styles.headerRight}>
-          <Text style={styles.companyName}>{shopData?.name || 'POS System'}</Text>
-          <Text style={styles.companyRole}>Cashier Portal</Text>
-        </View>
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Text style={styles.logoutButtonText}>Logout</Text>
-        </TouchableOpacity>
       </View>
 
       {/* Modern Decorative Border */}
@@ -1111,11 +2023,101 @@ const CashierDashboardScreen = () => {
 
       {/* POS Interface */}
       <View style={styles.posContainer}>
-        {/* Products Section - Large Card with Search */}
+        {/* Products Section - Hidden Initially with Show All Button */}
         <View style={styles.productsSection}>
           <Text style={styles.sectionTitle}>🛍️ AVAILABLE PRODUCTS</Text>
           
-          {/* Search and Filter Section */}
+          {/* Show All Products Button */}
+          <View style={styles.showAllProductsContainer}>
+            <TouchableOpacity 
+              style={styles.showAllProductsButton}
+              onPress={() => navigation.navigate('CashierProducts')}
+            >
+              <Icon name="inventory" size={24} color="#ffffff" />
+              <Text style={styles.showAllProductsButtonText}>SHOW ALL PRODUCTS</Text>
+              <Icon name="arrow-forward" size={20} color="#ffffff" />
+            </TouchableOpacity>
+            <Text style={styles.showAllProductsSubtext}>
+              Click to view and add products to your cart
+            </Text>
+          </View>
+          
+          {/* Quick Products Section - Products without Barcodes */}
+          <View style={styles.quickProductsContainer}>
+            <Text style={styles.quickProductsTitle}>⚡ QUICK PRODUCTS</Text>
+            <Text style={styles.quickProductsSubtitle}>Products without barcodes - Quick access for faster sales</Text>
+            
+            {/* Debug: Show product count */}
+            <Text style={{color: '#fff', fontSize: 10, marginBottom: 8}}>
+              Debug: Total products: {products.length} | Quick products: {products.filter(product => {
+                const barcode = (product.barcode || '').toString().trim().toUpperCase();
+                const lineCode = (product.line_code || '').toString().trim().toUpperCase();
+                // FIXED: Check if PRIMARY barcode is empty (OR logic, not AND)
+                return (!barcode || barcode === 'N/A' || barcode === 'NA' || barcode === 'NONE' || barcode === 'NULL' || barcode === 'UNDEFINED' || barcode === '');
+              }).length}
+            </Text>
+            
+            <View style={styles.quickProductsGrid}>
+              {products.filter(product => {
+                const barcode = (product.barcode || '').toString().trim().toUpperCase();
+                // FIXED: Check if PRIMARY barcode is empty (OR logic, not AND)
+                return (!barcode || barcode === 'N/A' || barcode === 'NA' || barcode === 'NONE' || barcode === 'NULL' || barcode === 'UNDEFINED' || barcode === '');
+              }).slice(0, 6).map((product, index) => (
+                <TouchableOpacity
+                  key={product.id}
+                  style={styles.quickProductCard}
+                  onPress={() => {
+                    addToCart(product);
+                    Alert.alert(
+                      '✅ Quick Product Added',
+                      `${product.name} added to cart!`,
+                      [{ text: 'OK', timeout: 1000 }]
+                    );
+                  }}
+                >
+                  <Text style={styles.quickProductName}>{product.name}</Text>
+                  <Text style={styles.quickProductPrice}>{formatCurrency(product.price)}</Text>
+                  <Text style={styles.quickProductCategory}>{product.category || 'General'}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            
+            {products.filter(product => {
+              const barcode = (product.barcode || '').toString().trim().toUpperCase();
+              // FIXED: Check if PRIMARY barcode is empty (OR logic, not AND)
+              return (!barcode || barcode === 'N/A' || barcode === 'NA' || barcode === 'NONE' || barcode === 'NULL' || barcode === 'UNDEFINED' || barcode === '');
+            }).length === 0 && (
+              <View style={styles.noQuickProductsContainer}>
+                <Icon name="inventory-2" size={48} color="#6b7280" />
+                <Text style={styles.noQuickProductsText}>No products without barcodes</Text>
+                <Text style={styles.noQuickProductsSubtext}>
+                  Add products without barcodes to see them here for quick access
+                </Text>
+              </View>
+            )}
+            
+            {products.filter(product => {
+              const barcode = (product.barcode || '').toString().trim().toUpperCase();
+              // FIXED: Check if PRIMARY barcode is empty (OR logic, not AND)
+              return (!barcode || barcode === 'N/A' || barcode === 'NA' || barcode === 'NONE' || barcode === 'NULL' || barcode === 'UNDEFINED' || barcode === '');
+            }).length > 6 && (
+              <TouchableOpacity 
+                style={styles.viewAllQuickProductsButton}
+                onPress={() => navigation.navigate(ROUTES.QUICK_PRODUCTS)}
+              >
+                <Text style={styles.viewAllQuickProductsButtonText}>
+                  View All Quick Products ({products.filter(product => {
+                    const barcode = (product.barcode || '').toString().trim().toUpperCase();
+                    // FIXED: Check if PRIMARY barcode is empty (OR logic, not AND)
+                    return (!barcode || barcode === 'N/A' || barcode === 'NA' || barcode === 'NONE' || barcode === 'NULL' || barcode === 'UNDEFINED' || barcode === '');
+                  }).length})
+                </Text>
+                <Icon name="arrow-forward" size={16} color="#10b981" />
+              </TouchableOpacity>
+            )}
+          </View>
+          
+          {/* Search and Filter Section - Now Visible and Functional */}
           <View style={styles.searchFilterSection}>
             {/* Search Input with Scan Button */}
             <View style={styles.searchContainer}>
@@ -1128,12 +2130,7 @@ const CashierDashboardScreen = () => {
                   placeholder="Search by name, code, or scan barcode..."
                   placeholderTextColor="#8B4513"
                 />
-                <TouchableOpacity
-                  style={styles.scanButton}
-                  onPress={handleScanPress}
-                >
-                  <Text style={styles.scanButtonText}>📷 SCAN</Text>
-                </TouchableOpacity>
+
               </View>
             </View>
             
@@ -1145,11 +2142,13 @@ const CashierDashboardScreen = () => {
                   style={styles.barcodeInput}
                   value={barcodeInput}
                   onChangeText={handleBarcodeInput}
-                  placeholder="Enter barcode, then click ADD TO CART..."
+                  placeholder="Enter barcode or line code, press Enter to auto-add..."
                   placeholderTextColor="#10b981"
                   keyboardType="default"
                   autoCapitalize="none"
                   autoCorrect={false}
+                  onSubmitEditing={handleBarcodeSubmit}
+                  blurOnSubmit={false}
                 />
                 <TouchableOpacity
                   style={[
@@ -1174,12 +2173,15 @@ const CashierDashboardScreen = () => {
                 )}
               </View>
               <Text style={styles.barcodeHelpText}>
-                💡 Type any barcode for the product (supports multiple barcodes per product), then click "ADD TO CART"
+                💡 Type any barcode or line code, then press Enter or click "ADD TO CART" to automatically add to cart
               </Text>
             </View>
             
-            {/* Category Filter */}
-            <View style={styles.categoryContainer}>
+            {/* Category Filter - Hidden by default, show only when searching */}
+            <View style={[
+              styles.categoryContainer,
+              (!searchQuery && selectedCategory === 'all') && { display: 'none' }
+            ]}>
               <Text style={styles.categoryLabel}>📁 FILTER BY CATEGORY:</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
                 {getCategories().map((category) => (
@@ -1203,113 +2205,206 @@ const CashierDashboardScreen = () => {
             </View>
           </View>
 
-          {/* Products Display */}
-          {productsLoading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#8B4513" />
-              <Text style={styles.loadingText}>Loading products...</Text>
-            </View>
-          ) : (
-            <ScrollView style={styles.productsList} showsVerticalScrollIndicator={true}>
-              {filteredProducts.length === 0 ? (
-                <View style={styles.noProductsContainer}>
-                  <Text style={styles.noProductsText}>
-                    {searchQuery || selectedCategory !== 'all' 
-                      ? 'No products match your search criteria'
-                      : 'No products available'
-                    }
-                  </Text>
+          {/* Products Display - Enhanced for Large Search Results */}
+          <View style={[
+            styles.productsDisplayContainer, 
+            (!searchQuery && selectedCategory === 'all') && { display: 'none' }
+          ]}>
+            {productsLoading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#8B4513" />
+                <Text style={styles.loadingText}>Loading products...</Text>
+              </View>
+            ) : filteredProducts.length === 0 ? (
+              <View style={styles.noProductsContainer}>
+                {searchQuery || selectedCategory !== 'all' ? (
+                  <>
+                    <Text style={styles.noProductsText}>
+                      No products match your search criteria
+                    </Text>
+                    <Text style={styles.searchHelpText}>
+                      Try a different search term or clear the search
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.searchHelpTitle}>🔍 Search Products</Text>
+                    <Text style={styles.searchHelpText}>
+                      Use the search bar above to find products by name, code, or barcode
+                    </Text>
+                    <Text style={styles.searchHelpSubtext}>
+                      Or scan a barcode to add products directly to cart
+                    </Text>
+                  </>
+                )}
+              </View>
+            ) : filteredProducts.length > 12 && !productsExpanded ? (
+              /* Compact Summary View for Large Product Lists */
+              <View style={styles.compactProductsSummary}>
+                <View style={styles.compactProductsHeader}>
+                  <Text style={styles.compactProductsTitle}>🔍 {filteredProducts.length} PRODUCTS FOUND</Text>
+                  <TouchableOpacity 
+                    style={styles.expandProductsButton}
+                    onPress={() => setProductsExpanded(true)}
+                  >
+                    <Text style={styles.expandProductsButtonText}>📋 VIEW ALL</Text>
+                  </TouchableOpacity>
                 </View>
-              ) : (
-                <View style={styles.productsGrid}>
-                  {filteredProducts.map((product) => (
+                <View style={styles.compactProductsGrid}>
+                  {filteredProducts.slice(0, 6).map((product) => (
                     <TouchableOpacity
                       key={product.id}
-                      style={styles.productCard}
-                      onPress={() => addToCart(product)}
+                      style={styles.compactProductCard}
+                      onPress={() => {
+                        addToCart(product);
+                        Alert.alert(
+                          '✅ Product Added',
+                          `${product.name} added to cart!`,
+                          [{ text: 'OK', timeout: 1000 }]
+                        );
+                      }}
                     >
-                      {/* Product Card Header */}
-                      <View style={styles.productCardHeader}>
-                        <Text style={styles.productName}>{product.name}</Text>
-                        <Text style={styles.productCode}>Code: {product.line_code || 'N/A'}</Text>
-                      </View>
-                      
-                      {/* Product Card Body */}
-                      <View style={styles.productCardBody}>
-                        <View style={styles.productInfo}>
-                          <Text style={styles.productCategory}>
-                            📁 {product.category || 'Uncategorized'}
-                          </Text>
-                          <View style={styles.stockIndicator}>
-                            <View style={[
-                              styles.stockDot,
-                              (product.stock_quantity || 0) < 0 && styles.stockDotNegative,
-                              (product.stock_quantity || 0) === 0 && styles.stockDotOut,
-                              (product.stock_quantity || 0) > 0 && (product.stock_quantity || 0) <= 5 && styles.stockDotLow,
-                              (product.stock_quantity || 0) > 5 && styles.stockDotActive
-                            ]} />
-                            <Text style={[
-                              styles.productStock,
-                              (product.stock_quantity || 0) < 0 && styles.negativeStock,
-                              (product.stock_quantity || 0) === 0 && styles.outOfStock,
-                              (product.stock_quantity || 0) > 0 && (product.stock_quantity || 0) <= 5 && styles.lowStock
-                            ]}>
-                              📦 {product.stock_quantity || 0} units
-                              {(product.stock_quantity || 0) < 0 && ' - NEGATIVE STOCK (SELLING)'}
-                              {(product.stock_quantity || 0) === 0 && ' - OUT OF STOCK'}
-                              {(product.stock_quantity || 0) > 0 && (product.stock_quantity || 0) <= 5 && ' - LOW STOCK'}
-                              {(product.stock_quantity || 0) > 5 && ' - IN STOCK'}
-                            </Text>
-                          </View>
-                          {/* Display all barcodes for the product */}
-                          {((product.barcode || product.line_code) || product.additional_barcodes) && (
-                            <View style={styles.productBarcodes}>
-                              <Text style={styles.productBarcodeLabel}>🔖 Barcodes:</Text>
-                              <Text style={styles.productBarcode}>
-                                {product.barcode && `Primary: ${product.barcode}`}
-                                {product.line_code && ` | Code: ${product.line_code}`}
-                              </Text>
-                              {product.additional_barcodes && (
-                                <Text style={styles.productBarcode}>
-                                  {Array.isArray(product.additional_barcodes) 
-                                    ? `Additional: ${product.additional_barcodes.join(', ')}`
-                                    : `Additional: ${product.additional_barcodes}`
-                                  }
-                                </Text>
-                              )}
-                            </View>
-                          )}
-                        </View>
-                        
-                        <View style={styles.productPriceSection}>
-                          <Text style={styles.priceText}>{formatCurrency(product.price)}</Text>
-                          <TouchableOpacity
-                            style={styles.addButton}
-                            onPress={() => addToCart(product)}
-                          >
-                            <Text style={styles.addButtonText}>
-                              ➕ ADD
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                      
-                      {/* Product Card Footer */}
-                      <View style={styles.productCardFooter}>
-                        <Text style={styles.cardVintageBorder}>✨ Premium Quality Products</Text>
-                        <Text style={{color: '#6b7280', fontSize: 10}}>
-                          {new Date().toLocaleDateString()}
-                        </Text>
-                      </View>
+                      <Text style={styles.compactProductName}>
+                        {product.name.length > 15 ? product.name.substring(0, 15) + '...' : product.name}
+                      </Text>
+                      <Text style={styles.compactProductPrice}>{formatCurrency(product.price)}</Text>
+                      <Text style={styles.compactProductCategory}>{product.category || 'General'}</Text>
                     </TouchableOpacity>
                   ))}
+                  {filteredProducts.length > 6 && (
+                    <View style={styles.compactProductsMore}>
+                      <Text style={styles.compactProductsMoreText}>+ {filteredProducts.length - 6} more products...</Text>
+                      <Text style={styles.compactProductsMoreSubtext}>Click "VIEW ALL" to see all products</Text>
+                    </View>
+                  )}
                 </View>
-              )}
-            </ScrollView>
-          )}
+              </View>
+            ) : (
+              /* Detailed Products View */
+              <>
+                {filteredProducts.length > 12 && (
+                  <View style={styles.productsViewHeader}>
+                    <Text style={styles.productsViewTitle}>📋 ALL PRODUCTS ({filteredProducts.length} found)</Text>
+                    <TouchableOpacity 
+                      style={styles.collapseProductsButton}
+                      onPress={() => setProductsExpanded(false)}
+                    >
+                      <Text style={styles.collapseProductsButtonText}>🔼 COMPACT VIEW</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+                <ScrollView 
+                  style={filteredProducts.length > 8 ? styles.productsListScroll : null}
+                  nestedScrollEnabled={true}
+                  showsVerticalScrollIndicator={true}
+                  maximumHeight={filteredProducts.length > 8 ? 400 : undefined}
+                >
+                  <View style={styles.productsGrid}>
+                    {filteredProducts.map((product) => (
+                      <TouchableOpacity
+                        key={product.id}
+                        style={styles.productCard}
+                        onPress={() => {
+                          addToCart(product);
+                          // Show brief feedback
+                          Alert.alert(
+                            '✅ Product Added',
+                            `${product.name} added to cart!`,
+                            [{ text: 'OK', timeout: 1000 }]
+                          );
+                        }}
+                      >
+                        {/* Product Card Header */}
+                        <View style={styles.productCardHeader}>
+                          <Text style={styles.productName}>{product.name}</Text>
+                          <Text style={styles.productCode}>Code: {product.line_code || 'N/A'}</Text>
+                        </View>
+                        
+                        {/* Product Card Body */}
+                        <View style={styles.productCardBody}>
+                          <View style={styles.productInfo}>
+                            <Text style={styles.productCategory}>
+                              📁 {product.category || 'Uncategorized'}
+                            </Text>
+                            <View style={styles.stockIndicator}>
+                              <View style={[
+                                styles.stockDot,
+                                (product.stock_quantity || 0) < 0 && styles.stockDotNegative,
+                                (product.stock_quantity || 0) === 0 && styles.stockDotOut,
+                                (product.stock_quantity || 0) > 0 && (product.stock_quantity || 0) <= 5 && styles.stockDotLow,
+                                (product.stock_quantity || 0) > 5 && styles.stockDotActive
+                              ]} />
+                              <Text style={[
+                                styles.productStock,
+                                (product.stock_quantity || 0) < 0 && styles.negativeStock,
+                                (product.stock_quantity || 0) === 0 && styles.outOfStock,
+                                (product.stock_quantity || 0) > 0 && (product.stock_quantity || 0) <= 5 && styles.lowStock
+                              ]}>
+                                📦 {product.stock_quantity || 0} {product.price_type === 'unit' ? 'units' : product.price_type}
+                                {(product.stock_quantity || 0) < 0 && ' - NEGATIVE STOCK (SELLING)'}
+                                {(product.stock_quantity || 0) === 0 && ' - OUT OF STOCK'}
+                                {(product.stock_quantity || 0) > 0 && (product.stock_quantity || 0) <= 5 && ' - LOW STOCK'}
+                                {(product.stock_quantity || 0) > 5 && ' - IN STOCK'}
+                              </Text>
+                            </View>
+                            {/* Display all barcodes for the product */}
+                            {((product.barcode || product.line_code) || product.additional_barcodes) && (
+                              <View style={styles.productBarcodes}>
+                                <Text style={styles.productBarcodeLabel}>🔖 Barcodes:</Text>
+                                <Text style={styles.productBarcode}>
+                                  {product.barcode && `Primary: ${product.barcode}`}
+                                  {product.line_code && ` | Code: ${product.line_code}`}
+                                </Text>
+                                {product.additional_barcodes && (
+                                  <Text style={styles.productBarcode}>
+                                    {Array.isArray(product.additional_barcodes) 
+                                      ? `Additional: ${product.additional_barcodes.join(', ')}`
+                                      : `Additional: ${product.additional_barcodes}`
+                                    }
+                                  </Text>
+                                )}
+                              </View>
+                            )}
+                          </View>
+                          
+                          <View style={styles.productPriceSection}>
+                            <Text style={styles.priceText}>{formatCurrency(product.price)}/{product.price_type === 'unit' ? 'unit' : product.price_type}</Text>
+                            <TouchableOpacity
+                              style={styles.addButton}
+                              onPress={() => {
+                                addToCart(product);
+                                // Show brief feedback
+                                Alert.alert(
+                                  '✅ Product Added',
+                                  `${product.name} added to cart!`,
+                                  [{ text: 'OK', timeout: 1000 }]
+                                );
+                              }}
+                            >
+                              <Text style={styles.addButtonText}>
+                                ➕ ADD
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                        
+                        {/* Product Card Footer */}
+                        <View style={styles.productCardFooter}>
+                          <Text style={styles.cardVintageBorder}>✨ Premium Quality Products</Text>
+                          <Text style={{color: '#6b7280', fontSize: 10}}>
+                            {new Date().toLocaleDateString()}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </ScrollView>
+              </>
+            )}
+          </View>
         </View>
 
-        {/* Purchase Summary Section - Small Card */}
+        {/* Purchase Summary Section - Enhanced for Large Carts */}
         <View style={styles.summarySection}>
           <Text style={styles.sectionTitle}>🛒 PURCHASE SUMMARY</Text>
           
@@ -1317,36 +2412,110 @@ const CashierDashboardScreen = () => {
           <View style={styles.cartItems}>
             {cart.length === 0 ? (
               <Text style={styles.emptyCartText}>No items in cart</Text>
-            ) : (
-              cart.map((item) => (
-                <View key={item.id} style={styles.cartItem}>
-                  <View style={styles.cartItemInfo}>
-                    <Text style={styles.cartItemName}>{item.name}</Text>
-                    <Text style={styles.cartItemPrice}>{formatCurrency(item.price)} x {item.quantity}</Text>
-                  </View>
-                  <View style={styles.cartItemControls}>
-                    <TouchableOpacity
-                      style={styles.qtyButton}
-                      onPress={() => updateQuantity(item.id, item.quantity - 1)}
-                    >
-                      <Text style={styles.qtyButtonText}>-</Text>
-                    </TouchableOpacity>
-                    <Text style={styles.qtyText}>{item.quantity}</Text>
-                    <TouchableOpacity
-                      style={styles.qtyButton}
-                      onPress={() => updateQuantity(item.id, item.quantity + 1)}
-                    >
-                      <Text style={styles.qtyButtonText}>+</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.removeButton}
-                      onPress={() => removeFromCart(item.id)}
-                    >
-                      <Text style={styles.removeButtonText}>X</Text>
-                    </TouchableOpacity>
-                  </View>
+            ) : cart.length > 8 && !cartExpanded ? (
+              /* Compact Summary View for Large Carts */
+              <View style={styles.compactCartSummary}>
+                <View style={styles.compactCartHeader}>
+                  <Text style={styles.compactCartTitle}>📦 {cart.length} ITEMS IN CART</Text>
+                  <TouchableOpacity 
+                    style={styles.expandCartButton}
+                    onPress={() => setCartExpanded(true)}
+                  >
+                    <Text style={styles.expandCartButtonText}>📋 VIEW DETAILS</Text>
+                  </TouchableOpacity>
                 </View>
-              ))
+                <View style={styles.compactCartItems}>
+                  {cart.slice(0, 3).map((item) => (
+                    <View key={item.id} style={styles.compactCartItem}>
+                      <Text style={styles.compactCartItemName}>
+                        {item.name.length > 20 ? item.name.substring(0, 20) + '...' : item.name}
+                      </Text>
+                      <Text style={styles.compactCartItemDetail}>
+                        {item.price_type === 'unit' 
+                          ? `×${item.quantity}`
+                          : `${item.weight || 0}${item.price_type}`
+                        } @ {formatCurrency(item.price)}
+                      </Text>
+                    </View>
+                  ))}
+                  {cart.length > 3 && (
+                    <Text style={styles.compactCartMoreItems}>+ {cart.length - 3} more items...</Text>
+                  )}
+                </View>
+              </View>
+            ) : (
+              /* Detailed Cart View */
+              <>
+                {cart.length > 8 && (
+                  <View style={styles.cartViewHeader}>
+                    <Text style={styles.cartViewTitle}>📋 DETAILED VIEW ({cart.length} items)</Text>
+                    <TouchableOpacity 
+                      style={styles.collapseCartButton}
+                      onPress={() => setCartExpanded(false)}
+                    >
+                      <Text style={styles.collapseCartButtonText}>🔼 COLLAPSE</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+                <ScrollView 
+                  style={cart.length > 5 ? styles.cartItemsScroll : null}
+                  nestedScrollEnabled={true}
+                  showsVerticalScrollIndicator={true}
+                  maximumHeight={cart.length > 5 ? 200 : undefined}
+                >
+                  {cart.map((item) => (
+                    <View key={item.id} style={styles.cartItem}>
+                      <View style={styles.cartItemInfo}>
+                        <Text style={styles.cartItemName}>{item.name}</Text>
+                        <Text style={styles.cartItemPrice}>
+                          {item.price_type === 'unit' 
+                            ? `${formatCurrency(item.price)} x ${item.quantity}`
+                            : `${formatCurrency(item.price)}/${item.price_type} x ${item.weight || 0} ${item.price_type} = ${formatCurrency(item.price * (item.weight || 0))}`
+                          }
+                        </Text>
+                      </View>
+                      <View style={styles.cartItemControls}>
+                        {item.price_type === 'unit' ? (
+                          /* Unit product controls */
+                          <>
+                            <TouchableOpacity
+                              style={styles.qtyButton}
+                              onPress={() => updateQuantity(item.id, item.quantity - 1)}
+                            >
+                              <Text style={styles.qtyButtonText}>-</Text>
+                            </TouchableOpacity>
+                            <Text style={styles.qtyText}>{item.quantity}</Text>
+                            <TouchableOpacity
+                              style={styles.qtyButton}
+                              onPress={() => updateQuantity(item.id, item.quantity + 1)}
+                            >
+                              <Text style={styles.qtyButtonText}>+</Text>
+                            </TouchableOpacity>
+                          </>
+                        ) : (
+                          /* Weighable product controls */
+                          <>
+                            <TextInput
+                              style={styles.weightInput}
+                              value={item.weight?.toString() || ''}
+                              onChangeText={(text) => updateWeight(item.id, text)}
+                              placeholder={`0.0`}
+                              keyboardType="numeric"
+                            />
+                            <Text style={styles.unitLabel}>{item.price_type}</Text>
+                          </>
+                        )}
+                        <TouchableOpacity
+                          style={styles.removeButton}
+                          onPress={() => removeFromCart(item.id)}
+                        >
+                          <Text style={styles.removeButtonText}>X</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                </ScrollView>
+              </>
             )}
           </View>
 
@@ -1534,6 +2703,146 @@ const CashierDashboardScreen = () => {
         onClose={() => setShowScanner(false)}
         onScan={(result) => handleBarcodeScan(result.data)}
       />
+
+      {/* Weight Input Modal for Weighable Products */}
+      <WeightInputModal
+        visible={showWeightModal}
+        product={selectedProduct}
+        weightInput={weightInput}
+        setWeightInput={setWeightInput}
+        onAdd={handleWeightAdd}
+        onCancel={handleWeightCancel}
+      />
+
+      {/* Cashier Sidebar */}
+      {showSidebar && (
+        <>
+          {/* Backdrop */}
+          <TouchableOpacity
+            style={styles.sidebarBackdrop}
+            activeOpacity={1}
+            onPress={() => setShowSidebar(false)}
+          />
+
+          {/* Sidebar */}
+          <Animated.View
+            style={[
+              styles.sidebar,
+              {
+                transform: [{ translateX: sidebarX }],
+                width: SIDEBAR_WIDTH,
+              },
+            ]}
+            {...panResponder.panHandlers}
+          >
+            {/* Sidebar Header */}
+            <View style={styles.sidebarHeader}>
+              <View style={styles.sidebarTitleContainer}>
+                <Text style={styles.sidebarTitle}>💰 Cashier Tools</Text>
+                <Text style={styles.sidebarSubtitle}>Quick Access Menu</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.sidebarCloseButton}
+                onPress={() => setShowSidebar(false)}
+              >
+                <Text style={styles.sidebarCloseButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Drawer Status Section - Prominent Display */}
+            {drawerStatus && (
+              <View style={styles.sidebarDrawerSection}>
+                <View style={styles.sidebarDrawerHeader}>
+                  <Text style={styles.sidebarDrawerTitle}>💰 MY DRAWER STATUS</Text>
+                  <TouchableOpacity 
+                    style={styles.sidebarRefreshButton}
+                    onPress={refreshDrawerStatus}
+                    disabled={refreshingDrawer}
+                  >
+                    <Text style={styles.sidebarRefreshButtonText}>
+                      {refreshingDrawer ? '⟳' : '↻'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                
+                {/* Primary Financial Metrics */}
+                <View style={styles.sidebarDrawerMetrics}>
+                  <View style={styles.sidebarMetricCard}>
+                    <Text style={styles.sidebarMetricLabel}>FLOAT</Text>
+                    <Text style={styles.sidebarMetricValue}>${drawerStatus.float_amount?.toFixed(2) || '0.00'}</Text>
+                  </View>
+                  <View style={styles.sidebarMetricCard}>
+                    <Text style={styles.sidebarMetricLabel}>CASH</Text>
+                    <Text style={[styles.sidebarMetricValue, { color: '#22c55e' }]}>${drawerStatus.current_breakdown?.cash?.toFixed(2) || '0.00'}</Text>
+                  </View>
+                  <View style={styles.sidebarMetricCard}>
+                    <Text style={styles.sidebarMetricLabel}>SALES</Text>
+                    <Text style={[styles.sidebarMetricValue, { color: '#f59e0b' }]}>${drawerStatus.session_sales?.total?.toFixed(2) || '0.00'}</Text>
+                  </View>
+                  <View style={styles.sidebarMetricCard}>
+                    <Text style={styles.sidebarMetricLabel}>EOD</Text>
+                    <Text style={[styles.sidebarMetricValue, { color: '#3b82f6' }]}>${drawerStatus.eod_expectations?.expected_cash?.toFixed(2) || '0.00'}</Text>
+                  </View>
+                </View>
+
+                {/* Variance Alert */}
+                {drawerStatus.eod_expectations?.variance !== undefined && (
+                  <View style={[
+                    styles.sidebarVarianceAlert, 
+                    { backgroundColor: drawerStatus.eod_expectations.variance >= 0 ? '#22c55e' : '#ef4444' }
+                  ]}>
+                    <Text style={styles.sidebarVarianceAlertText}>
+                      {drawerStatus.eod_expectations.variance >= 0 ? '✅' : '⚠️'} 
+                      {drawerStatus.eod_expectations.variance >= 0 ? 'OVER' : 'SHORT'}: ${Math.abs(drawerStatus.eod_expectations.variance).toFixed(2)}
+                    </Text>
+                  </View>
+                )}
+
+                {/* Payment Breakdown */}
+                <View style={styles.sidebarPaymentBreakdown}>
+                  <Text style={styles.sidebarPaymentTitle}>PAYMENT METHODS</Text>
+                  <View style={styles.sidebarPaymentRow}>
+                    <Text style={styles.sidebarPaymentLabel}>💵 Cash:</Text>
+                    <Text style={styles.sidebarPaymentValue}>${drawerStatus.current_breakdown?.cash?.toFixed(2) || '0.00'}</Text>
+                  </View>
+                  <View style={styles.sidebarPaymentRow}>
+                    <Text style={styles.sidebarPaymentLabel}>💳 Card:</Text>
+                    <Text style={styles.sidebarPaymentValue}>${drawerStatus.current_breakdown?.card?.toFixed(2) || '0.00'}</Text>
+                  </View>
+                  <View style={styles.sidebarPaymentRow}>
+                    <Text style={styles.sidebarPaymentLabel}>📱 Other:</Text>
+                    <Text style={styles.sidebarPaymentValue}>${((drawerStatus.current_breakdown?.ecocash || 0) + (drawerStatus.current_breakdown?.transfer || 0)).toFixed(2)}</Text>
+                  </View>
+                  <View style={styles.sidebarPaymentRowTotal}>
+                    <Text style={styles.sidebarPaymentLabelTotal}>💰 Total:</Text>
+                    <Text style={styles.sidebarPaymentValueTotal}>${drawerStatus.current_breakdown?.total?.toFixed(2) || '0.00'}</Text>
+                  </View>
+                </View>
+
+                <Text style={styles.sidebarDrawerNote}>
+                  🕐 Updated: {drawerStatus.last_activity ? new Date(drawerStatus.last_activity).toLocaleTimeString() : 'N/A'}
+                </Text>
+              </View>
+            )}
+
+            {/* Quick Access Tools */}
+            <ScrollView style={styles.sidebarFeaturesList} showsVerticalScrollIndicator={false}>
+              <View style={styles.sidebarFeaturesSection}>
+                <Text style={styles.sidebarSectionTitle}>🚀 QUICK ACCESS TOOLS</Text>
+                {sidebarFeatures.filter(f => f.section === 'cashier-tools' && f.id !== 'drawer-status').map(renderSidebarFeatureItem)}
+              </View>
+            </ScrollView>
+
+            {/* Sidebar Footer */}
+            <View style={styles.sidebarFooter}>
+              <Text style={styles.sidebarFooterText}>💡 Quick Tip</Text>
+              <Text style={styles.sidebarFooterDescription}>
+                Swipe from left edge or tap ☰ to open menu on mobile.
+              </Text>
+            </View>
+          </Animated.View>
+        </>
+      )}
     </ScrollView>
   );
 };
@@ -1663,6 +2972,528 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
     marginLeft: 12,
   },
+  
+  // Shop Status Indicator Styles
+  shopStatusIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  shopStatusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 8,
+  },
+  shopStatusText: {
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+  },
+  shopClosedNote: {
+    color: '#ef4444',
+    fontSize: 10,
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    marginLeft: 8,
+    fontStyle: 'italic',
+  },
+
+  // Enhanced Drawer Status Indicator Styles
+  enhancedDrawerStatusContainer: {
+    backgroundColor: '#1f2937',
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 12,
+    borderWidth: 2,
+    borderColor: '#10b981',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  
+
+
+  // Compact Cashier Header Styles - REDUCED SIZE
+  compactCashierHeader: {
+    backgroundColor: '#1a1a1a',
+    padding: 12,
+    paddingTop: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+  },
+  compactHeaderContent: {
+    alignItems: 'center',
+  },
+  compactTitleWithButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginBottom: 8,
+  },
+  headerRefreshButtonInline: {
+    backgroundColor: '#3b82f6',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 4,
+  },
+  inlineMenuButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#10b981',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 4,
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  inlineMenuButtonText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '600',
+    marginLeft: 3,
+  },
+  compactHeaderTitle: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+    flex: 1,
+  },
+  compactStatusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#374151',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    width: '100%',
+  },
+  compactStatusItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  compactStatusLabel: {
+    color: '#9ca3af',
+    fontSize: 11,
+    fontWeight: '600',
+    marginRight: 3,
+  },
+  compactStatusValue: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  compactStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10b981',
+    marginRight: 4,
+  },
+  compactStatusText: {
+    color: '#10b981',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+
+  showAllProductsContainer: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  showAllProductsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 12,
+    borderWidth: 0,
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  showAllProductsButtonText: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginHorizontal: 12,
+    textAlign: 'center',
+  },
+  showAllProductsSubtext: {
+    color: '#9ca3af',
+    fontSize: 14,
+    marginTop: 12,
+    textAlign: 'center',
+  },
+
+  // Quick Products Styles - Products without Barcodes
+  quickProductsContainer: {
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#10b981',
+  },
+  quickProductsTitle: {
+    color: '#10b981',
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  quickProductsSubtitle: {
+    color: '#9ca3af',
+    fontSize: 12,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  quickProductsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  quickProductCard: {
+    backgroundColor: '#374151',
+    borderRadius: 8,
+    padding: 12,
+    width: '31%',
+    marginBottom: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  quickProductName: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  quickProductPrice: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  quickProductCategory: {
+    color: '#9ca3af',
+    fontSize: 10,
+    textAlign: 'center',
+  },
+  noQuickProductsContainer: {
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+  noQuickProductsText: {
+    color: '#9ca3af',
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  noQuickProductsSubtext: {
+    color: '#6b7280',
+    fontSize: 12,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  viewAllQuickProductsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#065f46',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#10b981',
+  },
+  viewAllQuickProductsButtonText: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: '600',
+    marginRight: 8,
+  },
+  productsDisplayContainer: {
+    flex: 1,
+  },
+  drawerStatusHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  drawerStatusTitle: {
+    color: '#10b981',
+    fontSize: 16,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  refreshDrawerButton: {
+    backgroundColor: '#374151',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    minWidth: 40,
+    alignItems: 'center',
+  },
+  refreshDrawerButtonText: {
+    color: '#9ca3af',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  primaryDrawerMetrics: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  primaryMetricCard: {
+    backgroundColor: '#111827',
+    borderRadius: 12,
+    padding: 12,
+    width: '48%',
+    marginBottom: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  primaryMetricLabel: {
+    color: '#9ca3af',
+    fontSize: 10,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textTransform: 'uppercase',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  primaryMetricValue: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textAlign: 'center',
+  },
+  varianceAlert: {
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    alignItems: 'center',
+  },
+  varianceAlertText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textAlign: 'center',
+  },
+  paymentBreakdownGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  paymentBreakdownItem: {
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    padding: 12,
+    width: '31%',
+    marginBottom: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  paymentIcon: {
+    fontSize: 20,
+    marginBottom: 4,
+  },
+  paymentLabel: {
+    color: '#9ca3af',
+    fontSize: 10,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textTransform: 'uppercase',
+    marginBottom: 2,
+    textAlign: 'center',
+  },
+  paymentValue: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textAlign: 'center',
+  },
+  paymentLabelTotal: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textTransform: 'uppercase',
+    marginBottom: 2,
+    textAlign: 'center',
+  },
+  paymentValueTotal: {
+    color: '#10b981',
+    fontSize: 16,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textAlign: 'center',
+  },
+  totalPaymentItem: {
+    width: '100%',
+    backgroundColor: '#1f2937',
+    borderColor: '#10b981',
+    borderWidth: 2,
+  },
+  performanceGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  performanceItem: {
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    padding: 12,
+    width: '31%',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  performanceLabel: {
+    color: '#9ca3af',
+    fontSize: 10,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textTransform: 'uppercase',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  performanceValue: {
+    color: '#f59e0b',
+    fontSize: 16,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textAlign: 'center',
+  },
+  drawerDetails: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#374151',
+  },
+  drawerDetailsTitle: {
+    color: '#e5e7eb',
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    marginBottom: 8,
+  },
+  paymentBreakdown: {
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 12,
+  },
+  breakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 2,
+  },
+  breakdownLabel: {
+    color: '#9ca3af',
+    fontSize: 11,
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+  },
+  breakdownValue: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '500',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+  },
+  totalBreakdownRow: {
+    borderTopWidth: 1,
+    borderTopColor: '#374151',
+    paddingTop: 4,
+    marginTop: 2,
+  },
+  breakdownLabelTotal: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+  },
+  breakdownValueTotal: {
+    color: '#10b981',
+    fontSize: 12,
+    fontWeight: 'bold',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+  },
+  sessionSales: {
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 12,
+  },
+  salesRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 2,
+  },
+  salesLabel: {
+    color: '#9ca3af',
+    fontSize: 11,
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+  },
+  salesValue: {
+    color: '#f59e0b',
+    fontSize: 11,
+    fontWeight: '500',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+  },
+  eodExpectations: {
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    padding: 8,
+  },
+  expectationsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 2,
+  },
+  expectationsLabel: {
+    color: '#9ca3af',
+    fontSize: 11,
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+  },
+  expectationsValue: {
+    color: '#3b82f6',
+    fontSize: 11,
+    fontWeight: '500',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+  },
+  drawerStatusNote: {
+    color: '#6b7280',
+    fontSize: 9,
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    marginTop: 8,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
 
   topProductsContainer: {
     padding: 20,
@@ -1752,6 +3583,25 @@ const styles = StyleSheet.create({
     color: '#888888',
     fontSize: 14,
     textAlign: 'center',
+  },
+  searchHelpTitle: {
+    color: '#10b981',
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  searchHelpText: {
+    color: '#9ca3af',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  searchHelpSubtext: {
+    color: '#6b7280',
+    fontSize: 14,
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
   statsContainer: {
     padding: 20,
@@ -1872,9 +3722,10 @@ const styles = StyleSheet.create({
     minHeight: '100vh',
     paddingBottom: 100,
   },
+  // Compact Vintage Border
   vintageBorder: {
     backgroundColor: '#111111',
-    padding: 15,
+    padding: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#374151',
     alignItems: 'center',
@@ -2018,25 +3869,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontStyle: 'italic',
   },
-  scanButton: {
-    backgroundColor: '#3b82f6',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginLeft: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  scanButtonText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '600',
-    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
-  },
+
   categoryContainer: {
     marginBottom: 10,
   },
@@ -2340,6 +4173,26 @@ const styles = StyleSheet.create({
     minWidth: 30,
     textAlign: 'center',
   },
+  weightInput: {
+    backgroundColor: '#374151',
+    borderWidth: 1,
+    borderColor: '#4b5563',
+    padding: 6,
+    fontSize: 12,
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    color: '#ffffff',
+    borderRadius: 4,
+    minWidth: 50,
+    textAlign: 'center',
+    marginHorizontal: 4,
+  },
+  unitLabel: {
+    color: '#10b981',
+    fontSize: 10,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    marginLeft: 4,
+  },
   removeButton: {
     backgroundColor: '#ef4444',
     width: 32,
@@ -2638,6 +4491,504 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
     textAlign: 'center',
+  },
+
+  // Sidebar Styles
+  menuButton: {
+    backgroundColor: '#374151',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginRight: 12,
+    minWidth: 40,
+    alignItems: 'center',
+  },
+  menuButtonText: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  sidebarBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    zIndex: 1000,
+  },
+  // Enhanced Sidebar Styles - Better Positioning
+  sidebar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    bottom: 0,
+    backgroundColor: '#1a1a1a',
+    borderRightWidth: 2,
+    borderRightColor: '#10b981',
+    zIndex: 1001,
+    ...Platform.select({
+      web: {
+        boxShadow: '4px 0 20px rgba(0, 0, 0, 0.5)',
+      },
+    }),
+  },
+  sidebarHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    paddingTop: 50,
+    borderBottomWidth: 2,
+    borderBottomColor: '#10b981',
+    backgroundColor: '#111111',
+  },
+  sidebarTitleContainer: {
+    flex: 1,
+  },
+  sidebarTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  sidebarSubtitle: {
+    color: '#999',
+    fontSize: 12,
+  },
+  sidebarCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#ef4444',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#ef4444',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  sidebarCloseButtonText: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  sidebarDrawerSection: {
+    backgroundColor: '#1f2937',
+    margin: 16,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: '#10b981',
+  },
+  sidebarDrawerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  sidebarDrawerTitle: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  sidebarRefreshButton: {
+    backgroundColor: '#374151',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    minWidth: 32,
+    alignItems: 'center',
+  },
+  sidebarRefreshButtonText: {
+    color: '#9ca3af',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  sidebarDrawerMetrics: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  sidebarMetricCard: {
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    padding: 8,
+    width: '48%',
+    marginBottom: 6,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  sidebarMetricLabel: {
+    color: '#9ca3af',
+    fontSize: 9,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    marginBottom: 2,
+    textAlign: 'center',
+  },
+  sidebarMetricValue: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  sidebarVarianceAlert: {
+    borderRadius: 6,
+    padding: 8,
+    marginBottom: 12,
+    alignItems: 'center',
+  },
+  sidebarVarianceAlertText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  sidebarPaymentBreakdown: {
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  sidebarPaymentTitle: {
+    color: '#e5e7eb',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 8,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+  },
+  sidebarPaymentRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 2,
+  },
+  sidebarPaymentLabel: {
+    color: '#9ca3af',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  sidebarPaymentValue: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  sidebarPaymentRowTotal: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 4,
+    borderTopWidth: 1,
+    borderTopColor: '#374151',
+    marginTop: 4,
+  },
+  sidebarPaymentLabelTotal: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  sidebarPaymentValueTotal: {
+    color: '#10b981',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  sidebarDrawerNote: {
+    color: '#6b7280',
+    fontSize: 9,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  sidebarFeaturesList: {
+    flex: 1,
+    padding: 16,
+  },
+  sidebarFeaturesSection: {
+    marginBottom: 24,
+  },
+  sidebarSectionTitle: {
+    color: '#3b82f6',
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginBottom: 12,
+    marginLeft: 4,
+    textTransform: 'uppercase',
+  },
+  sidebarFeatureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#2a2a2a',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  sidebarFeatureIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  sidebarFeatureIconText: {
+    fontSize: 16,
+  },
+  sidebarFeatureContent: {
+    flex: 1,
+  },
+  sidebarFeatureTitle: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  sidebarFeatureDescription: {
+    color: '#999',
+    fontSize: 10,
+  },
+  sidebarFeatureArrow: {
+    color: '#666',
+    fontSize: 14,
+    marginLeft: 8,
+  },
+  sidebarFooter: {
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+    backgroundColor: '#0f0f0f',
+  },
+  sidebarFooterText: {
+    color: '#22c55e',
+    fontSize: 11,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  sidebarFooterDescription: {
+    color: '#999',
+    fontSize: 10,
+    lineHeight: 14,
+  },
+
+  // Enhanced Cart Styles for Large Carts
+  compactCartSummary: {
+    backgroundColor: '#1f2937',
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#10b981',
+  },
+  compactCartHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+  },
+  compactCartTitle: {
+    color: '#10b981',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  expandCartButton: {
+    backgroundColor: '#3b82f6',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 4,
+  },
+  expandCartButtonText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  compactCartItems: {
+    marginBottom: 8,
+  },
+  compactCartItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+    paddingVertical: 2,
+  },
+  compactCartItemName: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '600',
+    flex: 1,
+  },
+  compactCartItemDetail: {
+    color: '#9ca3af',
+    fontSize: 10,
+    fontWeight: '500',
+    textAlign: 'right',
+  },
+  compactCartMoreItems: {
+    color: '#f59e0b',
+    fontSize: 10,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  cartViewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    backgroundColor: '#374151',
+    borderRadius: 6,
+  },
+  cartViewTitle: {
+    color: '#10b981',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  collapseCartButton: {
+    backgroundColor: '#ef4444',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 4,
+  },
+  collapseCartButtonText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  cartItemsScroll: {
+    maxHeight: 200,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+    borderRadius: 6,
+  },
+
+  // Enhanced Products Styles for Large Search Results
+  compactProductsSummary: {
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#3b82f6',
+  },
+  compactProductsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+  },
+  compactProductsTitle: {
+    color: '#3b82f6',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  expandProductsButton: {
+    backgroundColor: '#3b82f6',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  expandProductsButtonText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  compactProductsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  compactProductCard: {
+    backgroundColor: '#374151',
+    borderRadius: 8,
+    padding: 8,
+    width: '31%',
+    marginBottom: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  compactProductName: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  compactProductPrice: {
+    color: '#10b981',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  compactProductCategory: {
+    color: '#9ca3af',
+    fontSize: 9,
+    textAlign: 'center',
+  },
+  compactProductsMore: {
+    width: '100%',
+    alignItems: 'center',
+    paddingVertical: 12,
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  compactProductsMoreText: {
+    color: '#f59e0b',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  compactProductsMoreSubtext: {
+    color: '#9ca3af',
+    fontSize: 10,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  productsViewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#374151',
+    borderRadius: 8,
+  },
+  productsViewTitle: {
+    color: '#3b82f6',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  collapseProductsButton: {
+    backgroundColor: '#ef4444',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  collapseProductsButtonText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  productsListScroll: {
+    maxHeight: 400,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+    borderRadius: 8,
   },
 });
 
