@@ -10,6 +10,7 @@ import {
   Platform,
   Modal,
   Dimensions,
+  TextInput,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { shopStorage } from '../services/storage';
@@ -26,11 +27,29 @@ const CashierSalesScreen = () => {
   const [receiptModalVisible, setReceiptModalVisible] = useState(false);
   const [selectedSale, setSelectedSale] = useState(null);
   const [shopConfig, setShopConfig] = useState(null);
+  
+  // Filter and pagination states
+  const [filteredSales, setFilteredSales] = useState([]);
+  const [displayedSales, setDisplayedSales] = useState([]);
+  const [showFilters, setShowFilters] = useState(false);
+  const [dateFilter, setDateFilter] = useState('today'); // today, yesterday, week, month, custom
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+  const [paymentFilter, setPaymentFilter] = useState('all'); // all, cash, card, ecocash, transfer
+  const [showAllSales, setShowAllSales] = useState(false);
+  const ITEMS_PER_PAGE = 10;
 
   useEffect(() => {
     loadCashierSales();
     loadShopConfiguration();
   }, []);
+
+  // Apply filters when data or filter states change
+  useEffect(() => {
+    if (salesData.length > 0) {
+      applyFilters();
+    }
+  }, [salesData, dateFilter, customStartDate, customEndDate, paymentFilter, showAllSales]);
 
   const loadCashierSales = async () => {
     try {
@@ -210,6 +229,8 @@ const CashierSalesScreen = () => {
       }
       
       setSalesData(cashierSales);
+      setFilteredSales(cashierSales);
+      setDisplayedSales(cashierSales.slice(0, ITEMS_PER_PAGE));
 
       // Calculate summary for current cashier
       const totalSales = cashierSales.length;
@@ -346,6 +367,80 @@ const CashierSalesScreen = () => {
     }
   };
 
+  // Filter and pagination functions
+  const applyFilters = () => {
+    let filtered = [...salesData];
+
+    // Date filtering
+    const now = new Date();
+    let startDate, endDate;
+
+    switch (dateFilter) {
+      case 'today':
+        startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        endDate = new Date(startDate.getTime() + 24 * 60 * 60 * 1000);
+        break;
+      case 'yesterday':
+        startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+        endDate = new Date(startDate.getTime() + 24 * 60 * 60 * 1000);
+        break;
+      case 'week':
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        endDate = now;
+        break;
+      case 'month':
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+        break;
+      case 'custom':
+        if (customStartDate && customEndDate) {
+          startDate = new Date(customStartDate);
+          endDate = new Date(customEndDate);
+          endDate.setHours(23, 59, 59, 999);
+        }
+        break;
+    }
+
+    if (startDate && endDate) {
+      filtered = filtered.filter(sale => {
+        const saleDate = new Date(sale.created_at || sale.sale_date);
+        return saleDate >= startDate && saleDate <= endDate;
+      });
+    }
+
+    // Payment method filtering
+    if (paymentFilter !== 'all') {
+      filtered = filtered.filter(sale => sale.payment_method === paymentFilter);
+    }
+
+    // Sort by date (newest first)
+    filtered.sort((a, b) => new Date(b.created_at || b.sale_date) - new Date(a.created_at || a.sale_date));
+
+    setFilteredSales(filtered);
+    
+    // Update displayed sales based on pagination
+    if (showAllSales) {
+      setDisplayedSales(filtered);
+    } else {
+      setDisplayedSales(filtered.slice(0, ITEMS_PER_PAGE));
+    }
+  };
+
+  const loadMoreSales = () => {
+    setShowAllSales(true);
+    setDisplayedSales(filteredSales);
+  };
+
+  const resetFilters = () => {
+    setDateFilter('today');
+    setCustomStartDate('');
+    setCustomEndDate('');
+    setPaymentFilter('all');
+    setShowAllSales(false);
+    setFilteredSales(salesData);
+    setDisplayedSales(salesData.slice(0, ITEMS_PER_PAGE));
+  };
+
   if (loading) {
     return (
       <View style={styles.container}>
@@ -379,9 +474,14 @@ const CashierSalesScreen = () => {
             <Text style={styles.backButton}>← Back</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>📊 My Sales</Text>
-          <TouchableOpacity onPress={loadCashierSales}>
-            <Text style={styles.refreshButton}>↻</Text>
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            <TouchableOpacity onPress={() => setShowFilters(!showFilters)}>
+              <Text style={styles.filterButton}>🔍</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={loadCashierSales}>
+              <Text style={styles.refreshButton}>↻</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.content}>
@@ -433,18 +533,132 @@ const CashierSalesScreen = () => {
             </View>
           )}
 
+          {/* Filter Section */}
+          {showFilters && (
+            <View style={styles.filterSection}>
+              <Text style={styles.sectionTitle}>🔍 FILTER & SEARCH</Text>
+              
+              {/* Date Filter */}
+              <View style={styles.filterGroup}>
+                <Text style={styles.filterLabel}>📅 Date Range:</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterOptions}>
+                  {[
+                    { value: 'today', label: 'Today' },
+                    { value: 'yesterday', label: 'Yesterday' },
+                    { value: 'week', label: 'Last 7 Days' },
+                    { value: 'month', label: 'This Month' },
+                    { value: 'custom', label: 'Custom Range' }
+                  ].map(option => (
+                    <TouchableOpacity
+                      key={option.value}
+                      style={[
+                        styles.filterOption,
+                        dateFilter === option.value && styles.filterOptionActive
+                      ]}
+                      onPress={() => setDateFilter(option.value)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        dateFilter === option.value && styles.filterOptionTextActive
+                      ]}>
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+
+              {/* Custom Date Range */}
+              {dateFilter === 'custom' && (
+                <View style={styles.customDateGroup}>
+                  <View style={styles.dateInputGroup}>
+                    <Text style={styles.filterLabel}>Start Date:</Text>
+                    <TextInput
+                      style={styles.dateInput}
+                      value={customStartDate}
+                      onChangeText={setCustomStartDate}
+                      placeholder="YYYY-MM-DD"
+                      placeholderTextColor="#9ca3af"
+                    />
+                  </View>
+                  <View style={styles.dateInputGroup}>
+                    <Text style={styles.filterLabel}>End Date:</Text>
+                    <TextInput
+                      style={styles.dateInput}
+                      value={customEndDate}
+                      onChangeText={setCustomEndDate}
+                      placeholder="YYYY-MM-DD"
+                      placeholderTextColor="#9ca3af"
+                    />
+                  </View>
+                </View>
+              )}
+
+              {/* Payment Method Filter */}
+              <View style={styles.filterGroup}>
+                <Text style={styles.filterLabel}>💳 Payment Method:</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterOptions}>
+                  {[
+                    { value: 'all', label: 'All Methods' },
+                    { value: 'cash', label: 'Cash Only' },
+                    { value: 'card', label: 'Card Only' },
+                    { value: 'ecocash', label: 'EcoCash Only' },
+                    { value: 'transfer', label: 'Transfer Only' }
+                  ].map(option => (
+                    <TouchableOpacity
+                      key={option.value}
+                      style={[
+                        styles.filterOption,
+                        paymentFilter === option.value && styles.filterOptionActive
+                      ]}
+                      onPress={() => setPaymentFilter(option.value)}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        paymentFilter === option.value && styles.filterOptionTextActive
+                      ]}>
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+
+              {/* Filter Actions */}
+              <View style={styles.filterActions}>
+                <TouchableOpacity style={styles.resetFilterButton} onPress={resetFilters}>
+                  <Text style={styles.resetFilterButtonText}>🔄 Reset Filters</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.applyFilterButton} onPress={applyFilters}>
+                  <Text style={styles.applyFilterButtonText}>✅ Apply Filters</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Filter Results Summary */}
+              <View style={styles.filterSummary}>
+                <Text style={styles.filterSummaryText}>
+                  Showing {filteredSales.length} of {salesData.length} sales
+                </Text>
+              </View>
+            </View>
+          )}
+
           {/* Sales List */}
           <View style={styles.salesSection}>
             <Text style={styles.sectionTitle}>🧾 MY TRANSACTION HISTORY</Text>
             
-            {salesData.length === 0 ? (
+            {displayedSales.length === 0 ? (
               <View style={styles.noSalesContainer}>
                 <Text style={styles.noSalesIcon}>📊</Text>
-                <Text style={styles.noSalesText}>No sales found for today</Text>
-                <Text style={styles.noSalesSubtext}>Start making sales to see them here!</Text>
+                <Text style={styles.noSalesText}>
+                  {filteredSales.length === 0 ? 'No sales found for the selected filters' : 'No sales to display'}
+                </Text>
+                <Text style={styles.noSalesSubtext}>
+                  {filteredSales.length === 0 ? 'Try adjusting your filters or make some sales!' : 'Start making sales to see them here!'}
+                </Text>
               </View>
             ) : (
-              salesData.map((sale, index) => (
+              displayedSales.map((sale, index) => (
                 <View key={sale.id || index} style={styles.saleCard}>
                   <View style={styles.saleHeader}>
                     <View style={styles.saleInfo}>
@@ -482,6 +696,27 @@ const CashierSalesScreen = () => {
                   )}
                 </View>
               ))
+            )}
+
+            {/* Pagination Controls */}
+            {filteredSales.length > ITEMS_PER_PAGE && (
+              <View style={styles.paginationContainer}>
+                {!showAllSales ? (
+                  <TouchableOpacity style={styles.seeMoreButton} onPress={loadMoreSales}>
+                    <Text style={styles.seeMoreButtonText}>📋 See More Sales ({filteredSales.length - ITEMS_PER_PAGE} more)</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity style={styles.showLessButton} onPress={() => {
+                    setShowAllSales(false);
+                    setDisplayedSales(filteredSales.slice(0, ITEMS_PER_PAGE));
+                  }}>
+                    <Text style={styles.showLessButtonText}>🔼 Show Less</Text>
+                  </TouchableOpacity>
+                )}
+                <Text style={styles.paginationInfo}>
+                  Showing {displayedSales.length} of {filteredSales.length} sales
+                </Text>
+              </View>
             )}
           </View>
         </View>
@@ -662,6 +897,156 @@ const styles = StyleSheet.create({
     color: '#10b981',
     fontSize: 20,
     fontWeight: '600',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  filterButton: {
+    color: '#3b82f6',
+    fontSize: 20,
+    fontWeight: '600',
+  },
+  
+  // Filter Section Styles
+  filterSection: {
+    backgroundColor: '#1f2937',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
+    borderWidth: 2,
+    borderColor: '#3b82f6',
+  },
+  filterGroup: {
+    marginBottom: 16,
+  },
+  filterLabel: {
+    color: '#e5e7eb',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  filterOptions: {
+    flexDirection: 'row',
+  },
+  filterOption: {
+    backgroundColor: '#374151',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  filterOptionActive: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#3b82f6',
+  },
+  filterOptionText: {
+    color: '#9ca3af',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  filterOptionTextActive: {
+    color: '#ffffff',
+  },
+  customDateGroup: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  dateInputGroup: {
+    flex: 1,
+  },
+  dateInput: {
+    backgroundColor: '#374151',
+    borderRadius: 8,
+    padding: 12,
+    color: '#ffffff',
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  filterActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 16,
+  },
+  resetFilterButton: {
+    backgroundColor: '#6b7280',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+  },
+  resetFilterButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  applyFilterButton: {
+    backgroundColor: '#10b981',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+  },
+  applyFilterButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  filterSummary: {
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  filterSummaryText: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  
+  // Pagination Styles
+  paginationContainer: {
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#374151',
+    marginTop: 16,
+  },
+  seeMoreButton: {
+    backgroundColor: '#3b82f6',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  seeMoreButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  showLessButton: {
+    backgroundColor: '#6b7280',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  showLessButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  paginationInfo: {
+    color: '#9ca3af',
+    fontSize: 12,
+    textAlign: 'center',
   },
   loadingContainer: {
     flex: 1,

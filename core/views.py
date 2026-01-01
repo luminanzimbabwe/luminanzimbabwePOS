@@ -537,17 +537,19 @@ class SaleListView(APIView):
             print(f"   Payment Method: {payment_method}")
             print(f"   Timestamp: {sale.created_at}")
 
-            # Automatically update drawer with the sale
+            # NOTE: Drawer is now updated automatically via Django signals
+            # Manual drawer updates removed to prevent double-counting
+            # The signal handler in core/signals.py will handle drawer updates automatically
             try:
                 from .models import CashFloat
                 drawer = CashFloat.get_active_drawer(shop, cashier)
                 if drawer.status != 'ACTIVE':
                     drawer.activate_drawer(cashier)
-                drawer.add_sale(total_amount, payment_method)
-                print(f"💰 DRAWER UPDATE: Added ${total_amount} {payment_method} sale to drawer")
+                # REMOVED: drawer.add_sale(total_amount, payment_method) - Now handled by signal
+                print(f"INFO: Drawer will be updated automatically via signal handler")
             except Exception as drawer_error:
-                print(f"⚠️ WARNING: Failed to update drawer: {drawer_error}")
-                # Don't fail the sale if drawer update fails
+                print(f"⚠️ WARNING: Failed to access drawer: {drawer_error}")
+                # Don't fail the sale if drawer access fails
 
             # Create sale items and update stock
             for item_data in sale_items:
@@ -1064,13 +1066,15 @@ class StockTakeListView(APIView):
         shop = ShopConfiguration.objects.get()
         serializer = CreateStockTakeSerializer(data=request.data)
         if serializer.is_valid():
+            # No authentication required - create stock take without cashier attribution
             cashier_id = request.data.get('cashier_id')
             cashier = None
             if cashier_id:
                 try:
                     cashier = Cashier.objects.get(id=cashier_id, shop=shop)
                 except Cashier.DoesNotExist:
-                    pass
+                    # Continue without cashier if not found
+                    print(f"Info: Cashier with ID {cashier_id} not found, creating stock take without cashier attribution")
 
             stock_take = StockTake.objects.create(
                 shop=shop,
@@ -1106,20 +1110,30 @@ class StockTakeDetailView(APIView):
 
         action = request.data.get('action')
         cashier_id = request.data.get('cashier_id')
+        
+        # Make cashier_id completely optional - no validation required
         cashier = None
         if cashier_id:
             try:
                 cashier = Cashier.objects.get(id=cashier_id, shop=shop)
             except Cashier.DoesNotExist:
-                pass
+                # If cashier lookup fails, continue without cashier (stock take can still be completed)
+                print(f"Info: Cashier with ID {cashier_id} not found, completing stock take without cashier attribution")
 
         if action == 'complete':
             if stock_take.status != 'in_progress':
                 return Response({"error": "Stock take is not in progress"}, status=status.HTTP_400_BAD_REQUEST)
 
-            stock_take.complete_stock_take(cashier)
-            serializer = StockTakeSerializer(stock_take)
-            return Response(serializer.data)
+            try:
+                stock_take.complete_stock_take(cashier)
+                serializer = StockTakeSerializer(stock_take)
+                return Response({
+                    "message": "Stock take completed successfully",
+                    "data": serializer.data
+                })
+            except Exception as e:
+                print(f"Error completing stock take: {e}")
+                return Response({"error": f"Failed to complete stock take: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         elif action == 'cancel':
             if stock_take.status != 'in_progress':

@@ -17,6 +17,7 @@ import InventoryAuditTrailScreen from '../screens/InventoryAuditTrailScreen';
 import InventoryReceivingScreen from '../screens/InventoryReceivingScreen';
 import RestockManagerScreen from '../screens/RestockManagerScreen';
 import ProductManagementScreen from '../screens/ProductManagementScreen';
+import StockTakeScreen from '../screens/StockTakeScreen';
 import StockTransferScreen from '../screens/StockTransferScreen';
 import StockTransferHistoryScreen from '../screens/StockTransferHistoryScreen';
 import ProductSplitScreen from '../screens/ProductSplitScreen';
@@ -36,8 +37,16 @@ import StartOfDayScreen from '../screens/StartOfDayScreen';
 import CashierSalesScreen from '../screens/CashierSalesScreen';
 import CashierDrawerScreen from '../screens/CashierDrawerScreen';
 import CashierProductsScreen from '../screens/CashierProductsScreen';
+import CashierProductReceivingScreen from '../screens/CashierProductReceivingScreen';
 import WeightProductsScreen from '../screens/WeightProductsScreen';
 import QuickProductsScreen from '../screens/QuickProductsScreen';
+import CashierStockTakeScreen from '../screens/Cashier/StockTakeScreen';
+import LowStockAlertsScreen from '../screens/LowStockAlertsScreen';
+import ProfitAnalysisScreen from '../screens/ProfitAnalysisScreen';
+import SupplierManagementScreen from '../screens/SupplierManagementScreen';
+import StockMovementScreen from '../screens/StockMovementScreen';
+import PriceComparisonScreen from '../screens/PriceComparisonScreen';
+import DemandForecastingScreen from '../screens/DemandForecastingScreen';
 
 // Import Tab Navigator
 import TabNavigator from './TabNavigator';
@@ -79,6 +88,7 @@ const AppNavigator = () => {
       <Stack.Screen name={ROUTES.INVENTORY_RECEIVING} component={InventoryReceivingScreen} />
       <Stack.Screen name={ROUTES.PRODUCT_MANAGEMENT} component={ProductManagementScreen} />
       <Stack.Screen name={ROUTES.RESTOCK_MANAGER} component={RestockManagerScreen} />
+      <Stack.Screen name={ROUTES.STOCK_TAKE} component={StockTakeScreen} />
       <Stack.Screen name={ROUTES.STOCK_TRANSFER} component={StockTransferScreen} />
       <Stack.Screen name={ROUTES.STOCK_TRANSFER_HISTORY} component={StockTransferHistoryScreen} />
       <Stack.Screen name={ROUTES.PRODUCT_SPLIT} component={ProductSplitScreen} />
@@ -94,11 +104,19 @@ const AppNavigator = () => {
       <Stack.Screen name={ROUTES.EOD_RECONCILIATION} component={EODReconciliationScreen} />
       <Stack.Screen name={ROUTES.START_OF_DAY} component={StartOfDayScreen} />
       <Stack.Screen name={ROUTES.CASHIER_SALES} component={CashierSalesScreen} />
+      <Stack.Screen name={ROUTES.CASHIER_PRODUCT_RECEIVING} component={CashierProductReceivingScreen} />
       <Stack.Screen name="CashierDrawer" component={CashierDrawerScreen} />
       <Stack.Screen name="CashierProducts" component={CashierProductsScreen} />
       <Stack.Screen name="WeightProducts" component={WeightProductsScreen} />
       <Stack.Screen name="QuickProducts" component={QuickProductsScreen} />
+      <Stack.Screen name="CashierStockTake" component={CashierStockTakeScreen} />
       <Stack.Screen name="OrderConfirmation" component={OrderConfirmationScreen} />
+      <Stack.Screen name="LowStockAlerts" component={LowStockAlertsScreen} />
+      <Stack.Screen name="ProfitAnalysis" component={ProfitAnalysisScreen} />
+      <Stack.Screen name={ROUTES.SUPPLIER_MANAGEMENT} component={SupplierManagementScreen} />
+      <Stack.Screen name={ROUTES.STOCK_MOVEMENTS} component={StockMovementScreen} />
+      <Stack.Screen name={ROUTES.PRICE_COMPARISON} component={PriceComparisonScreen} />
+      <Stack.Screen name={ROUTES.DEMAND_FORECASTING} component={DemandForecastingScreen} />
 
     </Stack.Navigator>
   );

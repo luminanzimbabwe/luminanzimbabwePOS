@@ -125,12 +125,13 @@ class SaleItemSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
     product_id = serializers.IntegerField(source='product.id', read_only=True)
     product_price = serializers.DecimalField(source='product.price', max_digits=10, decimal_places=2, read_only=True)
+    product_cost_price = serializers.DecimalField(source='product.cost_price', max_digits=10, decimal_places=2, read_only=True)
     product_price_type = serializers.CharField(source='product.price_type', read_only=True)
     remaining_quantity = serializers.SerializerMethodField()
 
     class Meta:
         model = SaleItem
-        fields = ['id', 'product', 'product_id', 'product_name', 'product_price', 'product_price_type', 'quantity', 'unit_price', 'total_price',
+        fields = ['id', 'product', 'product_id', 'product_name', 'product_price', 'product_cost_price', 'product_price_type', 'quantity', 'unit_price', 'total_price',
                   'refunded', 'refund_quantity', 'refund_reason', 'refund_type', 'refund_amount', 'refunded_at', 'refunded_by', 'remaining_quantity']
         read_only_fields = ['refunded', 'refund_quantity', 'refund_reason', 'refund_type', 'refund_amount', 'refunded_at', 'refunded_by', 'remaining_quantity']
 

@@ -58,12 +58,12 @@ const QuickProductsScreen = () => {
         // Debug: Log all products to see their barcode values
         console.log('All products from API:', response.data.map(p => ({name: p.name, barcode: p.barcode, line_code: p.line_code})));
         
-        // Filter products without barcodes - more flexible approach
+        // Filter products without barcodes AND with unit price type only
         const quickProducts = response.data.filter(product => {
           const barcode = (product.barcode || '').toString().trim().toUpperCase();
           const lineCode = (product.line_code || '').toString().trim().toUpperCase();
           
-          // FIXED: Check if PRIMARY barcode is empty (OR logic, not AND)
+          // Check if PRIMARY barcode is empty
           const hasNoBarcode = (
             !barcode || 
             barcode === 'N/A' || 
@@ -74,8 +74,11 @@ const QuickProductsScreen = () => {
             barcode === ''
           );
           
-          console.log('Checking product:', product.name, 'barcode:', `"${barcode}"`, 'line_code:', `"${lineCode}"`, 'isQuick:', hasNoBarcode);
-          return hasNoBarcode;
+          // Additional filter: only show unit price products
+          const isUnitPrice = product.price_type === 'unit';
+          
+          console.log('Checking product:', product.name, 'barcode:', `"${barcode}"`, 'price_type:', product.price_type, 'isQuick:', hasNoBarcode && isUnitPrice);
+          return hasNoBarcode && isUnitPrice;
         });
         
         console.log('Filtered quick products:', quickProducts.length);

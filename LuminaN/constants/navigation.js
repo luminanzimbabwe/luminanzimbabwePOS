@@ -19,10 +19,12 @@ export const ROUTES = {
   RESTOCK_MANAGER: 'RestockManager',
   STOCK_TRANSFER: 'StockTransfer',
   STOCK_TRANSFER_HISTORY: 'StockTransferHistory',
+  STOCK_TAKE: 'StockTake',
   STOCK_VALUATION: 'StockValuation',
   POS_PRICE: 'POSPrice',
   SALES_AND_REFUNDS: 'SalesAndRefunds',
   CASHIER_SALES: 'CashierSales',
+  CASHIER_PRODUCT_RECEIVING: 'CashierProductReceiving',
   QUICK_PRODUCTS: 'QuickProducts',
   // Sales Command Center routes
   SALES_DASHBOARD: 'SalesDashboard',
@@ -36,6 +38,10 @@ export const ROUTES = {
   HALF_PRODUCTS: 'HalfProducts',
   PRODUCT_MANAGEMENT: 'ProductManagement',
   WEIGHT_PRODUCTS: 'WeightProducts',
+  SUPPLIER_MANAGEMENT: 'SupplierManagement',
+  STOCK_MOVEMENTS: 'StockMovements',
+  PRICE_COMPARISON: 'PriceComparison',
+  DEMAND_FORECASTING: 'DemandForecasting',
 };
 
 // Screen titles
@@ -59,9 +65,11 @@ export const SCREEN_TITLES = {
   [ROUTES.RESTOCK_MANAGER]: 'Restock Manager',
   [ROUTES.STOCK_TRANSFER]: 'Stock Transfer',
   [ROUTES.STOCK_TRANSFER_HISTORY]: 'Transfer History',
+  [ROUTES.STOCK_TAKE]: 'Stock Take',
   [ROUTES.STOCK_VALUATION]: 'Stock Valuation',
   [ROUTES.POS_PRICE]: 'POS Price Labels',
   [ROUTES.SALES_AND_REFUNDS]: 'Sales & Refunds',
+  [ROUTES.CASHIER_PRODUCT_RECEIVING]: 'Cashier Product Receiving',
   [ROUTES.QUICK_PRODUCTS]: 'Quick Products',
   // Sales Command Center titles
   [ROUTES.SALES_DASHBOARD]: 'Sales Dashboard',
@@ -75,4 +83,8 @@ export const SCREEN_TITLES = {
   [ROUTES.HALF_PRODUCTS]: 'Half Products',
   [ROUTES.PRODUCT_MANAGEMENT]: 'Product Management',
   [ROUTES.WEIGHT_PRODUCTS]: 'Weight Products',
+  [ROUTES.SUPPLIER_MANAGEMENT]: 'Supplier Management',
+  [ROUTES.STOCK_MOVEMENTS]: 'Stock Movements',
+  [ROUTES.PRICE_COMPARISON]: 'Price Comparison',
+  [ROUTES.DEMAND_FORECASTING]: 'Demand Forecasting',
 };

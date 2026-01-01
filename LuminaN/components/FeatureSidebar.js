@@ -373,6 +373,24 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
         break;
         
       // Business Tools screens
+      case 'LowStockAlerts':
+        navigation.navigate('LowStockAlerts');
+        break;
+      case 'ProfitAnalysis':
+        navigation.navigate('ProfitAnalysis');
+        break;
+      case 'SupplierManagement':
+        navigation.navigate('SupplierManagement');
+        break;
+      case 'StockMovements':
+        navigation.navigate('StockMovements');
+        break;
+      case 'PriceComparison':
+        navigation.navigate('PriceComparison');
+        break;
+      case 'DemandForecasting':
+        navigation.navigate('DemandForecasting');
+        break;
       case 'Settings':
         navigation.navigate('Settings');
         break;

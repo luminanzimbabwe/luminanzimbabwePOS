@@ -51,6 +51,7 @@ const SalesLedgerScreen = () => {
     refundCount: 0,
     totalMargin: 0,
     marginPercentage: 0,
+    costDataSource: 'unknown', // 'actual' or 'estimated'
   });
 
   useEffect(() => {
@@ -92,6 +93,40 @@ const SalesLedgerScreen = () => {
         const response = await Promise.race([apiPromise, timeoutPromise]);
         const apiData = response.data;
         console.log('✅ Real sales data fetched:', apiData);
+        console.log('🔍 RAW API DATA STRUCTURE:', {
+          dataKeys: Object.keys(apiData || {}),
+          salesSample: apiData.sales?.[0] || apiData.results?.[0] || 'No sales data',
+          salesLength: (apiData.sales || apiData.results || []).length
+        });
+        
+        // Enhanced debug for cost price fields
+        const sampleSale = apiData.sales?.[0] || apiData.results?.[0];
+        if (sampleSale) {
+          console.log('🔍 COST PRICE FIELDS DEBUG:', {
+            saleId: sampleSale.id,
+            receipt: sampleSale.receipt_number,
+            totalAmount: sampleSale.total_amount,
+            cost_price: sampleSale.cost_price,
+            cost: sampleSale.cost,
+            margin_amount: sampleSale.margin_amount,
+            items: sampleSale.items?.map(item => ({
+              name: item.name || item.product_name,
+              cost_price: item.cost_price,
+              cost: item.cost,
+              unit_cost: item.unit_cost,
+              purchase_price: item.purchase_price,
+              quantity: item.quantity
+            })),
+            sale_items: sampleSale.sale_items?.map(item => ({
+              name: item.name || item.product_name,
+              cost_price: item.cost_price,
+              cost: item.cost,
+              unit_cost: item.unit_cost,
+              purchase_price: item.purchase_price,
+              quantity: item.quantity
+            }))
+          });
+        }
         
         // Transform API data to match component format
         const salesArray = apiData.sales || apiData.results || apiData || [];
@@ -101,23 +136,55 @@ const SalesLedgerScreen = () => {
         const transformedSales = salesArray.map((sale, index) => {
           const totalAmount = parseFloat(sale.total_amount) || 0;
           
-          // Enhanced cost price calculation
+          // Enhanced cost price calculation with API cost data
           let costPrice = 0;
-          if (sale.cost_price !== undefined && sale.cost_price !== null) {
-            costPrice = parseFloat(sale.cost_price) || 0;
-          } else if (sale.cost !== undefined && sale.cost !== null) {
-            costPrice = parseFloat(sale.cost) || 0;
-          } else if (sale.items && sale.items.length > 0) {
-            // Calculate from items if available
+          
+          // Method 1: Use cost prices from sale items (now includes product_cost_price)
+          if (sale.items && sale.items.length > 0) {
             costPrice = sale.items.reduce((itemSum, item) => {
-              const itemCost = parseFloat(item.cost_price) || parseFloat(item.cost) || 0;
+              // Use the product_cost_price from API (newly added)
+              const itemCost = parseFloat(item.product_cost_price) || 0;
               const quantity = parseFloat(item.quantity) || 1;
               return itemSum + (itemCost * quantity);
             }, 0);
           }
+          // Method 2: Check direct cost_price field (legacy support)
+          else if (sale.cost_price !== undefined && sale.cost_price !== null && sale.cost_price !== '') {
+            costPrice = parseFloat(sale.cost_price) || 0;
+          }
+          // Method 3: Check alternative cost field (legacy support)
+          else if (sale.cost !== undefined && sale.cost !== null && sale.cost !== '') {
+            costPrice = parseFloat(sale.cost) || 0;
+          }
+          // Method 4: Fallback estimation only if no cost data available
+          else if (totalAmount > 0) {
+            costPrice = totalAmount * 0.6; // Estimate 60% cost (40% margin)
+            console.log('⚠️ FALLBACK COST ESTIMATION:', {
+              totalAmount,
+              estimatedCostPrice: costPrice,
+              reason: 'No cost data available in API response'
+            });
+          } else {
+            console.log('⚠️ NO COST DATA AVAILABLE:', {
+              totalAmount,
+              hasCostPrice: !!(sale.cost_price),
+              hasCost: !!(sale.cost),
+              hasItems: !!(sale.items && sale.items.length > 0)
+            });
+          }
           
           const marginAmount = parseFloat(sale.margin_amount) || (totalAmount - costPrice);
-          const marginPercentage = parseFloat(sale.margin_percentage) || (costPrice > 0 ? (marginAmount / costPrice) * 100 : (totalAmount > 0 ? (marginAmount / totalAmount) * 100 : 0));
+          // Calculate margin percentage more accurately for individual sales
+          let marginPercentage;
+          if (costPrice > 0) {
+            // Markup percentage: (Profit / Cost) * 100
+            marginPercentage = (marginAmount / costPrice) * 100;
+          } else if (totalAmount > 0) {
+            // Margin percentage: (Profit / Revenue) * 100
+            marginPercentage = (marginAmount / totalAmount) * 100;
+          } else {
+            marginPercentage = 0;
+          }
           
           // Fix: Check refund status synchronously using the loaded data
           const saleId = sale.id || sale.receipt_number;
@@ -181,31 +248,74 @@ const SalesLedgerScreen = () => {
           const saleId = sale.id || sale.receipt_number;
           const isRefunded = !!(refundStatus[saleId] && refundStatus[saleId].refunded);
           
-          // Enhanced cost price calculation - handle different field names
+          // Enhanced cost price calculation with API cost data
           let costPrice = 0;
-          if (sale.cost_price !== undefined && sale.cost_price !== null) {
-            costPrice = parseFloat(sale.cost_price) || 0;
-          } else if (sale.cost !== undefined && sale.cost !== null) {
-            costPrice = parseFloat(sale.cost) || 0;
-          } else if (sale.items && sale.items.length > 0) {
-            // Calculate from items if available
+          
+          // Get selling price for calculations
+          const sellingPrice = parseFloat(sale.total_amount) || 0;
+          
+          // Method 1: Use cost prices from sale items (now includes product_cost_price)
+          if (sale.items && sale.items.length > 0) {
             costPrice = sale.items.reduce((itemSum, item) => {
-              const itemCost = parseFloat(item.cost_price) || parseFloat(item.cost) || 0;
+              // Use the product_cost_price from API (newly added)
+              const itemCost = parseFloat(item.product_cost_price) || 0;
               const quantity = parseFloat(item.quantity) || 1;
+              console.log('💰 API COST DATA:', {
+                itemName: item.product_name,
+                productCostPrice: item.product_cost_price,
+                quantity,
+                itemTotalCost: itemCost * quantity
+              });
               return itemSum + (itemCost * quantity);
             }, 0);
           }
+          // Method 2: Check direct cost_price field (legacy support)
+          else if (sale.cost_price !== undefined && sale.cost_price !== null && sale.cost_price !== '') {
+            costPrice = parseFloat(sale.cost_price) || 0;
+          }
+          // Method 3: Check alternative cost field (legacy support)
+          else if (sale.cost !== undefined && sale.cost !== null && sale.cost !== '') {
+            costPrice = parseFloat(sale.cost) || 0;
+          }
+          // Method 4: Fallback estimation only if no cost data available
+          else if (sellingPrice > 0) {
+            costPrice = sellingPrice * 0.6; // Estimate 60% cost (40% margin)
+            console.log('⚠️ FALLBACK COST ESTIMATION:', {
+              sellingPrice,
+              estimatedCostPrice: costPrice,
+              reason: 'No cost data available in API response'
+            });
+          }
           
-          const sellingPrice = parseFloat(sale.total_amount) || 0;
+          console.log('💰 FINAL COST CALCULATION:', {
+            receipt: sale.receipt_number || sale.id,
+            sellingPrice,
+            totalCostPrice: costPrice,
+            calculatedMargin: sellingPrice - costPrice,
+            marginPercentage: sellingPrice > 0 ? ((sellingPrice - costPrice) / sellingPrice) * 100 : 0
+          });
           
           // Debug individual sale calculation
-          if (sale.receipt_number === 'R005' || sale.id === 5) {
-            console.log('🔍 SALE R005 CALCULATION:', {
+          if (sale.receipt_number === 'R005' || sale.id === 5 || salesArray.length <= 5) {
+            console.log('🔍 SALE COST PRICE DEBUG:', {
+              receipt: sale.receipt_number || sale.id,
               sale,
               isRefunded,
               costPrice,
               sellingPrice,
-              calculatedMargin: sellingPrice - costPrice
+              calculatedMargin: sellingPrice - costPrice,
+              costPriceFields: {
+                cost_price: sale.cost_price,
+                cost: sale.cost,
+                items: sale.items?.map(item => ({
+                  name: item.name || item.product_name,
+                  cost_price: item.cost_price,
+                  cost: item.cost,
+                  unit_cost: item.unit_cost,
+                  purchase_price: item.purchase_price,
+                  quantity: item.quantity
+                }))
+              }
             });
           }
           
@@ -221,17 +331,28 @@ const SalesLedgerScreen = () => {
         }, { totalCostPrice: 0, totalSellingPrice: 0, totalRefunded: 0 });
         
         const totalMargin = totals.totalSellingPrice - totals.totalCostPrice;
-        const marginPercentage = totals.totalCostPrice > 0 
-          ? (totalMargin / totals.totalCostPrice) * 100 
-          : (totals.totalSellingPrice > 0 ? (totalMargin / totals.totalSellingPrice) * 100 : 0);
+        // Calculate margin percentage more accurately
+        let marginPercentage;
+        if (totals.totalCostPrice > 0) {
+          // Markup percentage: (Profit / Cost) * 100
+          marginPercentage = (totalMargin / totals.totalCostPrice) * 100;
+        } else if (totals.totalSellingPrice > 0) {
+          // Margin percentage: (Profit / Revenue) * 100  
+          marginPercentage = (totalMargin / totals.totalSellingPrice) * 100;
+        } else {
+          marginPercentage = 0;
+        }
           
         console.log('✅ FINANCIAL TOTALS CALCULATED:', {
           totalCostPrice: totals.totalCostPrice,
           totalSellingPrice: totals.totalSellingPrice,
           totalMargin,
           marginPercentage,
-          totalRefunded: totals.totalRefunded
+          totalRefunded: totals.totalRefunded,
+          costDataSource: totals.totalCostPrice > 0 ? 'actual' : 'estimated'
         });
+        
+        const costDataSource = totals.totalCostPrice > 0 ? 'actual' : 'estimated';
         
         setFinancialSummary({
           totalCostPrice: totals.totalCostPrice,
@@ -241,6 +362,7 @@ const SalesLedgerScreen = () => {
           refundCount: Object.keys(refundStats.refundsBySale || {}).length,
           totalMargin: totalMargin,
           marginPercentage: marginPercentage,
+          costDataSource: costDataSource,
         });
         
         console.log('✅ Financial summary calculated:', {
@@ -269,6 +391,7 @@ const SalesLedgerScreen = () => {
           refundCount: 0,
           totalMargin: 0,
           marginPercentage: 0,
+          costDataSource: 'unknown',
         });
         
         Alert.alert(
@@ -778,6 +901,8 @@ const SalesLedgerScreen = () => {
           <View style={styles.performanceSummary}>
             <Text style={styles.performanceSummaryText}>
               💰 Enterprise Analytics • {sales.length} Transactions • {(financialSummary.marginPercentage || 0).toFixed(1)}% Margin
+              {financialSummary.costDataSource === 'estimated' && ' • Cost prices estimated'}
+              {financialSummary.costDataSource === 'actual' && ' • Cost prices from sales data'}
             </Text>
           </View>
         </View>

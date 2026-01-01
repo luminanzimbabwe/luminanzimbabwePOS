@@ -14,8 +14,10 @@ import {
   UIManager
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from 'react-native-vector-icons/MaterialIcons';
 import { shopAPI } from '../services/api';
+import { shopStorage } from '../services/storage';
+import presenceService from '../services/presenceService';
 
 if (Platform.OS === 'android') {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -72,19 +74,20 @@ const EODProductionScreen = () => {
       // Step 2: Wait a moment for user to see the message
       await new Promise(resolve => setTimeout(resolve, 1500));
       
-      // Step 3: Logout user (clear any stored auth tokens)
-      // You would implement actual logout logic here
+      // Step 3: Set offline status before clearing credentials
+      presenceService.setOffline('shop_closed');
       
-      // Step 4: Navigate to login screen
-      // You would implement actual navigation logic here
+      // Step 4: Clear stored credentials
+      await shopStorage.clearCredentials();
       
-      // For immediate logout effect, reload the app
-      setTimeout(() => {
-        Alert.alert('Shop Closed', 'Please log in again for tomorrow.');
-        setClosing(false);
-      }, 2000);
+      // Step 5: Clean up presence service
+      presenceService.destroy();
+      
+      // Step 6: Navigate to login screen
+      navigation.replace('Login');
       
     } catch (error) {
+      console.error('Error during shop closing:', error);
       Alert.alert('Error', 'Failed to close shop properly. Please contact support.');
       setClosing(false);
     }
@@ -300,39 +303,16 @@ const EODProductionScreen = () => {
         </TouchableOpacity>
       </View>
       
-      {/* Ultimate Enterprise Command Center Header */}
-      <View style={styles.ultimateHeader}>
-        {/* Header Background Overlay */}
-        <View style={styles.headerBackgroundOverlay} />
-        
-        {/* Command Center Badge */}
-        <View style={styles.commandCenterBadge}>
-          <Icon name="military-tech" size={20} color="#fbbf24" />
-          <Text style={styles.commandCenterBadgeText}>COMMAND CENTER</Text>
-        </View>
-        
-        {/* Main Title */}
-        <Text style={styles.ultimateHeaderTitle}>🧮 EOD Reconciliation Command</Text>
-        
-        {/* Subtitle with Enhanced Styling */}
-        <View style={styles.ultimateHeaderSubtitleContainer}>
-          <Icon name="calculate" size={16} color="#8b5cf6" />
-          <Text style={styles.ultimateHeaderSubtitle}>Enterprise End-of-Day Financial Control</Text>
-          <Icon name="verified" size={16} color="#10b981" />
-        </View>
-        
-        {/* Real-time Status Indicator */}
-        <View style={styles.realtimeStatus}>
-          <View style={styles.statusDot} />
-          <Text style={styles.statusText}>Live Reconciliation Active</Text>
-          <Icon name="wifi" size={14} color="#10b981" />
-        </View>
-        
-        {/* Performance Summary */}
-        <View style={styles.performanceSummary}>
-          <Text style={styles.performanceSummaryText}>
-            📊 Daily Reconciliation • {totalCashiers} Cashiers • ${stats.actual.toLocaleString()} Total Verified
-          </Text>
+      {/* EOD Reconciliation Header */}
+      <View style={styles.eodHeader}>
+        <View style={styles.eodHeaderContent}>
+          <Icon name="calculate" size={32} color="#10b981" />
+          <Text style={styles.eodHeaderTitle}>End of Day Reconciliation</Text>
+          <Text style={styles.eodHeaderSubtitle}>Financial Summary for {new Date().toLocaleDateString()}</Text>
+          <View style={styles.eodStatusRow}>
+            <View style={styles.eodStatusDot} />
+            <Text style={styles.eodStatusText}>Active</Text>
+          </View>
         </View>
       </View>
 
@@ -391,30 +371,30 @@ const EODProductionScreen = () => {
         </View>
       </View>
 
-      {/* Enterprise Variance Analysis */}
-      <View style={[styles.section, styles.alertSection]}>
-        <Text style={styles.sectionTitle}>⚠️ Enterprise Variance Analysis</Text>
-        <View style={styles.alertCard}>
+      {/* Variance Analysis */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>⚠️ Variance Analysis</Text>
+        <View style={styles.varianceCard}>
           <Icon name="warning" size={24} color={varianceColor} />
-          <View style={styles.alertContent}>
-            <Text style={styles.alertTitle}>
+          <View style={styles.varianceContent}>
+            <Text style={styles.varianceTitle}>
               {stats.variance === 0 ? 'Perfect Balance' : stats.variance < 0 ? 'Cash Shortage' : 'Cash Overage'}
             </Text>
-            <Text style={[styles.alertValue, { color: varianceColor }]}>
+            <Text style={[styles.varianceAmount, { color: varianceColor }]}>
               ${Math.abs(stats.variance).toFixed(2)}
             </Text>
-            <Text style={styles.alertSubtitle}>
+            <Text style={styles.varianceSubtitle}>
               {stats.variance === 0 ? 'All counts match perfectly' : stats.variance < 0 ? 'Shortage detected' : 'Overpayment identified'}
             </Text>
           </View>
         </View>
         
-        {/* Enhanced Progress Bar */}
-        <View style={styles.enhancedProgressBar}>
-          <View style={styles.enhancedProgressBarBg}>
+        {/* Progress Bar */}
+        <View style={styles.progressBarContainer}>
+          <View style={styles.progressBarBg}>
             <View 
               style={[
-                styles.enhancedProgressBarFill, 
+                styles.progressBarFill, 
                 { 
                   width: `${progress * 100}%`,
                   backgroundColor: varianceColor
@@ -422,189 +402,106 @@ const EODProductionScreen = () => {
               ]} 
             />
           </View>
-          <Text style={styles.enhancedProgressText}>
+          <Text style={styles.progressText}>
             Verified {verifiedCount}/{totalCashiers} Cashiers ({Math.round(progress * 100)}%)
           </Text>
         </View>
       </View>
 
-      {/* Ultimate Cashier Performance Matrix */}
+      {/* Cashier Verification */}
       <View style={styles.section}>
-        <View style={styles.cashierSectionHeader}>
-          <Text style={styles.sectionTitle}>👥 Cashier Verification Matrix</Text>
-          <View style={styles.cashierStatusBadge}>
-            <Icon name="security" size={16} color="#10b981" />
-            <Text style={styles.cashierStatusText}>Financial Security</Text>
-          </View>
-        </View>
+        <Text style={styles.sectionTitle}>👥 Cashier Verification</Text>
         
-        <View style={styles.enhancedCashierGrid}>
+        <View style={styles.cashierList}>
           {drawerStatus?.drawers?.map((d, index) => {
             const verified = cashierCounts[d.cashier];
-            const performanceColor = verified ? '#10b981' : '#ef4444';
+            const statusColor = verified ? '#10b981' : '#ef4444';
             
             return (
               <TouchableOpacity
                 key={d.cashier}
                 style={[
-                  styles.enhancedCashierCard,
-                  { borderLeftColor: performanceColor },
-                  verified && styles.verifiedCashierCard
+                  styles.cashierCard,
+                  { borderLeftColor: statusColor }
                 ]}
                 onPress={() => openCashier(d.cashier)}
                 activeOpacity={0.7}
               >
-                <View style={styles.enhancedCashierHeader}>
-                  <View style={styles.cashierRankContainer}>
-                    <View style={[
-                      styles.cashierRankBadge, 
-                      { backgroundColor: performanceColor }
-                    ]}>
-                      <Text style={styles.cashierRankText}>#{index + 1}</Text>
-                    </View>
-                    <View style={styles.cashierNameContainer}>
-                      <Text style={styles.enhancedCashierName}>{d.cashier}</Text>
-                      <Text style={styles.cashierPerformanceDate}>Today • {verified ? 'Verified' : 'Pending'}</Text>
-                    </View>
+                <View style={styles.cashierHeader}>
+                  <View style={styles.cashierInfo}>
+                    <Text style={styles.cashierName}>{d.cashier}</Text>
+                    <Text style={styles.cashierStatus}>
+                      {verified ? 'Verified' : 'Pending'}
+                    </Text>
                   </View>
-                  <View style={[styles.cashierVerificationBadge, { backgroundColor: performanceColor}]}>
-                    <Icon name={verified ? "verified" : "pending"} size={16} color="#ffffff" />
+                  <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
+                    <Icon name={verified ? "check" : "pending"} size={16} color="#ffffff" />
                   </View>
                 </View>
                 
-                <View style={styles.enhancedCashierMetrics}>
-                  <View style={styles.cashierMetricRow}>
-                    <View style={styles.cashierMetricIconContainer}>
-                      <Icon name="attach-money" size={14} color={performanceColor} />
-                    </View>
-                    <View style={styles.cashierMetricContent}>
-                      <Text style={styles.cashierMetricLabel}>Cash Counted</Text>
-                      <Text style={[styles.cashierMetricValue, { color: performanceColor}]}>
-                        ${verified ? verified.cash.toFixed(2) : '0.00'}
-                      </Text>
-                    </View>
-                  </View>
-                  
-                  <View style={styles.cashierMetricRow}>
-                    <View style={styles.cashierMetricIconContainer}>
-                      <Icon name="card" size={14} color="#3b82f6" />
-                    </View>
-                    <View style={styles.cashierMetricContent}>
-                      <Text style={styles.cashierMetricLabel}>Card Payments</Text>
-                      <Text style={styles.cashierMetricValue}>
-                        ${verified ? verified.card.toFixed(2) : '0.00'}
-                      </Text>
-                    </View>
-                  </View>
-                  
-                  <View style={styles.cashierMetricRow}>
-                    <View style={styles.cashierMetricIconContainer}>
-                      <Icon name="smartphone" size={14} color="#8b5cf6" />
-                    </View>
-                    <View style={styles.cashierMetricContent}>
-                      <Text style={styles.cashierMetricLabel}>EcoCash</Text>
-                      <Text style={styles.cashierMetricValue}>
-                        ${verified ? verified.ecocash.toFixed(2) : '0.00'}
-                      </Text>
-                    </View>
-                  </View>
+                <View style={styles.cashierDetails}>
+                  <Text style={styles.cashierAmount}>
+                    Cash: ${verified ? verified.cash.toFixed(2) : '0.00'}
+                  </Text>
+                  <Text style={styles.cashierAmount}>
+                    Card: ${verified ? verified.card.toFixed(2) : '0.00'}
+                  </Text>
+                  <Text style={styles.cashierAmount}>
+                    EcoCash: ${verified ? verified.ecocash.toFixed(2) : '0.00'}
+                  </Text>
                 </View>
-                
-                {verified && (
-                  <View style={styles.cashierVerificationStats}>
-                    <View style={styles.cashierStatItem}>
-                      <Text style={styles.cashierStatLabel}>Total Verified</Text>
-                      <Text style={[styles.cashierStatValue, { color: performanceColor}]}>
-                        ${(verified.cash + verified.card + verified.ecocash).toFixed(2)}
-                      </Text>
-                    </View>
-                    <View style={styles.cashierStatItem}>
-                      <Text style={styles.cashierStatLabel}>Status</Text>
-                      <Text style={[styles.cashierStatValue, { color: performanceColor}]}>Complete</Text>
-                    </View>
-                  </View>
-                )}
               </TouchableOpacity>
             );
           })}
         </View>
         
-        <View style={styles.ultimateCashierSummary}>
-          <Text style={styles.ultimateCashierSummaryText}>
-            👥 Cashier Matrix • {verifiedCount}/{totalCashiers} Verified • 
-            Total Verified: ${Object.values(cashierCounts).reduce((sum, c) => sum + c.cash + c.card + c.ecocash, 0).toFixed(2)}
+        <View style={styles.cashierSummary}>
+          <Text style={styles.cashierSummaryText}>
+            {verifiedCount}/{totalCashiers} Cashiers Verified • 
+            Total: ${Object.values(cashierCounts).reduce((sum, c) => sum + c.cash + c.card + c.ecocash, 0).toFixed(2)}
           </Text>
         </View>
       </View>
 
-      {/* Ultimate Manager Notes & Finalization */}
+      {/* Manager Notes */}
       <View style={styles.section}>
-        <View style={styles.notesSectionHeader}>
-          <Text style={styles.sectionTitle}>📝 Manager Executive Notes</Text>
-          <View style={styles.notesStatusBadge}>
-            <Icon name="edit" size={16} color="#8b5cf6" />
-            <Text style={styles.notesStatusText}>Executive Summary</Text>
-          </View>
-        </View>
-        
-        <View style={styles.enhancedNotesCard}>
+        <Text style={styles.sectionTitle}>📝 Notes</Text>
+        <View style={styles.notesCard}>
           <TextInput
-            style={styles.enhancedNotesInput}
+            style={styles.notesInput}
             multiline
-            placeholder="Executive observations and notes for owner review..."
+            placeholder="Add notes about the day..."
             value={globalNotes}
             onChangeText={setGlobalNotes}
             placeholderTextColor="#6b7280"
           />
-          <View style={styles.notesMetadata}>
-            <Text style={styles.notesMetadataText}>
-              📅 {new Date().toLocaleDateString()} • 🔒 Manager Level Access • 💼 End-of-Day Documentation
-            </Text>
-          </View>
         </View>
       </View>
 
-      {/* Ultimate Finalization Command Center */}
-      <View style={styles.ultimateFinalizationSection}>
-        <View style={styles.ultimateFinalizationHeader}>
-          <Icon name="military-tech" size={24} color="#fbbf24" />
-          <Text style={styles.ultimateFinalizationTitle}>🏪 End of Day Finalization</Text>
-          <Icon name="security" size={24} color="#ef4444" />
-        </View>
-        
-        <View style={styles.ultimateFinalizationCard}>
-          <Text style={styles.ultimateFinalizationWarning}>
-            ⚠️ This action will finalize the day and log out all users
-          </Text>
-          <Text style={styles.ultimateFinalizationDetail}>
-            All cashier counts will be permanently saved and the shop will be closed for the day
+      {/* Finalization */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>🏪 End of Day Finalization</Text>
+        <View style={styles.finalizationCard}>
+          <Text style={styles.finalizationWarning}>
+            ⚠️ This will finalize the day and log out all users
           </Text>
           
-          <View style={styles.finalizationMetrics}>
-            <View style={styles.finalizationMetric}>
-              <Text style={styles.finalizationMetricLabel}>Verification Status</Text>
-              <Text style={[
-                styles.finalizationMetricValue, 
-                { color: verifiedCount === totalCashiers ? '#10b981' : '#ef4444' }
-              ]}>
-                {verifiedCount}/{totalCashiers} Complete
-              </Text>
-            </View>
-            <View style={styles.finalizationMetric}>
-              <Text style={styles.finalizationMetricLabel}>Financial Status</Text>
-              <Text style={[
-                styles.finalizationMetricValue,
-                { color: varianceColor }
-              ]}>
-                {stats.variance === 0 ? 'Balanced' : 'Variance Detected'}
-              </Text>
-            </View>
+          <View style={styles.finalizationStatus}>
+            <Text style={styles.finalizationStatusText}>
+              Verification: {verifiedCount}/{totalCashiers} Complete
+            </Text>
+            <Text style={[
+              styles.finalizationStatusText,
+              { color: varianceColor }
+            ]}>
+              Variance: ${Math.abs(stats.variance).toFixed(2)}
+            </Text>
           </View>
           
           <TouchableOpacity
             style={[
-              styles.ultimateFinalizeButton,
-              (verifiedCount !== totalCashiers || finalizing || closing) && styles.disabledUltimateButton
+              styles.finalizeButton,
+              (verifiedCount !== totalCashiers || finalizing || closing) && styles.disabledButton
             ]}
             disabled={verifiedCount !== totalCashiers || finalizing || closing}
             onPress={() => {
@@ -615,11 +512,9 @@ const EODProductionScreen = () => {
               finalizeDay();
             }}
           >
-            <Icon name="military-tech" size={20} color="#fff" />
-            <Text style={styles.ultimateFinalizeText}>
+            <Text style={styles.finalizeButtonText}>
               {closing ? 'CLOSING SHOP...' : finalizing ? 'FINALIZING...' : 'FINALIZE DAY'}
             </Text>
-            <Icon name="verified" size={20} color="#fff" />
           </TouchableOpacity>
         </View>
       </View>
@@ -861,112 +756,43 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
   },
 
-  // Ultimate Header Styles
-  ultimateHeader: {
+  // EOD Header Styles
+  eodHeader: {
     backgroundColor: '#1e293b',
     padding: 24,
-    paddingTop: 24,
-    position: 'relative',
-    overflow: 'hidden',
-    borderBottomWidth: 2,
+    paddingTop: 40,
+    borderBottomWidth: 1,
     borderBottomColor: '#374151',
   },
-  headerBackgroundOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
-    opacity: 0.95,
-  },
-  commandCenterBadge: {
-    flexDirection: 'row',
+  eodHeaderContent: {
     alignItems: 'center',
-    backgroundColor: 'rgba(251, 191, 36, 0.2)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 25,
-    borderWidth: 1,
-    borderColor: '#fbbf24',
-    alignSelf: 'flex-start',
-    marginBottom: 16,
-    elevation: 3,
-    shadowColor: '#fbbf24',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
   },
-  commandCenterBadgeText: {
-    color: '#fbbf24',
-    fontSize: 10,
-    fontWeight: 'bold',
-    marginLeft: 8,
-    letterSpacing: 1,
-  },
-  ultimateHeaderTitle: {
-    fontSize: 32,
+  eodHeaderTitle: {
+    fontSize: 24,
     fontWeight: 'bold',
     color: '#ffffff',
-    marginBottom: 12,
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
-    position: 'relative',
-    zIndex: 1,
+    marginTop: 12,
+    marginBottom: 8,
   },
-  ultimateHeaderSubtitleContainer: {
+  eodHeaderSubtitle: {
+    fontSize: 16,
+    color: '#94a3b8',
+    marginBottom: 12,
+  },
+  eodStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-    position: 'relative',
-    zIndex: 1,
   },
-  ultimateHeaderSubtitle: {
-    fontSize: 18,
-    color: '#e2e8f0',
-    marginHorizontal: 12,
-    fontWeight: '500',
-  },
-  realtimeStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-    position: 'relative',
-    zIndex: 1,
-  },
-  statusDot: {
+  eodStatusDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
     backgroundColor: '#10b981',
     marginRight: 8,
-    shadowColor: '#10b981',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 4,
   },
-  statusText: {
-    fontSize: 12,
+  eodStatusText: {
+    fontSize: 14,
     color: '#10b981',
-    fontWeight: '600',
-    marginRight: 8,
-  },
-  performanceSummary: {
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.3)',
-    position: 'relative',
-    zIndex: 1,
-  },
-  performanceSummaryText: {
-    fontSize: 13,
-    color: '#10b981',
-    textAlign: 'center',
     fontWeight: '600',
   },
   alertSection: {
@@ -1017,11 +843,175 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: 4,
   },
-  enhancedProgressText: {
+  // Variance Section Styles
+  varianceCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#f59e0b',
+  },
+  varianceContent: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  varianceTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 4,
+  },
+  varianceAmount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  varianceSubtitle: {
+    fontSize: 12,
+    color: '#94a3b8',
+  },
+  progressBarContainer: {
+    marginTop: 8,
+  },
+  progressBarBg: {
+    width: '100%',
+    height: 8,
+    backgroundColor: '#374151',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  progressText: {
     fontSize: 12,
     color: '#9ca3af',
     textAlign: 'center',
     fontWeight: '500',
+  },
+
+  // Cashier Section Styles
+  cashierList: {
+    gap: 12,
+  },
+  cashierCard: {
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    padding: 16,
+    borderLeftWidth: 4,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  cashierHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  cashierInfo: {
+    flex: 1,
+  },
+  cashierName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 4,
+  },
+  cashierStatus: {
+    fontSize: 12,
+    color: '#94a3b8',
+  },
+  statusBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cashierDetails: {
+    gap: 4,
+  },
+  cashierAmount: {
+    fontSize: 14,
+    color: '#e2e8f0',
+    fontWeight: '500',
+  },
+  cashierSummary: {
+    backgroundColor: '#1e293b',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  cashierSummaryText: {
+    fontSize: 14,
+    color: '#10b981',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+
+  // Notes Section Styles
+  notesCard: {
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    padding: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#8b5cf6',
+  },
+  notesInput: {
+    backgroundColor: '#374151',
+    borderRadius: 8,
+    padding: 12,
+    minHeight: 80,
+    color: '#ffffff',
+    fontSize: 14,
+    textAlignVertical: 'top',
+  },
+
+  // Finalization Section Styles
+  finalizationCard: {
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    padding: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: '#ef4444',
+  },
+  finalizationWarning: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#fca5a5',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  finalizationStatus: {
+    marginBottom: 20,
+    gap: 8,
+  },
+  finalizationStatusText: {
+    fontSize: 14,
+    color: '#e2e8f0',
+    textAlign: 'center',
+  },
+  finalizeButton: {
+    backgroundColor: '#ef4444',
+    borderRadius: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+  },
+  disabledButton: {
+    backgroundColor: '#6b7280',
+  },
+  finalizeButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 
   // Cashier Section Styles

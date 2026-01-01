@@ -233,6 +233,9 @@ class CashierLogoutView(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ProductListView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    
     def get(self, request):
         shop = ShopConfiguration.objects.get()
         products = Product.objects.filter(shop=shop)

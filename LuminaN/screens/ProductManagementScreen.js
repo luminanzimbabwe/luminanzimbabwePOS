@@ -804,7 +804,7 @@ const ProductManagementScreen = () => {
         price: parseFloat(newProduct.price),
         cost_price: parseFloat(newProduct.cost_price) || 0,
         category: newProduct.category,
-        barcode: newProduct.has_no_barcode ? null : newProduct.barcode.trim(),
+        barcode: newProduct.has_no_barcode ? '' : newProduct.barcode.trim(),
         additional_barcodes: newProduct.additional_barcodes ? 
           newProduct.additional_barcodes.split(',').map(b => b.trim()).filter(b => b) : [],
         stock_quantity: parseFloat(newProduct.stock_quantity) || 0,
@@ -910,7 +910,7 @@ const ProductManagementScreen = () => {
         price: parseFloat(editedProduct.price),
         cost_price: parseFloat(editedProduct.cost_price) || 0,
         category: editedProduct.category,
-        barcode: editedProduct.has_no_barcode ? null : editedProduct.barcode.trim(),
+        barcode: editedProduct.has_no_barcode ? '' : editedProduct.barcode.trim(),
         additional_barcodes: editedProduct.additional_barcodes ? 
           editedProduct.additional_barcodes.split(',').map(b => b.trim()).filter(b => b) : [],
         stock_quantity: parseFloat(editedProduct.stock_quantity) || 0,
@@ -1064,6 +1064,12 @@ const ProductManagementScreen = () => {
               style={[styles.headerActionButton, styles.restockButton]}
             >
               <Text style={styles.headerActionText}>📦</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              onPress={() => navigation.navigate(ROUTES.STOCK_TAKE)} 
+              style={[styles.headerActionButton, styles.stockTakeButton]}
+            >
+              <Text style={styles.headerActionText}>📋</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setBulkMode(true)} style={styles.headerActionButton}>
               <Text style={styles.headerActionText}>Select</Text>
@@ -2081,6 +2087,9 @@ const styles = StyleSheet.create({
   },
   restockButton: {
     backgroundColor: '#f59e0b',
+  },
+  stockTakeButton: {
+    backgroundColor: '#8b5cf6',
   },
   
   // Manual Refresh Bar at very top

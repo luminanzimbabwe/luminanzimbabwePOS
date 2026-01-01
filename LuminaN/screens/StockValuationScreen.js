@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -97,29 +98,21 @@ const StockValuationScreen = () => {
       if (productsData.length > 0) {
         // Process products to add calculated fields for stock valuation
         const processedProducts = productsData.map((product, index) => {
-          // Try multiple field names for stock data
+          // Use exact field names from ProductSerializer API response
           const stockUnits = parseFloat(
             product.stock_quantity || 
             product.current_stock || 
-            product.inventory || 
-            product.quantity || 
-            product.stock || 
             0
           );
           
-          // Try multiple field names for cost and price
+          // Use exact field names from ProductSerializer API response
           const unitCost = parseFloat(
             product.cost_price || 
-            product.cost || 
-            product.unit_cost || 
             0
           );
           
           const sellingPrice = parseFloat(
             product.price || 
-            product.sale_price || 
-            product.selling_price || 
-            product.retail_price || 
             0
           );
           
@@ -137,6 +130,8 @@ const StockValuationScreen = () => {
           const grossProfit = (sellingPrice - unitCost) * Math.max(0, stockUnits);
           const gpMargin = unitCost > 0 ? ((sellingPrice - unitCost) / unitCost * 100) : 0;
 
+
+          
           return {
             ...product,
             // Use the actual stock data
@@ -338,8 +333,8 @@ const StockValuationScreen = () => {
   };
 
   const getStockStatusStyle = (product) => {
-    const stockQuantity = parseFloat(product.stock_quantity) || 0;
-    const minStockLevel = parseFloat(product.min_stock_level) || 5;
+    const stockQuantity = parseFloat(product.stockUnits || product.stock_quantity || 0);
+    const minStockLevel = parseFloat(product.min_stock_level || product.minStockLevel || 5);
     
     if (stockQuantity === 0) {
       return { color: '#dc2626' }; // Red for out of stock
@@ -599,8 +594,8 @@ const StockValuationScreen = () => {
                 <Text style={[styles.cell, styles.colStock, getStockStatusStyle(product)]}>
                   {formatNumber(product.stockUnits)}
                 </Text>
-                <Text style={[styles.cell, styles.colMinStock]}>{formatNumber(parseFloat(product.min_stock_level) || 5)}</Text>
-                <Text style={[styles.cell, styles.colPriceType]}>{product.price_type || 'Per Unit'}</Text>
+                <Text style={[styles.cell, styles.colMinStock]}>{formatNumber(parseFloat(product.min_stock_level || product.minStockLevel || 5))}</Text>
+                <Text style={[styles.cell, styles.colPriceType]}>{product.price_type || product.priceType || 'Per Unit'}</Text>
                 <Text style={[styles.cell, styles.colStockValue]}>{formatCurrency(product.stockValue)}</Text>
                 <Text style={[styles.cell, styles.colGP, { color: product.grossProfit >= 0 ? '#22c55e' : '#dc2626' }]}>
                   {formatCurrency(product.grossProfit)}
@@ -684,7 +679,7 @@ const StockValuationScreen = () => {
         {totals.totalUnits === 0 && (
           <View style={styles.footerRow}>
             <Text style={styles.footerLabelNote}>NOTE:</Text>
-            <Text style={styles.footerNote}>Products show 0 stock. Check inventory levels.</Text>
+            <Text style={styles.footerNote}>Products show 0 stock in database. Add inventory or check stock levels.</Text>
           </View>
         )}
       </View>

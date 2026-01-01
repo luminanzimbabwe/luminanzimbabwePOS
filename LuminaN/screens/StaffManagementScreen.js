@@ -13,8 +13,10 @@ import {
   RefreshControl,
   Animated,
   Share,
+  Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import Icon from 'react-native-vector-icons/MaterialIcons';
 import { shopAPI } from '../services/api';
 import { shopStorage } from '../services/storage';
 import { ROUTES } from '../constants/navigation';
@@ -134,6 +136,73 @@ const StaffManagementScreen = () => {
     recentActivity: [],
     monthlyGrowth: 0,
   });
+
+  // Enhanced new states for advanced features
+  const [showNotificationsModal, setShowNotificationsModal] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [showAttendanceModal, setShowAttendanceModal] = useState(false);
+  const [showTrainingModal, setShowTrainingModal] = useState(false);
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [showDocumentsModal, setShowDocumentsModal] = useState(false);
+  const [showEmergencyModal, setShowEmergencyModal] = useState(false);
+  const [showSkillsModal, setShowSkillsModal] = useState(false);
+  const [showTimeTrackingModal, setShowTimeTrackingModal] = useState(false);
+  const [selectedStaffForAction, setSelectedStaffForAction] = useState(null);
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  // Schedule and attendance states
+  const [scheduleData, setScheduleData] = useState({
+    weeklySchedule: {},
+    timeOffRequests: [],
+    shiftSwaps: []
+  });
+  const [attendanceData, setAttendanceData] = useState({
+    clockInOut: {},
+    monthlyHours: {},
+    overtime: {},
+    attendanceRate: {}
+  });
+
+  // Training and skills states
+  const [trainingData, setTrainingData] = useState({
+    certifications: [],
+    trainingRecords: [],
+    skillAssessments: []
+  });
+
+  // Leave and document states
+  const [leaveData, setLeaveData] = useState({
+    vacationDays: {},
+    sickLeave: {},
+    leaveRequests: []
+  });
+  const [documentsData, setDocumentsData] = useState({
+    contracts: [],
+    performanceReviews: [],
+    personalDocuments: []
+  });
+
+  // Emergency contacts
+  const [emergencyContacts, setEmergencyContacts] = useState({});
+
+  // Time tracking
+  const [timeTracking, setTimeTracking] = useState({
+    dailyLogs: {},
+    weeklyHours: {},
+    productivity: {}
+  });
+
+  // Real-time updates
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(new Date());
+      // Auto-refresh notifications
+      loadNotifications();
+    }, 30000); // Update every 30 seconds
+
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     loadShopCredentials();
@@ -1177,16 +1246,14 @@ Signature: ___________________________`,
     }
   };
 
-  const renderStatCard = (title, value, icon, color, subtitle = '') => (
-    <View style={[styles.statCard, { borderLeftColor: color }]}>
-      <View style={styles.statIconContainer}>
-        <Text style={[styles.statIcon, { color }]}>{icon}</Text>
+  const renderMetricCard = (title, value, subtitle, color, icon) => (
+    <View style={[styles.metricCard, { borderLeftColor: color }]}>
+      <View style={styles.metricHeader}>
+        <Icon name={icon} size={24} color={color} />
+        <Text style={styles.metricTitle}>{title}</Text>
       </View>
-      <View style={styles.statContent}>
-        <Text style={styles.statValue}>{value}</Text>
-        <Text style={styles.statTitle}>{title}</Text>
-        {subtitle ? <Text style={styles.statSubtitle}>{subtitle}</Text> : null}
-      </View>
+      <Text style={styles.metricValue}>{value}</Text>
+      {subtitle && <Text style={styles.metricSubtitle}>{subtitle}</Text>}
     </View>
   );
 
@@ -1338,80 +1405,131 @@ Signature: ___________________________`,
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Text style={styles.backButton}>← Back</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Staff Management</Text>
-          <View style={styles.headerSpacer} />
-        </View>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#3b82f6" />
-          <Text style={styles.loadingText}>Loading staff dashboard...</Text>
-        </View>
+      <View style={styles.loadingContainer}>
+        <Text style={styles.loadingText}>Loading Staff Management...</Text>
       </View>
     );
   }
 
   return (
-    <Animated.View style={[styles.container, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
-      {/* Enhanced Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.backButton}>← Back</Text>
+    <ScrollView 
+      style={[styles.container, Platform.OS === 'web' && styles.webContainer]}
+      contentContainerStyle={styles.scrollContentContainer}
+      showsVerticalScrollIndicator={true}
+      scrollEventThrottle={16}
+      nestedScrollEnabled={Platform.OS === 'web'}
+      removeClippedSubviews={false}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+      }
+    >
+      {/* Header with Back Button */}
+      <View style={styles.headerWithBack}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Icon name="arrow-back" size={24} color="#fff" />
+          <Text style={styles.backButtonText}>Back</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>
-          {bulkMode ? `Select Staff (${selectedStaffIds.length})` : 'Staff Management'}
-        </Text>
-        <View style={styles.headerActions}>
-          {bulkMode ? (
-            <>
-              <TouchableOpacity onPress={selectAllStaff}>
-                <Text style={styles.headerActionButton}>Select All</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={deselectAllStaff}>
-                <Text style={styles.headerActionButton}>Deselect All</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={toggleBulkMode}>
-                <Text style={styles.cancelBulkButton}>Cancel</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <TouchableOpacity onPress={toggleBulkMode}>
-                <Text style={styles.bulkModeButton}>☑️ Bulk</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={onRefresh}>
-                <Text style={styles.refreshButton}>🔄</Text>
-              </TouchableOpacity>
-            </>
-          )}
+        <TouchableOpacity onPress={onRefresh} style={styles.refreshButton}>
+          <Icon name="refresh" size={24} color="#fff" />
+        </TouchableOpacity>
+      </View>
+      
+      {/* Ultimate Enterprise Command Center Header */}
+      <View style={styles.ultimateHeader}>
+        {/* Header Background Overlay */}
+        <View style={styles.headerBackgroundOverlay} />
+        
+        {/* Command Center Badge */}
+        <View style={styles.commandCenterBadge}>
+          <Icon name="military-tech" size={20} color="#fbbf24" />
+          <Text style={styles.commandCenterBadgeText}>COMMAND CENTER</Text>
+        </View>
+        
+        {/* Main Title */}
+        <Text style={styles.ultimateHeaderTitle}>🚀 2080 Staff Management Center</Text>
+        
+        {/* Subtitle with Enhanced Styling */}
+        <View style={styles.ultimateHeaderSubtitleContainer}>
+          <Icon name="people" size={16} color="#8b5cf6" />
+          <Text style={styles.ultimateHeaderSubtitle}>Enterprise HR Management Dashboard</Text>
+          <Icon name="auto-awesome" size={16} color="#10b981" />
+        </View>
+        
+        {/* Premium Growth Metrics */}
+        <View style={styles.ultimateGrowthMetrics}>
+          <View style={styles.growthMetricCard}>
+            <View style={styles.growthMetricIconContainer}>
+              <Icon name="group" size={16} color="#10b981" />
+            </View>
+            <View style={styles.growthMetricContent}>
+              <Text style={styles.growthMetricLabel}>Total Staff</Text>
+              <Text style={styles.growthMetricValue}>{staffStats.totalStaff}</Text>
+            </View>
+            <View style={styles.growthTrendIndicator}>
+              <Icon name="trending-up" size={14} color="#10b981" />
+            </View>
+          </View>
+          
+          <View style={styles.growthMetricCard}>
+            <View style={styles.growthMetricIconContainer}>
+              <Icon name="verified-user" size={16} color="#3b82f6" />
+            </View>
+            <View style={styles.growthMetricContent}>
+              <Text style={styles.growthMetricLabel}>Active Staff</Text>
+              <Text style={styles.growthMetricValue}>{approvedStaff.length}</Text>
+            </View>
+            <View style={styles.growthTrendIndicator}>
+              <Icon name="trending-up" size={14} color="#10b981" />
+            </View>
+          </View>
+        </View>
+        
+        {/* Real-time Status Indicator */}
+        <View style={styles.realtimeStatus}>
+          <View style={styles.statusDot} />
+          <Text style={styles.statusText}>Live HR Analytics Active</Text>
+          <Icon name="wifi" size={14} color="#10b981" />
+        </View>
+        
+        {/* Performance Summary */}
+        <View style={styles.performanceSummary}>
+          <Text style={styles.performanceSummaryText}>
+            🏆 Elite Performance • {approvedStaff.length} Active • {staffStats.pendingApprovals} Pending • Avg Tenure: {staffStats.avgTenure} months
+          </Text>
         </View>
       </View>
 
       {/* Bulk Actions Bar */}
       {bulkMode && selectedStaffIds.length > 0 && (
-        <View style={styles.bulkActionsBar}>
-          <Text style={styles.bulkActionsText}>
-            {selectedStaffIds.length} staff selected
-          </Text>
-          <View style={styles.bulkActionButtons}>
-            {selectedFilter === 'pending' && (
-              <>
-                <TouchableOpacity style={styles.bulkApproveButton} onPress={bulkApprove}>
-                  <Text style={styles.bulkButtonText}>✅ Approve All</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.bulkRejectButton} onPress={bulkReject}>
-                  <Text style={styles.bulkButtonText}>❌ Reject All</Text>
-                </TouchableOpacity>
-              </>
-            )}
-            {selectedFilter === 'active' && (
-              <TouchableOpacity style={styles.bulkDeactivateButton} onPress={bulkDeactivate}>
-                <Text style={styles.bulkButtonText}>🚫 Deactivate All</Text>
-              </TouchableOpacity>
-            )}
+        <View style={[styles.section, styles.alertSection]}>
+          <Text style={styles.sectionTitle}>📋 Bulk Actions</Text>
+          <View style={styles.alertCard}>
+            <Icon name="group" size={24} color="#3b82f6" />
+            <View style={styles.alertContent}>
+              <Text style={styles.alertTitle}>
+                {selectedStaffIds.length} Staff Selected
+              </Text>
+              <Text style={styles.alertSubtitle}>
+                Choose bulk action for selected staff members
+              </Text>
+              <View style={styles.bulkActionButtons}>
+                {selectedFilter === 'pending' && (
+                  <>
+                    <TouchableOpacity style={styles.bulkApproveButton} onPress={bulkApprove}>
+                      <Text style={styles.bulkButtonText}>✅ Approve All</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.bulkRejectButton} onPress={bulkReject}>
+                      <Text style={styles.bulkButtonText}>❌ Reject All</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+                {selectedFilter === 'active' && (
+                  <TouchableOpacity style={styles.bulkDeactivateButton} onPress={bulkDeactivate}>
+                    <Text style={styles.bulkButtonText}>🚫 Deactivate All</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
           </View>
         </View>
       )}
@@ -1422,95 +1540,144 @@ Signature: ___________________________`,
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {/* Enhanced Statistics Cards */}
-        <View style={styles.statsContainer}>
-          <View style={styles.sectionHeaderContainer}>
-            <Text style={styles.sectionHeader}>📊 Staff Overview</Text>
-            <Text style={styles.sectionSubtitle}>Real-time workforce statistics</Text>
-          </View>
-          
-          <View style={styles.statsGrid}>
-            <View style={styles.statsRow}>
-              {renderStatCard('Total Staff', staffStats.totalStaff, '👥', '#3b82f6')}
-              {renderStatCard('Pending Approval', staffStats.pendingApprovals, '⏳', '#f59e0b')}
-            </View>
-            <View style={styles.statsRow}>
-              {renderStatCard('New This Week', staffStats.newThisWeek, '🆕', '#10b981')}
-              {renderStatCard('Active Today', staffStats.activeToday, '🔥', '#ef4444')}
-            </View>
-            <View style={styles.statsRow}>
-              {renderStatCard('Avg Tenure', `${staffStats.avgTenure} months`, '📅', '#8b5cf6')}
-              {renderStatCard('Turnover Rate', `${staffStats.turnoverRate}%`, '📈', '#f97316')}
-            </View>
-            <View style={styles.statsRow}>
-              {renderStatCard('Departments', staffStats.departmentCount, '🏢', '#06b6d4')}
-              {renderStatCard('Active Staff', approvedStaff.length, '✅', '#22c55e')}
-            </View>
+      {/* Enterprise Key Metrics */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>💰 Enterprise Staff Overview</Text>
+        <View style={styles.metricsGrid}>
+          {renderMetricCard(
+            'Total Staff',
+            staffStats.totalStaff.toString(),
+            'All team members',
+            '#3b82f6',
+            'group'
+          )}
+          {renderMetricCard(
+            'Pending Approval',
+            staffStats.pendingApprovals.toString(),
+            'Awaiting review',
+            '#f59e0b',
+            'schedule'
+          )}
+          {renderMetricCard(
+            'Active Staff',
+            approvedStaff.length.toString(),
+            'Currently working',
+            '#10b981',
+            'verified-user'
+          )}
+          {renderMetricCard(
+            'New This Week',
+            staffStats.newThisWeek.toString(),
+            'Recent additions',
+            '#8b5cf6',
+            'person-add'
+          )}
+        </View>
+      </View>
+
+      {/* Enterprise Additional Metrics */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>📈 Advanced HR Metrics</Text>
+        <View style={styles.metricsGrid}>
+          {renderMetricCard(
+            'Avg Tenure',
+            `${staffStats.avgTenure} months`,
+            'Team experience',
+            '#06b6d4',
+            'timeline'
+          )}
+          {renderMetricCard(
+            'Turnover Rate',
+            `${staffStats.turnoverRate}%`,
+            'Staff retention',
+            '#f97316',
+            'trending-down'
+          )}
+          {renderMetricCard(
+            'Departments',
+            staffStats.departmentCount.toString(),
+            'Organizational units',
+            '#8b5cf6',
+            'business'
+          )}
+          {renderMetricCard(
+            'Growth Rate',
+            `${analyticsData.monthlyGrowth >= 0 ? '+' : ''}${analyticsData.monthlyGrowth}%`,
+            'Monthly expansion',
+            '#10b981',
+            'trending-up'
+          )}
+        </View>
+      </View>
+
+      {/* Enterprise Quick Actions */}
+      <View style={styles.section}>
+        <View style={styles.categorySectionHeader}>
+          <Text style={styles.sectionTitle}>⚡ Enterprise Quick Actions</Text>
+          <View style={styles.categoryStatusBadge}>
+            <Icon name="touch-app" size={16} color="#8b5cf6" />
+            <Text style={styles.categoryStatusText}>Fast Access Tools</Text>
           </View>
         </View>
+        
+        <View style={styles.quickActionsGrid}>
+          {renderQuickAction(
+            'View All Staff',
+            '👥',
+            '#3b82f6',
+            () => setShowStaffListModal(true),
+            `${staffStats.totalStaff} total members`
+          )}
+          {renderQuickAction(
+            'Manage Pending',
+            '⏳',
+            '#f59e0b',
+            () => {
+              setSelectedFilter('pending');
+              setShowStaffListModal(true);
+            },
+            `${staffStats.pendingApprovals} waiting approval`
+          )}
+          {renderQuickAction(
+            'Staff Analytics',
+            '📈',
+            '#8b5cf6',
+            handleViewAnalytics,
+            'View detailed reports'
+          )}
+          {renderQuickAction(
+            'Performance',
+            '📊',
+            '#10b981',
+            () => setShowPerformanceModal(true),
+            'Sales & attendance metrics'
+          )}
+          {renderQuickAction(
+            'Staff Directory',
+            '📞',
+            '#ec4899',
+            () => setShowDirectoryModal(true),
+            'Contact list & details'
+          )}
+          {renderQuickAction(
+            'Export Staff List',
+            '📤',
+            '#06b6d4',
+            handleExportStaff,
+            'Download staff data'
+          )}
+        </View>
+      </View>
 
-        {/* Enhanced Quick Actions */}
-        <View style={styles.quickActionsContainer}>
-          <View style={styles.sectionHeaderContainer}>
-            <Text style={styles.sectionHeader}>⚡ Quick Actions</Text>
-            <Text style={styles.sectionSubtitle}>Fast access to common tasks</Text>
-          </View>
-          
-          <View style={styles.quickActionsGrid}>
-            {renderQuickAction(
-              'View All Staff',
-              '👥',
-              '#3b82f6',
-              () => setShowStaffListModal(true),
-              `${staffStats.totalStaff} total members`
-            )}
-            {renderQuickAction(
-              'Manage Pending',
-              '⏳',
-              '#f59e0b',
-              () => {
-                setSelectedFilter('pending');
-                setShowStaffListModal(true);
-              },
-              `${staffStats.pendingApprovals} waiting approval`
-            )}
-            {renderQuickAction(
-              'Staff Analytics',
-              '📈',
-              '#8b5cf6',
-              handleViewAnalytics,
-              'View detailed reports'
-            )}
-            {renderQuickAction(
-              'Performance',
-              '📊',
-              '#10b981',
-              () => setShowPerformanceModal(true),
-              'Sales & attendance metrics'
-            )}
-            {renderQuickAction(
-              'Staff Directory',
-              '📞',
-              '#ec4899',
-              () => setShowDirectoryModal(true),
-              'Contact list & details'
-            )}
-            {renderQuickAction(
-              'Export Staff List',
-              '📤',
-              '#06b6d4',
-              handleExportStaff,
-              'Download staff data'
-            )}
+      {/* Enhanced Search and Filter */}
+      <View style={styles.section}>
+        <View style={styles.categorySectionHeader}>
+          <Text style={styles.sectionTitle}>🔍 Search & Filter</Text>
+          <View style={styles.categoryStatusBadge}>
+            <Icon name="search" size={16} color="#3b82f6" />
+            <Text style={styles.categoryStatusText}>Quick Find</Text>
           </View>
         </View>
-
-        {/* Enhanced Search and Filter */}
-        <View style={styles.searchContainer}>
-          <View style={styles.sectionHeaderContainer}>
-            <Text style={styles.sectionHeader}>🔍 Search & Filter</Text>
-            <Text style={styles.sectionSubtitle}>Find staff members quickly</Text>
-          </View>
           
           <View style={styles.searchInputContainer}>
             <View style={styles.searchInputWrapper}>
@@ -1688,57 +1855,64 @@ Signature: ___________________________`,
           )}
         </View>
 
-        {/* Always Show Staff List Section */}
-        <View style={styles.searchResultsContainer}>
-          <Text style={styles.sectionHeader}>
-            👥 All Staff Members ({filteredStaff.length})
-          </Text>
-          <ScrollView horizontal style={styles.searchResultsScroll}>
-            {filteredStaff.length > 0 ? (
-              filteredStaff.map(staff => renderStaffCard(staff))
-            ) : (
-              <View style={styles.noResultsContainer}>
-                <Text style={styles.noResultsText}>
-                  {searchQuery.trim() ? 
-                    `No staff found for "${searchQuery}"` : 
-                    selectedFilter !== 'all' ? 
-                      `No ${selectedFilter} staff members found` : 
-                      'No staff members found'
-                  }
-                </Text>
-              </View>
-            )}
-          </ScrollView>
+      {/* Always Show Staff List Section */}
+      <View style={styles.section}>
+        <View style={styles.categorySectionHeader}>
+          <Text style={styles.sectionTitle}>👥 Staff Directory</Text>
+          <View style={styles.categoryStatusBadge}>
+            <Icon name="list" size={16} color="#10b981" />
+            <Text style={styles.categoryStatusText}>{filteredStaff.length} Members</Text>
+          </View>
         </View>
+        
+        {filteredStaff.length > 0 ? (
+          filteredStaff.map(staff => renderStaffCard(staff))
+        ) : (
+          <View style={styles.noResultsContainer}>
+            <Icon name="people-outline" size={48} color="#64748b" />
+            <Text style={styles.noResultsText}>
+              {searchQuery.trim() ? 
+                `No staff found for "${searchQuery}"` : 
+                selectedFilter !== 'all' ? 
+                  `No ${selectedFilter} staff members found` : 
+                  'No staff members found'
+              }
+            </Text>
+          </View>
+        )}
+      </View>
 
-        {/* Recent Activity */}
-        <View style={styles.recentActivityContainer}>
-          <View style={styles.sectionHeaderContainer}>
-            <Text style={styles.sectionHeader}>🕒 Recent Activity</Text>
-            <Text style={styles.sectionSubtitle}>Latest staff updates and changes</Text>
-          </View>
-          
-          <View style={styles.activityCard}>
-            <View style={styles.activityItemContainer}>
-              <Text style={styles.activityIcon}>📝</Text>
-              <Text style={styles.activityItem}>
-                {pendingStaff.length} new staff registration{pendingStaff.length !== 1 ? 's' : ''} pending approval
-              </Text>
-            </View>
-            <View style={styles.activityItemContainer}>
-              <Text style={styles.activityIcon}>✅</Text>
-              <Text style={styles.activityItem}>
-                {approvedStaff.length} staff member{approvedStaff.length !== 1 ? 's' : ''} currently active
-              </Text>
-            </View>
-            <View style={styles.activityItemContainer}>
-              <Text style={styles.activityIcon}>🚫</Text>
-              <Text style={styles.activityItem}>
-                {inactiveStaff.length} staff member{inactiveStaff.length !== 1 ? 's' : ''} inactive
-              </Text>
-            </View>
+      {/* Recent Activity */}
+      <View style={styles.section}>
+        <View style={styles.categorySectionHeader}>
+          <Text style={styles.sectionTitle}>🕒 Recent Activity</Text>
+          <View style={styles.categoryStatusBadge}>
+            <Icon name="timeline" size={16} color="#f59e0b" />
+            <Text style={styles.categoryStatusText}>Live Updates</Text>
           </View>
         </View>
+        
+        <View style={styles.activityCard}>
+          <View style={styles.activityItemContainer}>
+            <Icon name="schedule" size={20} color="#f59e0b" />
+            <Text style={styles.activityItem}>
+              {pendingStaff.length} new staff registration{pendingStaff.length !== 1 ? 's' : ''} pending approval
+            </Text>
+          </View>
+          <View style={styles.activityItemContainer}>
+            <Icon name="verified-user" size={20} color="#10b981" />
+            <Text style={styles.activityItem}>
+              {approvedStaff.length} staff member{approvedStaff.length !== 1 ? 's' : ''} currently active
+            </Text>
+          </View>
+          <View style={styles.activityItemContainer}>
+            <Icon name="person-off" size={20} color="#ef4444" />
+            <Text style={styles.activityItem}>
+              {inactiveStaff.length} staff member{inactiveStaff.length !== 1 ? 's' : ''} inactive
+            </Text>
+          </View>
+        </View>
+      </View>
 
         {/* Toggle Inactive */}
         <View style={styles.toggleContainer}>
@@ -3260,62 +3434,1696 @@ Signature: ___________________________`,
           </View>
         </View>
       </Modal>
-    </Animated.View>
+      
+      {/* Bottom padding for web scrolling and task bar clearance */}
+      <View style={{ 
+        height: Platform.OS === 'web' ? 120 : 40, // Increased padding for task bar
+        minHeight: Platform.OS === 'web' ? 120 : 40
+      }} />
+    </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: '#0a0a0a' 
+  container: {
+    flex: 1,
+    backgroundColor: '#0f172a',
+    ...Platform.select({
+      web: {
+        height: '100vh',
+        overflow: 'auto',
+        WebkitOverflowScrolling: 'auto',
+        scrollBehavior: 'smooth',
+      },
+    }),
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  webContainer: {
+    ...Platform.select({
+      web: {
+        height: '100vh',
+        maxHeight: '100vh',
+        overflow: 'auto',
+        WebkitOverflowScrolling: 'auto',
+        scrollBehavior: 'smooth',
+      },
+    }),
+  },
+  scrollContentContainer: {
+    flexGrow: 1,
+    paddingBottom: Platform.OS === 'web' ? 100 : 0,
+    ...Platform.select({
+      web: {
+        minHeight: '100vh',
+        width: '100%',
+        flexGrow: 1,
+      },
+    }),
+  },
+  headerWithBack: {
+    backgroundColor: '#1e293b',
     padding: 16,
-    backgroundColor: '#1a1a1a',
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
-  },
-  backButton: { color: '#3b82f6', fontSize: 16 },
-  refreshButton: { color: '#3b82f6', fontSize: 18 },
-  headerTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  headerSpacer: { width: 40 },
-  headerActions: {
+    paddingTop: 40,
     flexDirection: 'row',
     alignItems: 'center',
   },
-  headerActionButton: {
-    color: '#3b82f6',
-    fontSize: 12,
-    marginHorizontal: 8,
-    fontWeight: 'bold',
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 8,
   },
-  bulkModeButton: {
-    color: '#3b82f6',
+  backButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  refreshButton: {
+    padding: 8,
+    marginLeft: 'auto',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#0f172a',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#64748b',
+  },
+
+  // Ultimate Header Styles
+  ultimateHeader: {
+    backgroundColor: '#1e293b',
+    padding: 24,
+    paddingTop: 24,
+    position: 'relative',
+    overflow: 'hidden',
+    borderBottomWidth: 2,
+    borderBottomColor: '#374151',
+  },
+  headerBackgroundOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+    opacity: 0.95,
+  },
+  commandCenterBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(251, 191, 36, 0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 25,
+    borderWidth: 1,
+    borderColor: '#fbbf24',
+    alignSelf: 'flex-start',
+    marginBottom: 16,
+    elevation: 3,
+    shadowColor: '#fbbf24',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  commandCenterBadgeText: {
+    color: '#fbbf24',
+    fontSize: 10,
+    fontWeight: 'bold',
+    marginLeft: 8,
+    letterSpacing: 1,
+  },
+  ultimateHeaderTitle: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 12,
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+    position: 'relative',
+    zIndex: 1,
+  },
+  ultimateHeaderSubtitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+    position: 'relative',
+    zIndex: 1,
+  },
+  ultimateHeaderSubtitle: {
+    fontSize: 18,
+    color: '#e2e8f0',
+    marginHorizontal: 12,
+    fontWeight: '500',
+  },
+  ultimateGrowthMetrics: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    position: 'relative',
+    zIndex: 1,
+  },
+  growthMetricCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 12,
+    padding: 12,
+    flex: 1,
+    marginHorizontal: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  growthMetricIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  growthMetricContent: {
+    flex: 1,
+  },
+  growthMetricLabel: {
+    fontSize: 11,
+    color: '#94a3b8',
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  growthMetricValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+  growthTrendIndicator: {
+    marginLeft: 8,
+  },
+  realtimeStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    position: 'relative',
+    zIndex: 1,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#10b981',
+    marginRight: 8,
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 4,
+  },
+  statusText: {
+    fontSize: 12,
+    color: '#10b981',
+    fontWeight: '600',
+    marginRight: 8,
+  },
+  performanceSummary: {
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+    position: 'relative',
+    zIndex: 1,
+  },
+  performanceSummaryText: {
+    fontSize: 13,
+    color: '#10b981',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+
+  section: {
+    padding: 16,
+    marginBottom: 8,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#f1f5f9',
+    marginBottom: 12,
+  },
+  metricsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  metricCard: {
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    width: '48%',
+    borderLeftWidth: 4,
+    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
+    elevation: 4,
+  },
+  metricHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  metricTitle: {
+    fontSize: 12,
+    color: '#e2e8f0',
+    marginLeft: 8,
+    fontWeight: '500',
+  },
+  metricValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 4,
+  },
+  metricSubtitle: {
+    fontSize: 11,
+    color: '#94a3b8',
+  },
+
+  // Category Section Header Styles
+  categorySectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  categoryStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+  },
+  categoryStatusText: {
+    color: '#8b5cf6',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+
+  // Quick Actions Grid
+  quickActionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+
+  // Alert Section Styles
+  alertSection: {
+    backgroundColor: 'rgba(59, 130, 246, 0.05)',
+    margin: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.2)',
+  },
+  alertCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1e293b',
+    borderRadius: 8,
+    padding: 16,
+  },
+  alertContent: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  alertTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#f1f5f9',
+    marginBottom: 4,
+  },
+  alertSubtitle: {
+    fontSize: 12,
+    color: '#94a3b8',
+    marginBottom: 8,
+  },
+
+  // Activity Card Styles
+  activityCard: {
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    padding: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#3b82f6',
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+    elevation: 3,
+  },
+  activityItemContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  activityItem: {
+    color: '#e2e8f0',
+    fontSize: 14,
+    flex: 1,
+    marginLeft: 12,
+  },
+
+  // No Results Container
+  noResultsContainer: {
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    padding: 32,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  noResultsText: {
+    color: '#94a3b8',
+    fontSize: 16,
+    textAlign: 'center',
+    marginTop: 12,
+  },
+
+  // Bulk Action Buttons
+  bulkActionButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
+  bulkApproveButton: {
+    backgroundColor: '#10b981',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+  },
+  bulkRejectButton: {
+    backgroundColor: '#ef4444',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+  },
+  bulkDeactivateButton: {
+    backgroundColor: '#f59e0b',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+  },
+  bulkButtonText: {
+    color: '#fff',
     fontSize: 14,
     fontWeight: 'bold',
   },
-  cancelBulkButton: {
-    color: '#ef4444',
+
+  // Search and Filter Styles
+  searchInputContainer: {
+    marginBottom: 16,
+  },
+  searchInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  searchInput: {
+    flex: 1,
+    padding: 16,
+    color: '#ffffff',
+    fontSize: 16,
+  },
+  clearSearchButton: {
+    padding: 16,
+    paddingLeft: 8,
+  },
+  clearSearchButtonText: {
+    color: '#94a3b8',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  filterContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  filterButton: {
+    backgroundColor: '#1e293b',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  filterButtonActive: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#3b82f6',
+  },
+  filterButtonText: {
+    color: '#94a3b8',
     fontSize: 12,
     fontWeight: 'bold',
   },
-  loadingContainer: { 
-    flex: 1, 
-    justifyContent: 'center', 
+  filterButtonTextActive: {
+    color: '#ffffff',
+  },
+
+  // Advanced Filters Styles
+  advancedFiltersContainer: {
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  advancedFiltersTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 16,
+  },
+  advancedFilterRow: {
+    marginBottom: 16,
+  },
+  advancedFilterGroup: {
+    marginBottom: 8,
+  },
+  advancedFilterLabel: {
+    color: '#e2e8f0',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  advancedFilterButtons: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  advancedFilterButton: {
+    backgroundColor: '#374151',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  advancedFilterButtonActive: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#3b82f6',
+  },
+  advancedFilterButtonText: {
+    color: '#d1d5db',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  advancedFilterButtonTextActive: {
+    color: '#ffffff',
+  },
+  clearFiltersButton: {
+    backgroundColor: '#6b7280',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
     alignItems: 'center',
-    backgroundColor: '#0a0a0a'
+    marginTop: 8,
   },
-  loadingText: { 
-    color: '#fff', 
+  clearFiltersButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+
+  // Staff Card Styles
+  staffCard: {
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#374151',
+    borderLeftWidth: 4,
+    borderLeftColor: '#3b82f6',
+  },
+  staffCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  staffAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#3b82f6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  staffAvatarText: {
+    color: '#ffffff',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  staffInfo: {
+    flex: 1,
+  },
+  staffName: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  staffEmail: {
+    color: '#94a3b8',
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  staffPhone: {
+    color: '#94a3b8',
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  staffShift: {
+    color: '#64748b',
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  staffRole: {
+    color: '#64748b',
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  staffDepartment: {
+    color: '#64748b',
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  statusBadge: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+  },
+  pendingBadge: {
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+  },
+  activeBadge: {
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+  },
+  inactiveBadge: {
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+  },
+  statusBadgeText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+  actionContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  actionButton: {
+    backgroundColor: '#3b82f6',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginHorizontal: 2,
+    marginVertical: 2,
+    minWidth: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  approveAction: {
+    backgroundColor: '#10b981',
+  },
+  rejectAction: {
+    backgroundColor: '#ef4444',
+  },
+  deactivateAction: {
+    backgroundColor: '#f59e0b',
+  },
+  deleteAction: {
+    backgroundColor: '#dc2626',
+  },
+  reactivateAction: {
+    backgroundColor: '#8b5cf6',
+  },
+  quickEditAction: {
+    backgroundColor: '#06b6d4',
+  },
+  contractAction: {
+    backgroundColor: '#f97316',
+  },
+
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContainer: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    padding: 20,
+    width: '100%',
+    maxWidth: 400,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  staffListModalContainer: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    padding: 20,
+    width: '100%',
+    maxWidth: 600,
+    maxHeight: '90%',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  contractModalContainer: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    padding: 20,
+    width: '100%',
+    maxWidth: 500,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  analyticsModalContainer: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    padding: 20,
+    width: '100%',
+    maxWidth: 500,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  directoryModalContainer: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    padding: 20,
+    width: '100%',
+    maxWidth: 600,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  performanceModalContainer: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    padding: 20,
+    width: '100%',
+    maxWidth: 700,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  editModalContainer: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    padding: 20,
+    width: '100%',
+    maxWidth: 500,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  modalTitle: {
+    color: '#ffffff',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  modalDescription: {
+    color: '#94a3b8',
+    fontSize: 14,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+
+  // Staff List Modal
+  staffListContent: {
+    flex: 1,
+  },
+  staffListContentContainer: {
+    paddingBottom: 20,
+  },
+  emptyState: {
+    alignItems: 'center',
+    padding: 40,
+  },
+  emptyTitle: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  emptyText: {
+    color: '#64748b',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  closeModalButton: {
+    backgroundColor: '#3b82f6',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    alignItems: 'center',
     marginTop: 16,
-    fontSize: 16
   },
-  content: { 
-    flex: 1 
+  closeModalButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
+
+  // Form Styles
+  formSection: {
+    marginBottom: 24,
+  },
+  formSectionTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  formField: {
+    marginBottom: 16,
+  },
+  formLabel: {
+    color: '#e2e8f0',
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  formInput: {
+    backgroundColor: '#374151',
+    borderRadius: 8,
+    padding: 12,
+    color: '#ffffff',
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+
+  // Contract Form
+  contractFormContent: {
+    flex: 1,
+  },
+  contractFormContentContainer: {
+    paddingBottom: 20,
+  },
+
+  // Edit Form
+  editFormContent: {
+    flex: 1,
+  },
+  editFormContentContainer: {
+    paddingBottom: 20,
+  },
+
+  // Analytics Styles
+  analyticsContent: {
+    flex: 1,
+  },
+  analyticsContentContainer: {
+    paddingBottom: 20,
+  },
+  analyticsSection: {
+    marginBottom: 24,
+  },
+  analyticsSectionTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  analyticsStatsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  analyticsStatCard: {
+    backgroundColor: '#374151',
+    borderRadius: 12,
+    padding: 16,
+    width: '48%',
+    alignItems: 'center',
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  analyticsStatNumber: {
+    color: '#ffffff',
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  analyticsStatLabel: {
+    color: '#94a3b8',
+    fontSize: 12,
+  },
+  analyticsItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+  },
+  analyticsItemLabel: {
+    color: '#ffffff',
+    fontSize: 14,
+  },
+  analyticsItemValue: {
+    color: '#94a3b8',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  activityContent: {
+    flex: 1,
+  },
+  activityMessage: {
+    color: '#ffffff',
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  activityTime: {
+    color: '#64748b',
+    fontSize: 12,
+  },
+
+  // Directory Styles
+  directoryContent: {
+    flex: 1,
+  },
+  directoryContentContainer: {
+    paddingBottom: 20,
+  },
+  directorySection: {
+    marginBottom: 24,
+  },
+  directorySectionTitle: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+  },
+  directoryCard: {
+    backgroundColor: '#374151',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  directoryCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  directoryAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#3b82f6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  directoryAvatarText: {
+    color: '#ffffff',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  directoryInfo: {
+    flex: 1,
+  },
+  directoryName: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 2,
+  },
+  directoryRole: {
+    color: '#94a3b8',
+    fontSize: 14,
+  },
+  directoryContact: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  directoryContactItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1e293b',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    minWidth: 120,
+  },
+  directoryContactIcon: {
+    fontSize: 14,
+    marginRight: 6,
+  },
+  directoryContactText: {
+    color: '#94a3b8',
+    fontSize: 12,
+    flex: 1,
+  },
+
+  // Performance Dashboard Styles
+  performanceContent: {
+    flex: 1,
+  },
+  performanceContentContainer: {
+    paddingBottom: 20,
+  },
+  performanceSummary: {
+    marginBottom: 24,
+  },
+  performanceSummaryTitle: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 16,
+  },
+  performanceSummaryGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  performanceSummaryCard: {
+    backgroundColor: '#374151',
+    borderRadius: 12,
+    padding: 16,
+    width: '31%',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  performanceSummaryValue: {
+    color: '#10b981',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  performanceSummaryLabel: {
+    color: '#94a3b8',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  performanceStaffSection: {
+    marginBottom: 24,
+  },
+  performanceSectionTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  performanceStaffCard: {
+    backgroundColor: '#374151',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  performanceStaffHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  performanceStaffAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#3b82f6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  performanceStaffAvatarText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  performanceStaffInfo: {
+    flex: 1,
+  },
+  performanceStaffName: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 2,
+  },
+  performanceStaffRole: {
+    color: '#94a3b8',
+    fontSize: 12,
+  },
+  performanceMetrics: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  performanceMetric: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  performanceMetricValue: {
+    color: '#10b981',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 2,
+  },
+  performanceMetricLabel: {
+    color: '#64748b',
+    fontSize: 10,
+    textAlign: 'center',
+  },
+  performanceBar: {
+    height: 8,
+    backgroundColor: '#4b5563',
+    borderRadius: 4,
+    marginBottom: 8,
+    overflow: 'hidden',
+  },
+  performanceBarFill: {
+    height: '100%',
+    backgroundColor: '#10b981',
+    borderRadius: 4,
+  },
+  performanceBarLabel: {
+    color: '#94a3b8',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  emptyPerformance: {
+    alignItems: 'center',
+    padding: 40,
+  },
+  emptyPerformanceText: {
+    color: '#64748b',
+    fontSize: 16,
+  },
+  performanceDeptSection: {
+    marginBottom: 24,
+  },
+  performanceDeptCard: {
+    backgroundColor: '#374151',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  performanceDeptHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  performanceDeptName: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  performanceDeptCount: {
+    color: '#94a3b8',
+    fontSize: 12,
+  },
+  performanceDeptMetrics: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  performanceDeptMetric: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+
+  // Comment Dialog
+  commentInput: {
+    backgroundColor: '#374151',
+    borderRadius: 8,
+    padding: 12,
+    color: '#ffffff',
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+    marginBottom: 16,
+    textAlignVertical: 'top',
+  },
+
+  // Modal Buttons
+  modalButtonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 20,
+  },
+  cancelButton: {
+    backgroundColor: '#6b7280',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    flex: 1,
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  cancelButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  confirmButton: {
+    backgroundColor: '#3b82f6',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    flex: 1,
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  confirmButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  disabledButton: {
+    opacity: 0.5,
+  },
+
+  // Details Modal
+  detailsContent: {
+    flex: 1,
+  },
+  detailsContentContainer: {
+    paddingBottom: 20,
+  },
+  detailSection: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+  },
+  detailLabel: {
+    color: '#94a3b8',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  detailValue: {
+    color: '#ffffff',
+    fontSize: 14,
+    flex: 1,
+    textAlign: 'right',
+  },
+  performanceTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginTop: 20,
+    marginBottom: 12,
+  },
+  errorText: {
+    color: '#ef4444',
+    fontSize: 16,
+    textAlign: 'center',
+    marginTop: 20,
+  },
+  closeButton: {
+    backgroundColor: '#6b7280',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  closeButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+
+  // Contract Modal Styles
+  contractModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  contractModalContainer: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    width: '95%',
+    maxWidth: 500,
+    maxHeight: '95%',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  contractModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+  },
+  contractModalTitle: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    flex: 1,
+  },
+  contractModalClose: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#374151',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  contractModalCloseText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  contractModalContent: {
+    flex: 1,
+  },
+  contractModalContentContainer: {
+    padding: 20,
+    paddingBottom: 100,
+  },
+  contractStatusContainer: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  contractStatusBadge: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+  },
+  contractStatusBadgeText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+  contractSection: {
+    backgroundColor: '#374151',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  contractSectionTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 16,
+  },
+  contractFieldLabel: {
+    color: '#e2e8f0',
+    fontSize: 14,
+    marginBottom: 8,
+    fontWeight: 'bold',
+  },
+  contractInput: {
+    backgroundColor: '#1e293b',
+    borderRadius: 8,
+    padding: 12,
+    color: '#ffffff',
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+    marginBottom: 16,
+  },
+  contractModalFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 20,
+    backgroundColor: '#1e293b',
+    borderTopWidth: 1,
+    borderTopColor: '#374151',
+  },
+  contractCancelButton: {
+    backgroundColor: '#6b7280',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    flex: 1,
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  contractCancelButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  contractShareButton: {
+    backgroundColor: '#3b82f6',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    flex: 1,
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  contractShareButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+
+  // Contract Document Preview Styles
+  contractDocumentContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 10,
+  },
+  contractDocumentScroll: {
+    flex: 1,
+    width: '100%',
+  },
+  contractDocumentContent: {
+    alignItems: 'center',
+  },
+  contractPaper: {
+    backgroundColor: '#f8f4e8',
+    borderRadius: 8,
+    padding: 30,
+    width: '100%',
+    maxWidth: 600,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    borderWidth: 2,
+    borderColor: '#d4c4a8',
+    position: 'relative',
+    borderStyle: 'solid',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.3)',
+  },
+  contractCornerTL: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+  },
+  contractCornerTR: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+  },
+  contractCornerBL: {
+    position: 'absolute',
+    bottom: 10,
+    left: 10,
+  },
+  contractCornerBR: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+  },
+  contractCornerSymbol: {
+    fontSize: 16,
+    color: '#8b4513',
+    opacity: 0.6,
+  },
+  contractWatermark: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: [{ translateX: -75 }, { translateY: -50 }],
+    opacity: 0.05,
+  },
+  contractWatermarkText: {
+    fontSize: 60,
+    fontWeight: 'bold',
+    color: '#8b4513',
+    fontFamily: 'serif',
+  },
+  contractHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 30,
+    paddingBottom: 20,
+    borderBottomWidth: 2,
+    borderBottomColor: '#8b4513',
+  },
+  contractCompanyInfo: {
+    flex: 1,
+  },
+  contractCompanyName: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#8b4513',
+    marginBottom: 5,
+    fontFamily: 'serif',
+  },
+  contractCompanyAddress: {
+    fontSize: 12,
+    color: '#654321',
+    marginBottom: 2,
+  },
+  contractCompanyContact: {
+    fontSize: 12,
+    color: '#654321',
+    marginBottom: 2,
+  },
+  contractLogo: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#8b4513',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#654321',
+  },
+  contractLogoText: {
+    fontSize: 30,
+    color: '#f8f4e8',
+  },
+  contractTitleSection: {
+    alignItems: 'center',
+    marginBottom: 30,
+  },
+  contractMainTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#8b4513',
+    textAlign: 'center',
+    fontFamily: 'serif',
+    marginBottom: 5,
+  },
+  contractSubtitle: {
+    fontSize: 14,
+    color: '#654321',
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  contractDivider: {
+    width: 100,
+    height: 2,
+    backgroundColor: '#8b4513',
+    marginTop: 10,
+  },
+  contractParties: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 30,
+  },
+  contractParty: {
+    flex: 1,
+    padding: 15,
+    backgroundColor: '#f0e6d2',
+    borderRadius: 8,
+    marginHorizontal: 5,
+  },
+  contractPartyTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#8b4513',
+    marginBottom: 8,
+    textDecorationLine: 'underline',
+  },
+  contractPartyText: {
+    fontSize: 12,
+    color: '#654321',
+    lineHeight: 18,
+    marginBottom: 2,
+  },
+  contractBody: {
+    marginBottom: 30,
+  },
+  contractDate: {
+    fontSize: 14,
+    color: '#654321',
+    textAlign: 'right',
+    marginBottom: 20,
+    fontStyle: 'italic',
+  },
+  contractSectionHeader: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#8b4513',
+    marginTop: 15,
+    marginBottom: 8,
+    textDecorationLine: 'underline',
+  },
+  contractText: {
+    fontSize: 12,
+    color: '#654321',
+    lineHeight: 18,
+    marginBottom: 10,
+    textAlign: 'justify',
+  },
+  contractSignatures: {
+    marginTop: 40,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#d4c4a8',
+  },
+  contractSignatureBlock: {
+    marginBottom: 30,
+  },
+  contractSignatureLabel: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#8b4513',
+    marginBottom: 20,
+  },
+  contractSignatureLine: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#8b4513',
+    marginBottom: 5,
+    width: 200,
+  },
+  contractSignatureText: {
+    fontSize: 12,
+    color: '#654321',
+    fontStyle: 'italic',
+  },
+  contractSignatureDate: {
+    fontSize: 12,
+    color: '#654321',
+    marginTop: 10,
+  },
+  contractFooter: {
+    marginTop: 40,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#d4c4a8',
+    alignItems: 'center',
+  },
+  contractFooterText: {
+    fontSize: 10,
+    color: '#8b7355',
+    textAlign: 'center',
+    marginBottom: 2,
+    fontStyle: 'italic',
+  },
+
+  // Header Actions
+  contractModalHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  contractPreviewButton: {
+    backgroundColor: '#10b981',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    marginRight: 8,
+  },
+  contractPreviewButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  contractEditButton: {
+    backgroundColor: '#f59e0b',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    marginRight: 8,
+  },
+  contractEditButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  contractPreviewButtonLarge: {
+    backgroundColor: '#10b981',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    flex: 1,
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  contractPreviewButtonTextLarge: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+
+  // Bulk Actions Styles
+  bulkActionsBar: {
+    backgroundColor: '#1e293b',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  bulkActionsText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  bulkActionButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  bulkCheckbox: {
+    marginRight: 12,
+    padding: 4,
+  },
+  checkboxIcon: {
+    fontSize: 20,
+    color: '#666',
+  },
+  checkboxSelected: {
+    color: '#3b82f6',
+  },
+
 
   // Statistics Section
   statsContainer: {

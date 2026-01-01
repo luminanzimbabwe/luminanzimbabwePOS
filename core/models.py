@@ -860,12 +860,40 @@ class StockTake(models.Model):
         self.total_products_counted = items.count()
 
         total_discrepancy = 0
+        # Get StockMovement model for creating movement records
+        StockMovement = get_stock_movement_model()
+        
         for item in items:
             discrepancy = item.counted_quantity - item.system_quantity
             item.discrepancy = discrepancy
             item.discrepancy_value = discrepancy * item.product.cost_price
             item.save()
             total_discrepancy += item.discrepancy_value
+            
+            # CRITICAL: Update actual product stock to match counted quantity
+            if discrepancy != 0:  # Only update if there's a difference
+                previous_stock = item.product.stock_quantity
+                new_stock = item.counted_quantity
+                
+                # Update the product stock
+                item.product.stock_quantity = new_stock
+                item.product.save()
+                
+                # Create stock movement record for the adjustment
+                try:
+                    StockMovement.objects.create(
+                        shop=self.shop,
+                        product=item.product,
+                        movement_type='STOCKTAKE',
+                        previous_stock=previous_stock,
+                        quantity_change=new_stock - previous_stock,
+                        new_stock=new_stock,
+                        cost_price=item.product.cost_price,
+                        notes=f'Stock Take Adjustment: {previous_stock} -> {new_stock} (Counted: {item.counted_quantity})',
+                        performed_by=completed_by
+                    )
+                except Exception as e:
+                    print(f"Warning: Could not create stock movement record for {item.product.name}: {e}")
 
         self.total_discrepancy_value = total_discrepancy
         self.save()
@@ -2322,8 +2350,10 @@ def update_drawer_sale(request):
             if drawer.status != 'ACTIVE':
                 drawer.activate_drawer(cashier)
             
-            # Add sale to drawer
-            drawer.add_sale(sale_amount, payment_method)
+            # NOTE: Drawer is updated automatically via Django signals
+            # Manual drawer updates removed to prevent double-counting
+            # REMOVED: drawer.add_sale(sale_amount, payment_method) - Now handled by signal
+            print(f"INFO: Sale will be added to drawer automatically via signal handler")
             
             return Response({
                 'success': True,

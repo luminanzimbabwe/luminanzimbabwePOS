@@ -122,6 +122,14 @@ const CashierDashboardScreen = () => {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [weightInput, setWeightInput] = useState('');
 
+  // Calculator State - Retro 1990s Style
+  const [calculatorDisplay, setCalculatorDisplay] = useState('0');
+  const [calculatorPreviousValue, setCalculatorPreviousValue] = useState(null);
+  const [calculatorOperation, setCalculatorOperation] = useState(null);
+  const [calculatorWaitingForNewValue, setCalculatorWaitingForNewValue] = useState(false);
+  const [showCalculator, setShowCalculator] = useState(false);
+  const [calculatorMemory, setCalculatorMemory] = useState(0);
+
 
   useEffect(() => {
     loadCashierData();
@@ -588,6 +596,15 @@ const CashierDashboardScreen = () => {
       section: 'cashier-tools'
     },
     {
+      id: 'product-receiving',
+      title: '📦 Product Receiving',
+      description: 'Receive products from suppliers',
+      icon: '📦',
+      screen: 'CashierProductReceiving',
+      color: '#8b5cf6',
+      section: 'cashier-tools'
+    },
+    {
       id: 'quick-products',
       title: '⚡ Quick Products',
       description: 'Products without barcodes',
@@ -650,6 +667,15 @@ const CashierDashboardScreen = () => {
       color: '#06b6d4',
       section: 'cashier-tools'
     },
+    {
+      id: 'stock-take',
+      title: '📦 Stock Take',
+      description: 'Count physical inventory & update stock',
+      icon: '📦',
+      screen: 'CashierStockTake',
+      color: '#f59e0b',
+      section: 'cashier-tools'
+    },
   ];
 
   const handleSidebarFeaturePress = (feature) => {
@@ -657,6 +683,9 @@ const CashierDashboardScreen = () => {
     
     // Navigate to the feature screen
     switch (feature.screen) {
+      case 'CashierProductReceiving':
+        navigation.navigate('CashierProductReceiving');
+        break;
       case 'WasteScreen':
         navigation.navigate(ROUTES.WASTE_SCREEN);
         break;
@@ -677,6 +706,9 @@ const CashierDashboardScreen = () => {
         break;
       case 'QuickProducts':
         navigation.navigate(ROUTES.QUICK_PRODUCTS);
+        break;
+      case 'CashierStockTake':
+        navigation.navigate('CashierStockTake');
         break;
       default:
         console.log(`Feature "${feature.title}" pressed`);
@@ -769,43 +801,292 @@ const CashierDashboardScreen = () => {
     setWeightInput('');
   };
 
-  const removeFromCart = (productId) => {
-    setCart(cart.filter(item => item.id !== productId));
+  // Cart management functions
+  const removeFromCart = (itemId) => {
+    setCart(cart.filter(item => item.id !== itemId));
   };
 
-  const updateQuantity = (productId, newQuantity) => {
+  const updateQuantity = (itemId, newQuantity) => {
     if (newQuantity <= 0) {
-      removeFromCart(productId);
+      // Remove item if quantity is 0 or negative
+      removeFromCart(itemId);
       return;
     }
     
-    // Allow negative stock sales - no stock validation
-    setCart(cart.map(item => {
-      if (item.id === productId) {
-        // For weighable products, update weight instead of quantity
-        if (item.price_type !== 'unit') {
-          return { ...item, weight: newQuantity };
-        }
-        // For unit products, update quantity
-        return { ...item, quantity: newQuantity };
-      }
-      return item;
-    }));
-  };
-
-  const updateWeight = (productId, weight) => {
-    const numWeight = parseFloat(weight) || 0;
-    if (numWeight <= 0) {
-      removeFromCart(productId);
-      return;
-    }
-    
-    // Allow negative stock sales - no stock validation
     setCart(cart.map(item => 
-      item.id === productId 
-        ? { ...item, weight: numWeight }
+      item.id === itemId 
+        ? { ...item, quantity: newQuantity }
         : item
     ));
+  };
+
+  const updateWeight = (itemId, newWeight) => {
+    const weight = parseFloat(newWeight) || 0;
+    
+    if (weight <= 0) {
+      // Remove item if weight is 0 or negative
+      removeFromCart(itemId);
+      return;
+    }
+    
+    setCart(cart.map(item => 
+      item.id === itemId 
+        ? { ...item, weight: weight }
+        : item
+    ));
+  };
+
+  // Calculator Functions - Retro 1990s Style with Enhanced Operations
+  const inputNumber = (num) => {
+    if (calculatorWaitingForNewValue) {
+      setCalculatorDisplay(num);
+      setCalculatorWaitingForNewValue(false);
+    } else {
+      setCalculatorDisplay(calculatorDisplay === '0' ? num : calculatorDisplay + num);
+    }
+  };
+
+  const inputDecimal = () => {
+    if (calculatorWaitingForNewValue) {
+      setCalculatorDisplay('0.');
+      setCalculatorWaitingForNewValue(false);
+    } else if (calculatorDisplay.indexOf('.') === -1) {
+      setCalculatorDisplay(calculatorDisplay + '.');
+    }
+  };
+
+  const inputOperation = (nextOperation) => {
+    const inputValue = parseFloat(calculatorDisplay);
+
+    if (calculatorPreviousValue === null) {
+      setCalculatorPreviousValue(inputValue);
+    } else if (calculatorOperation) {
+      const currentValue = calculatorPreviousValue || 0;
+      const newValue = calculate(currentValue, inputValue, calculatorOperation);
+
+      setCalculatorDisplay(String(newValue));
+      setCalculatorPreviousValue(newValue);
+    }
+
+    setCalculatorWaitingForNewValue(true);
+    setCalculatorOperation(nextOperation);
+  };
+
+  const calculate = (firstValue, secondValue, operation) => {
+    switch (operation) {
+      case '+':
+        return firstValue + secondValue;
+      case '-':
+        return firstValue - secondValue;
+      case '*':
+        return firstValue * secondValue;
+      case '/':
+        return firstValue / secondValue;
+      case '=':
+        return secondValue;
+      case '%':
+        return (firstValue * secondValue) / 100;
+      case 'x²':
+        return firstValue * firstValue;
+      case '√':
+        return Math.sqrt(firstValue);
+      case '±':
+        return -firstValue;
+      case '1/x':
+        return 1 / firstValue;
+      default:
+        return secondValue;
+    }
+  };
+
+  const performCalculation = () => {
+    const inputValue = parseFloat(calculatorDisplay);
+
+    if (calculatorPreviousValue !== null && calculatorOperation) {
+      const newValue = calculate(calculatorPreviousValue, inputValue, calculatorOperation);
+      setCalculatorDisplay(String(newValue));
+      setCalculatorPreviousValue(null);
+      setCalculatorOperation(null);
+      setCalculatorWaitingForNewValue(true);
+    }
+  };
+
+  // Memory Functions
+  const memoryStore = () => {
+    setCalculatorMemory(parseFloat(calculatorDisplay));
+  };
+
+  const memoryRecall = () => {
+    setCalculatorDisplay(String(calculatorMemory));
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const memoryClear = () => {
+    setCalculatorMemory(0);
+  };
+
+  const memoryAdd = () => {
+    setCalculatorMemory(calculatorMemory + parseFloat(calculatorDisplay));
+  };
+
+  // Advanced Operations
+  const performSquare = () => {
+    const value = parseFloat(calculatorDisplay);
+    setCalculatorDisplay(String(value * value));
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const performSquareRoot = () => {
+    const value = parseFloat(calculatorDisplay);
+    setCalculatorDisplay(String(Math.sqrt(value)));
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const toggleSign = () => {
+    const value = parseFloat(calculatorDisplay);
+    setCalculatorDisplay(String(-value));
+  };
+
+  const reciprocal = () => {
+    const value = parseFloat(calculatorDisplay);
+    setCalculatorDisplay(String(1 / value));
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const percentage = () => {
+    const value = parseFloat(calculatorDisplay);
+    setCalculatorDisplay(String(value / 100));
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const clearCalculator = () => {
+    setCalculatorDisplay('0');
+    setCalculatorPreviousValue(null);
+    setCalculatorOperation(null);
+    setCalculatorWaitingForNewValue(false);
+  };
+
+  const clearEntry = () => {
+    setCalculatorDisplay('0');
+  };
+
+  // Quick Actions Functions
+  const applyDiscount = (percentage) => {
+    setCartDiscount(percentage);
+    Alert.alert(
+      '💰 Discount Applied',
+      `${percentage}% discount applied to cart!`,
+      [{ text: 'OK' }]
+    );
+  };
+
+  const clearDiscount = () => {
+    setCartDiscount(0);
+    Alert.alert(
+      '🗑️ Discount Cleared',
+      'Discount removed from cart',
+      [{ text: 'OK' }]
+    );
+  };
+
+  const toggleTaxMode = () => {
+    setTaxIncluded(!taxIncluded);
+    Alert.alert(
+      '💱 Tax Mode Changed',
+      `Tax is now ${!taxIncluded ? 'INCLUDED' : 'EXCLUDED'} in prices`,
+      [{ text: 'OK' }]
+    );
+  };
+
+  const bulkUpdateQuantities = () => {
+    Alert.alert(
+      '📋 Bulk Update Quantities',
+      'This feature allows updating quantities for all items in cart.\n\nSelect multiplier:',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'x2 (Double)', onPress: () => bulkMultiplyQuantities(2) },
+        { text: 'x3 (Triple)', onPress: () => bulkMultiplyQuantities(3) },
+        { text: 'Custom...', onPress: () => showCustomMultiplierDialog() }
+      ]
+    );
+  };
+
+  const bulkMultiplyQuantities = (multiplier) => {
+    setCart(prevCart => 
+      prevCart.map(item => ({
+        ...item,
+        quantity: item.price_type === 'unit' ? item.quantity * multiplier : item.quantity,
+        weight: item.price_type !== 'unit' ? (item.weight || 0) * multiplier : item.weight
+      }))
+    );
+    Alert.alert(
+      '✅ Bulk Update Complete',
+      `All quantities multiplied by ${multiplier}`,
+      [{ text: 'OK' }]
+    );
+  };
+
+  const showCustomMultiplierDialog = () => {
+    // In a real implementation, you'd show a custom input dialog
+    Alert.alert(
+      'Custom Multiplier',
+      'Enter multiplier value:',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Apply', onPress: () => bulkMultiplyQuantities(1.5) }
+      ]
+    );
+  };
+
+  const clearCartWithConfirmation = () => {
+    Alert.alert(
+      '🗑️ Clear Cart',
+      'Are you sure you want to clear all items from the cart?\n\nThis action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear Cart',
+          style: 'destructive',
+          onPress: () => {
+            setCart([]);
+            setCartDiscount(0);
+            setCartNotes('');
+            setAmountReceived('');
+          }
+        }
+      ]
+    );
+  };
+
+  // Real-time Dashboard Functions
+  const updateRealTimeStats = async () => {
+    try {
+      // In a real implementation, you'd fetch from API
+      const mockStats = {
+        todaySales: Math.random() * 1000 + 500,
+        totalTransactions: Math.floor(Math.random() * 50) + 20,
+        averageTransaction: Math.random() * 50 + 25,
+        itemsPerTransaction: Math.random() * 5 + 2,
+        peakHour: '14:00-15:00',
+        lastUpdated: new Date()
+      };
+      setRealTimeStats(mockStats);
+    } catch (error) {
+      console.error('Failed to update real-time stats:', error);
+    }
+  };
+
+  // Auto-update real-time stats every 30 seconds
+  useEffect(() => {
+    updateRealTimeStats();
+    const interval = setInterval(updateRealTimeStats, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Get unique categories from products
+  const getCategories = () => {
+    const categories = [...new Set(products.map(p => p.category).filter(Boolean))];
+    return ['all', ...categories];
   };
 
   const getTotalAmount = () => {
@@ -824,12 +1105,6 @@ const CashierDashboardScreen = () => {
     const total = getTotalAmount();
     const received = parseFloat(amountReceived) || 0;
     return Math.max(0, received - total);
-  };
-
-  // Get unique categories from products
-  const getCategories = () => {
-    const categories = [...new Set(products.map(p => p.category).filter(Boolean))];
-    return ['all', ...categories];
   };
 
   // Handle barcode scan - Auto add to cart
@@ -1977,39 +2252,87 @@ const CashierDashboardScreen = () => {
         />
       }
     >
-      {/* Compact Cashier Header with Integrated Buttons */}
-      <View style={styles.compactCashierHeader}>
-        <View style={styles.compactHeaderContent}>
-          {/* Compact Title with Integrated Buttons */}
-          <View style={styles.compactTitleWithButtons}>
-            <TouchableOpacity 
-              style={styles.inlineMenuButton} 
-              onPress={() => setShowSidebar(!showSidebar)}
-            >
-              <Icon name="menu" size={18} color="#fff" />
-              <Text style={styles.inlineMenuButtonText}>Menu</Text>
-            </TouchableOpacity>
-            
-            <Text style={styles.compactHeaderTitle}>🛒 Cashier Terminal</Text>
-            
-            <TouchableOpacity onPress={() => loadDrawerStatus(cashierData)} style={styles.headerRefreshButtonInline}>
-              <Icon name="refresh" size={18} color="#fff" />
-            </TouchableOpacity>
-          </View>
-          
-          {/* Compact Status */}
-          <View style={styles.compactStatusRow}>
-            <View style={styles.compactStatusItem}>
-              <Text style={styles.compactStatusLabel}>Items:</Text>
-              <Text style={styles.compactStatusValue}>{cart.length}</Text>
+      {/* NEURAL CASHIER HEADER - GEN 2080 INTERFACE */}
+      <View style={styles.neuralCashierHeader}>
+        <View style={styles.neuralHeaderBackground}>
+          <View style={styles.neuralHeaderContent}>
+            {/* GEN 2080 Neural Title */}
+            <View style={styles.neuralTitleSection}>
+              <TouchableOpacity 
+                style={styles.neuralMenuButton} 
+                onPress={() => setShowSidebar(!showSidebar)}
+              >
+                <View style={styles.neuralButtonGlow}></View>
+                <Icon name="menu" size={20} color="#00ffff" />
+                <Text style={styles.neuralButtonText}>NEURAL</Text>
+              </TouchableOpacity>
+              
+              <View style={styles.neuralTitleContainer}>
+                <Text style={styles.neuralGeneration}>GEN 2080</Text>
+                <Text style={styles.neuralSubtitle}>🧠 CASHIER NEURAL INTERFACE</Text>
+                {(() => {
+                  // Debug: Log available fields
+                  console.log('Cashier Data Keys:', Object.keys(cashierData || {}));
+                  console.log('Cashier Info:', cashierData?.cashier_info);
+                  
+                  // Try multiple fields to get the actual cashier name
+                  const cashierName = cashierData?.cashier_info?.name || 
+                                    cashierData?.username || 
+                                    cashierData?.cashier_name || 
+                                    cashierData?.name ||
+                                    'CASHIER';
+                  
+                  // Show operator name with basic filtering (only exclude obvious shop domains)
+                  if (cashierName && !cashierName.includes('.com')) {
+                    return (
+                      <Text style={styles.neuralCashierName}>👤 OPERATOR: {cashierName.toUpperCase()}</Text>
+                    );
+                  }
+                  
+                  // Fallback to generic cashier
+                  return (
+                    <Text style={styles.neuralCashierName}>👤 OPERATOR: CASHIER</Text>
+                  );
+                })()}
+                <View style={styles.neuralScanner}>
+                  <Text style={styles.neuralScannerText}>◉ NEURAL SCAN ACTIVE</Text>
+                </View>
+              </View>
+              
+              <TouchableOpacity 
+                style={[styles.neuralCalculatorButton, showCalculator && styles.neuralButtonActive]} 
+                onPress={() => setShowCalculator(!showCalculator)}
+              >
+                <View style={styles.neuralButtonGlow}></View>
+                <Text style={styles.neuralCalculatorIcon}>🧮</Text>
+                <Text style={styles.neuralButtonText}>CALC</Text>
+              </TouchableOpacity>
             </View>
-            <View style={styles.compactStatusItem}>
-              <Text style={styles.compactStatusLabel}>Total:</Text>
-              <Text style={styles.compactStatusValue}>{formatCurrency(getTotalAmount())}</Text>
-            </View>
-            <View style={styles.compactStatusItem}>
-              <View style={styles.compactStatusDot} />
-              <Text style={styles.compactStatusText}>{shopStatus?.is_open ? 'OPEN' : 'CLOSED'}</Text>
+            
+            {/* Neural Status Display */}
+            <View style={styles.neuralStatusGrid}>
+              <View style={styles.neuralStatusCard}>
+                <Text style={styles.neuralStatusLabel}>NEURAL ITEMS</Text>
+                <Text style={styles.neuralStatusValue}>{cart.length}</Text>
+                <View style={styles.neuralPulse}></View>
+              </View>
+              <View style={styles.neuralStatusCard}>
+                <Text style={styles.neuralStatusLabel}>TOTAL VALUE</Text>
+                <Text style={styles.neuralStatusValue}>{formatCurrency(getTotalAmount())}</Text>
+                <View style={styles.neuralPulse}></View>
+              </View>
+              <View style={styles.neuralStatusCard}>
+                <Text style={styles.neuralStatusLabel}>SHOP STATUS</Text>
+                <Text style={[styles.neuralStatusValue, shopStatus?.is_open ? styles.neuralOnline : styles.neuralOffline]}>
+                  {shopStatus?.is_open ? 'ONLINE' : 'OFFLINE'}
+                </Text>
+                <View style={[styles.neuralPulse, shopStatus?.is_open ? styles.neuralPulseOnline : styles.neuralPulseOffline]}></View>
+              </View>
+              <TouchableOpacity onPress={() => loadDrawerStatus(cashierData)} style={styles.neuralRefreshButton}>
+                <View style={styles.neuralButtonGlow}></View>
+                <Icon name="refresh" size={18} color="#00ffff" />
+                <Text style={styles.neuralRefreshText}>SYNC</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -2045,38 +2368,34 @@ const CashierDashboardScreen = () => {
           {/* Quick Products Section - Products without Barcodes */}
           <View style={styles.quickProductsContainer}>
             <Text style={styles.quickProductsTitle}>⚡ QUICK PRODUCTS</Text>
-            <Text style={styles.quickProductsSubtitle}>Products without barcodes - Quick access for faster sales</Text>
+            <Text style={styles.quickProductsSubtitle}>Products without barcodes - Treated as units for faster sales</Text>
             
-            {/* Debug: Show product count */}
-            <Text style={{color: '#fff', fontSize: 10, marginBottom: 8}}>
-              Debug: Total products: {products.length} | Quick products: {products.filter(product => {
-                const barcode = (product.barcode || '').toString().trim().toUpperCase();
-                const lineCode = (product.line_code || '').toString().trim().toUpperCase();
-                // FIXED: Check if PRIMARY barcode is empty (OR logic, not AND)
-                return (!barcode || barcode === 'N/A' || barcode === 'NA' || barcode === 'NONE' || barcode === 'NULL' || barcode === 'UNDEFINED' || barcode === '');
-              }).length}
-            </Text>
+
             
             <View style={styles.quickProductsGrid}>
               {products.filter(product => {
                 const barcode = (product.barcode || '').toString().trim().toUpperCase();
-                // FIXED: Check if PRIMARY barcode is empty (OR logic, not AND)
-                return (!barcode || barcode === 'N/A' || barcode === 'NA' || barcode === 'NONE' || barcode === 'NULL' || barcode === 'UNDEFINED' || barcode === '');
+                // Show products without barcodes AND with unit price type only
+                const hasNoBarcode = (!barcode || barcode === 'N/A' || barcode === 'NA' || barcode === 'NONE' || barcode === 'NULL' || barcode === 'UNDEFINED' || barcode === '');
+                const isUnitPrice = product.price_type === 'unit';
+                return hasNoBarcode && isUnitPrice;
               }).slice(0, 6).map((product, index) => (
                 <TouchableOpacity
                   key={product.id}
                   style={styles.quickProductCard}
                   onPress={() => {
-                    addToCart(product);
+                    // For Quick Products (no barcodes), always treat as units regardless of price_type
+                    const unitProduct = { ...product, price_type: 'unit' };
+                    addToCart(unitProduct);
                     Alert.alert(
                       '✅ Quick Product Added',
-                      `${product.name} added to cart!`,
+                      `${product.name} added to cart as unit!`,
                       [{ text: 'OK', timeout: 1000 }]
                     );
                   }}
                 >
                   <Text style={styles.quickProductName}>{product.name}</Text>
-                  <Text style={styles.quickProductPrice}>{formatCurrency(product.price)}</Text>
+                  <Text style={styles.quickProductPrice}>{formatCurrency(product.price)}/unit</Text>
                   <Text style={styles.quickProductCategory}>{product.category || 'General'}</Text>
                 </TouchableOpacity>
               ))}
@@ -2084,8 +2403,10 @@ const CashierDashboardScreen = () => {
             
             {products.filter(product => {
               const barcode = (product.barcode || '').toString().trim().toUpperCase();
-              // FIXED: Check if PRIMARY barcode is empty (OR logic, not AND)
-              return (!barcode || barcode === 'N/A' || barcode === 'NA' || barcode === 'NONE' || barcode === 'NULL' || barcode === 'UNDEFINED' || barcode === '');
+              // Show products without barcodes AND with unit price type only
+              const hasNoBarcode = (!barcode || barcode === 'N/A' || barcode === 'NA' || barcode === 'NONE' || barcode === 'NULL' || barcode === 'UNDEFINED' || barcode === '');
+              const isUnitPrice = product.price_type === 'unit';
+              return hasNoBarcode && isUnitPrice;
             }).length === 0 && (
               <View style={styles.noQuickProductsContainer}>
                 <Icon name="inventory-2" size={48} color="#6b7280" />
@@ -2098,8 +2419,10 @@ const CashierDashboardScreen = () => {
             
             {products.filter(product => {
               const barcode = (product.barcode || '').toString().trim().toUpperCase();
-              // FIXED: Check if PRIMARY barcode is empty (OR logic, not AND)
-              return (!barcode || barcode === 'N/A' || barcode === 'NA' || barcode === 'NONE' || barcode === 'NULL' || barcode === 'UNDEFINED' || barcode === '');
+              // Show products without barcodes AND with unit price type only
+              const hasNoBarcode = (!barcode || barcode === 'N/A' || barcode === 'NA' || barcode === 'NONE' || barcode === 'NULL' || barcode === 'UNDEFINED' || barcode === '');
+              const isUnitPrice = product.price_type === 'unit';
+              return hasNoBarcode && isUnitPrice;
             }).length > 6 && (
               <TouchableOpacity 
                 style={styles.viewAllQuickProductsButton}
@@ -2108,8 +2431,10 @@ const CashierDashboardScreen = () => {
                 <Text style={styles.viewAllQuickProductsButtonText}>
                   View All Quick Products ({products.filter(product => {
                     const barcode = (product.barcode || '').toString().trim().toUpperCase();
-                    // FIXED: Check if PRIMARY barcode is empty (OR logic, not AND)
-                    return (!barcode || barcode === 'N/A' || barcode === 'NA' || barcode === 'NONE' || barcode === 'NULL' || barcode === 'UNDEFINED' || barcode === '');
+                    // Show products without barcodes AND with unit price type only
+                    const hasNoBarcode = (!barcode || barcode === 'N/A' || barcode === 'NA' || barcode === 'NONE' || barcode === 'NULL' || barcode === 'UNDEFINED' || barcode === '');
+                    const isUnitPrice = product.price_type === 'unit';
+                    return hasNoBarcode && isUnitPrice;
                   }).length})
                 </Text>
                 <Icon name="arrow-forward" size={16} color="#10b981" />
@@ -2714,6 +3039,224 @@ const CashierDashboardScreen = () => {
         onCancel={handleWeightCancel}
       />
 
+      {/* Enhanced Retro 1990s Calculator Modal */}
+      {showCalculator && (
+        <View style={styles.calculatorModalOverlay}>
+          <View style={styles.calculatorModalContainer}>
+            <View style={styles.calculatorModalHeader}>
+              <Text style={styles.calculatorModalTitle}>🧮 RETRO CALCULATOR</Text>
+              <TouchableOpacity 
+                style={styles.calculatorModalCloseButton}
+                onPress={() => setShowCalculator(false)}
+              >
+                <Text style={styles.calculatorModalCloseButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            {/* Memory Display */}
+            <View style={styles.calculatorMemoryContainer}>
+              <Text style={styles.calculatorMemoryText}>
+                MEMORY: {calculatorMemory !== 0 ? calculatorMemory.toFixed(2) : 'EMPTY'}
+              </Text>
+            </View>
+            
+            <View style={styles.calculatorModalDisplayContainer}>
+              <Text style={styles.calculatorModalDisplay}>{calculatorDisplay}</Text>
+            </View>
+            
+            <View style={styles.calculatorModalButtonsContainer}>
+              {/* Memory Functions Row */}
+              <View style={styles.calculatorModalRow}>
+                <TouchableOpacity 
+                  style={[styles.calculatorModalButton, styles.calculatorModalButtonMemory]} 
+                  onPress={memoryClear}
+                >
+                  <Text style={styles.calculatorModalButtonText}>MC</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.calculatorModalButton, styles.calculatorModalButtonMemory]} 
+                  onPress={memoryRecall}
+                >
+                  <Text style={styles.calculatorModalButtonText}>MR</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.calculatorModalButton, styles.calculatorModalButtonMemory]} 
+                  onPress={memoryAdd}
+                >
+                  <Text style={styles.calculatorModalButtonText}>M+</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.calculatorModalButton, styles.calculatorModalButtonMemory]} 
+                  onPress={memoryStore}
+                >
+                  <Text style={styles.calculatorModalButtonText}>MS</Text>
+                </TouchableOpacity>
+              </View>
+              
+              {/* Advanced Operations Row */}
+              <View style={styles.calculatorModalRow}>
+                <TouchableOpacity 
+                  style={[styles.calculatorModalButton, styles.calculatorModalButtonAdvanced]} 
+                  onPress={clearCalculator}
+                >
+                  <Text style={styles.calculatorModalButtonText}>C</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.calculatorModalButton, styles.calculatorModalButtonAdvanced]} 
+                  onPress={clearEntry}
+                >
+                  <Text style={styles.calculatorModalButtonText}>CE</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.calculatorModalButton, styles.calculatorModalButtonAdvanced]} 
+                  onPress={performSquare}
+                >
+                  <Text style={styles.calculatorModalButtonText}>x²</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.calculatorModalButton, styles.calculatorModalButtonAdvanced]} 
+                  onPress={performSquareRoot}
+                >
+                  <Text style={styles.calculatorModalButtonText}>√</Text>
+                </TouchableOpacity>
+              </View>
+              
+              {/* More Advanced Operations Row */}
+              <View style={styles.calculatorModalRow}>
+                <TouchableOpacity 
+                  style={[styles.calculatorModalButton, styles.calculatorModalButtonAdvanced]} 
+                  onPress={toggleSign}
+                >
+                  <Text style={styles.calculatorModalButtonText}>±</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.calculatorModalButton, styles.calculatorModalButtonAdvanced]} 
+                  onPress={reciprocal}
+                >
+                  <Text style={styles.calculatorModalButtonText}>1/x</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.calculatorModalButton, styles.calculatorModalButtonOperator]} 
+                  onPress={() => inputOperation('%')}
+                >
+                  <Text style={styles.calculatorModalButtonText}>%</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.calculatorModalButton, styles.calculatorModalButtonOperator]} 
+                  onPress={() => inputOperation('/')}
+                >
+                  <Text style={styles.calculatorModalButtonText}>÷</Text>
+                </TouchableOpacity>
+              </View>
+              
+              {/* Number Rows */}
+              <View style={styles.calculatorModalRow}>
+                <TouchableOpacity 
+                  style={styles.calculatorModalButton} 
+                  onPress={() => inputNumber('7')}
+                >
+                  <Text style={styles.calculatorModalButtonText}>7</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.calculatorModalButton} 
+                  onPress={() => inputNumber('8')}
+                >
+                  <Text style={styles.calculatorModalButtonText}>8</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.calculatorModalButton} 
+                  onPress={() => inputNumber('9')}
+                >
+                  <Text style={styles.calculatorModalButtonText}>9</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.calculatorModalButton, styles.calculatorModalButtonOperator]} 
+                  onPress={() => inputOperation('*')}
+                >
+                  <Text style={styles.calculatorModalButtonText}>×</Text>
+                </TouchableOpacity>
+              </View>
+              
+              <View style={styles.calculatorModalRow}>
+                <TouchableOpacity 
+                  style={styles.calculatorModalButton} 
+                  onPress={() => inputNumber('4')}
+                >
+                  <Text style={styles.calculatorModalButtonText}>4</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.calculatorModalButton} 
+                  onPress={() => inputNumber('5')}
+                >
+                  <Text style={styles.calculatorModalButtonText}>5</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.calculatorModalButton} 
+                  onPress={() => inputNumber('6')}
+                >
+                  <Text style={styles.calculatorModalButtonText}>6</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.calculatorModalButton, styles.calculatorModalButtonOperator]} 
+                  onPress={() => inputOperation('-')}
+                >
+                  <Text style={styles.calculatorModalButtonText}>-</Text>
+                </TouchableOpacity>
+              </View>
+              
+              <View style={styles.calculatorModalRow}>
+                <TouchableOpacity 
+                  style={styles.calculatorModalButton} 
+                  onPress={() => inputNumber('1')}
+                >
+                  <Text style={styles.calculatorModalButtonText}>1</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.calculatorModalButton} 
+                  onPress={() => inputNumber('2')}
+                >
+                  <Text style={styles.calculatorModalButtonText}>2</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.calculatorModalButton} 
+                  onPress={() => inputNumber('3')}
+                >
+                  <Text style={styles.calculatorModalButtonText}>3</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.calculatorModalButton, styles.calculatorModalButtonOperator]} 
+                  onPress={() => inputOperation('+')}
+                >
+                  <Text style={styles.calculatorModalButtonText}>+</Text>
+                </TouchableOpacity>
+              </View>
+              
+              {/* Final Row */}
+              <View style={styles.calculatorModalRow}>
+                <TouchableOpacity 
+                  style={[styles.calculatorModalButton, { flex: 2 }]} 
+                  onPress={() => inputNumber('0')}
+                >
+                  <Text style={styles.calculatorModalButtonText}>0</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.calculatorModalButton} 
+                  onPress={inputDecimal}
+                >
+                  <Text style={styles.calculatorModalButtonText}>.</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.calculatorModalButton, styles.calculatorModalButtonEquals]} 
+                  onPress={performCalculation}
+                >
+                  <Text style={styles.calculatorModalButtonText}>=</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
+      )}
+
       {/* Cashier Sidebar */}
       {showSidebar && (
         <>
@@ -3032,6 +3575,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     width: '100%',
     marginBottom: 8,
+    paddingHorizontal: 4,
   },
   headerRefreshButtonInline: {
     backgroundColor: '#3b82f6',
@@ -3060,10 +3604,11 @@ const styles = StyleSheet.create({
   },
   compactHeaderTitle: {
     color: '#ffffff',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     textAlign: 'center',
     flex: 1,
+    marginHorizontal: 8,
   },
   compactStatusRow: {
     flexDirection: 'row',
@@ -4989,6 +5534,407 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#4b5563',
     borderRadius: 8,
+  },
+
+  // Retro 1990s Calculator Styles - Enhanced Modal Version
+  inlineCalculatorButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#6b7280',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 4,
+    marginLeft: 8,
+  },
+  calculatorButtonActive: {
+    backgroundColor: '#10b981',
+  },
+  inlineCalculatorButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    marginRight: 4,
+  },
+  inlineCalculatorButtonLabel: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  
+  // Modal Calculator Styles
+  calculatorModalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10000,
+  },
+  calculatorModalContainer: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 16,
+    borderWidth: 3,
+    borderColor: '#10b981',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    elevation: 8,
+    width: 400,
+    maxWidth: '90vw',
+    overflow: 'hidden',
+  },
+  calculatorModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 2,
+    borderBottomColor: '#10b981',
+  },
+  calculatorModalTitle: {
+    color: '#10b981',
+    fontSize: 20,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Courier New, monospace' : 'Courier New',
+  },
+  calculatorModalCloseButton: {
+    backgroundColor: '#ef4444',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    shadowColor: '#ef4444',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  calculatorModalCloseButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  calculatorMemoryContainer: {
+    backgroundColor: '#111111',
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+  },
+  calculatorMemoryText: {
+    color: '#f59e0b',
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Courier New, monospace' : 'Courier New',
+    textAlign: 'right',
+  },
+  calculatorModalDisplayContainer: {
+    backgroundColor: '#0a0a0a',
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+    borderBottomWidth: 2,
+    borderBottomColor: '#374151',
+  },
+  calculatorModalDisplay: {
+    color: '#10b981',
+    fontSize: 36,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Courier New, monospace' : 'Courier New',
+    textAlign: 'right',
+    letterSpacing: 3,
+  },
+  calculatorModalButtonsContainer: {
+    padding: 20,
+  },
+  calculatorModalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  calculatorModalButton: {
+    backgroundColor: '#4b5563',
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+    marginHorizontal: 3,
+    borderWidth: 1,
+    borderColor: '#6b7280',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  calculatorModalButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Courier New, monospace' : 'Courier New',
+  },
+  calculatorModalButtonOperator: {
+    backgroundColor: '#f59e0b',
+    borderColor: '#d97706',
+    shadowColor: '#f59e0b',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  calculatorModalButtonEquals: {
+    backgroundColor: '#10b981',
+    borderColor: '#059669',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  calculatorModalButtonAdvanced: {
+    backgroundColor: '#8b5cf6',
+    borderColor: '#7c3aed',
+    shadowColor: '#8b5cf6',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  calculatorModalButtonMemory: {
+    backgroundColor: '#06b6d4',
+    borderColor: '#0891b2',
+    shadowColor: '#06b6d4',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+
+  // NEURAL CASHIER HEADER STYLES - GEN 2080 INTERFACE
+  neuralCashierHeader: {
+    backgroundColor: '#000000',
+    padding: 0,
+    borderBottomWidth: 2,
+    borderBottomColor: '#00ffff',
+    shadowColor: '#00ffff',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  neuralHeaderBackground: {
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    borderWidth: 1,
+    borderColor: '#00ffff',
+    borderRadius: 0,
+    padding: 0,
+  },
+  neuralHeaderContent: {
+    padding: 20,
+    paddingTop: 30,
+  },
+  neuralTitleSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  neuralMenuButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 255, 255, 0.1)',
+    borderWidth: 2,
+    borderColor: '#00ffff',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  neuralCalculatorButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    borderWidth: 2,
+    borderColor: '#8b5cf6',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  neuralButtonActive: {
+    backgroundColor: 'rgba(139, 92, 246, 0.3)',
+    borderColor: '#a855f7',
+    shadowColor: '#8b5cf6',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+  },
+  neuralButtonGlow: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 255, 255, 0.1)',
+    borderRadius: 12,
+  },
+  neuralButtonText: {
+    color: '#00ffff',
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  neuralCalculatorIcon: {
+    fontSize: 18,
+    marginRight: 8,
+  },
+  neuralTitleContainer: {
+    flex: 1,
+    alignItems: 'center',
+    marginHorizontal: 16,
+  },
+  neuralGeneration: {
+    color: '#00ffff',
+    fontSize: 28,
+    fontWeight: '900',
+    textAlign: 'center',
+    textTransform: 'uppercase',
+    letterSpacing: 3,
+    textShadowColor: '#00ffff',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 10,
+  },
+  neuralSubtitle: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  neuralCashierName: {
+    color: '#00ffff',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    textShadowColor: '#00ffff',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 3,
+  },
+  neuralScanner: {
+    backgroundColor: 'rgba(0, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: '#00ffff',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginTop: 8,
+    alignItems: 'center',
+  },
+  neuralScannerText: {
+    color: '#00ffff',
+    fontSize: 10,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  neuralStatusGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderWidth: 1,
+    borderColor: '#00ffff',
+    borderRadius: 12,
+    padding: 16,
+  },
+  neuralStatusCard: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: '#00ffff',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+    marginHorizontal: 4,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  neuralStatusLabel: {
+    color: '#00ffff',
+    fontSize: 10,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  neuralStatusValue: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  neuralOnline: {
+    color: '#00ff00',
+    textShadowColor: '#00ff00',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 5,
+  },
+  neuralOffline: {
+    color: '#ff0040',
+    textShadowColor: '#ff0040',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 5,
+  },
+  neuralPulse: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: 8,
+    opacity: 0.3,
+  },
+  neuralPulseOnline: {
+    backgroundColor: 'rgba(0, 255, 0, 0.1)',
+  },
+  neuralPulseOffline: {
+    backgroundColor: 'rgba(255, 0, 64, 0.1)',
+  },
+  neuralRefreshButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 255, 255, 0.1)',
+    borderWidth: 2,
+    borderColor: '#00ffff',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    position: 'relative',
+    overflow: 'hidden',
+    marginLeft: 8,
+  },
+  neuralRefreshText: {
+    color: '#00ffff',
+    fontSize: 10,
+    fontWeight: '700',
+    marginLeft: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
 });
 

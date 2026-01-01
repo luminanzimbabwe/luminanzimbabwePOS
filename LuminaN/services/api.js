@@ -201,6 +201,12 @@ export const shopAPI = {
 
   getSalesHistory: (config = {}) => api.get('/sales-history/', config),
   getSaleDetails: (saleId, config = {}) => api.get(`/sales/${saleId}/`, config),
+  
+  // Real Sales Analytics for Dashboard
+  getSalesAnalytics: (config = {}) => api.get('/sales-analytics/', config),
+  getSalesSummary: (config = {}) => api.get('/sales/summary/', config),
+  getRecentSales: (config = {}) => api.get('/sales/recent/', config),
+  getSalesMetrics: (config = {}) => api.get('/sales/metrics/', config),
 
   // Enhanced EOD Reconciliation methods
   getEnhancedReconciliation: (config = {}) => api.get('/reconciliation/enhanced/', config),
@@ -209,6 +215,14 @@ export const shopAPI = {
   getReconciliationSession: (date, config = {}) => api.get(`/reconciliation/session/?date=${date}`, config),
   startReconciliationSession: (data, config = {}) => api.post('/reconciliation/session/', { ...data, action: 'start' }, config),
   completeReconciliationSession: (data, config = {}) => api.post('/reconciliation/session/', { ...data, action: 'complete' }, config),
+
+  // Stock Take methods - NO AUTHENTICATION REQUIRED
+  createStockTake: (data) => api.post('/stock-takes/', data),
+  bulkAddStockTakeItems: (stockTakeId, data) => api.post(`/stock-takes/${stockTakeId}/items/bulk/`, data),
+  completeStockTake: (stockTakeId) => api.patch(`/stock-takes/${stockTakeId}/`, { action: 'complete' }),
+  
+  // Public product access - NO AUTHENTICATION REQUIRED  
+  getPublicProducts: () => api.get('/products/'),
 };
 
 export default api;

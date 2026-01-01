@@ -1,5 +1,7 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { SafeAreaView, Platform, View, TouchableOpacity, Text } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Home, Users, Package, BarChart3, Settings, Truck, ClipboardCheck, Trash2, Calculator, List } from 'lucide-react-native';
 
 // Import main screens for tabs
@@ -18,13 +20,45 @@ import SalesLedgerScreen from '../screens/SalesLedgerScreen';
 
 const Tab = createBottomTabNavigator();
 
-const TabNavigator = () => {
+// Custom Tab Bar Component with Safe Area Handling
+const CustomTabBar = ({ state, descriptors, navigation }) => {
   return (
-    <Tab.Navigator
-      screenOptions={({ route }) => ({
-        tabBarIcon: ({ focused, color, size }) => {
-          let IconComponent;
+    <SafeAreaView edges={['bottom']} style={{ backgroundColor: '#1a1a1a' }}>
+      <View style={{
+        flexDirection: 'row',
+        backgroundColor: '#1a1a1a',
+        paddingBottom: Platform.OS === 'web' ? 20 : 15, // Extra padding for web task bars
+        paddingTop: 5,
+        height: Platform.OS === 'web' ? 80 : 65, // Taller on web to avoid task bar
+        borderTopColor: '#333',
+        borderTopWidth: 1,
+        paddingHorizontal: 5,
+        marginBottom: Platform.OS === 'web' ? 10 : 0, // Extra margin for web
+      }}>
+        {state.routes.map((route, index) => {
+          const { options } = descriptors[route.key];
+          const label =
+            options.tabBarLabel !== undefined
+              ? options.tabBarLabel
+              : options.title !== undefined
+              ? options.title
+              : route.name;
 
+          const isFocused = state.index === index;
+
+          const onPress = () => {
+            const event = navigation.emit({
+              type: 'tabPress',
+              target: route.key,
+              canPreventDefault: true,
+            });
+
+            if (!isFocused && !event.defaultPrevented) {
+              navigation.navigate(route.name);
+            }
+          };
+
+          let IconComponent;
           if (route.name === 'Dashboard') {
             IconComponent = Home;
           } else if (route.name === 'Staff') {
@@ -47,38 +81,52 @@ const TabNavigator = () => {
             IconComponent = List;
           }
 
-          return <IconComponent size={size} color={color} />;
-        },
+          return (
+            <TouchableOpacity
+              key={route.key}
+              accessibilityRole="button"
+              accessibilityState={isFocused ? { selected: true } : {}}
+              onPress={onPress}
+              style={{
+                flex: 1,
+                alignItems: 'center',
+                justifyContent: 'center',
+                paddingVertical: 1,
+                paddingHorizontal: 4,
+                backgroundColor: 'transparent',
+              }}
+            >
+              <IconComponent 
+                size={20} 
+                color={isFocused ? '#3b82f6' : '#999'} 
+                style={{ marginBottom: 1 }}
+              />
+              <Text style={{
+                fontSize: 11,
+                fontWeight: '600',
+                marginTop: 0,
+                color: isFocused ? '#ffffff' : '#999',
+                includeFontPadding: false,
+                textAlignVertical: 'center',
+              }}>
+                {label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </SafeAreaView>
+  );
+};
+
+const TabNavigator = () => {
+  return (
+    <SafeAreaProvider>
+      <Tab.Navigator
+        tabBar={CustomTabBar}
+      screenOptions={({ route }) => ({
         tabBarActiveTintColor: '#3b82f6',
         tabBarInactiveTintColor: '#999',
-        tabBarStyle: {
-          backgroundColor: '#1a1a1a',
-          borderTopColor: '#333',
-          borderTopWidth: 1,
-          paddingBottom: 5,
-          paddingTop: 5,
-          height: 65,
-          paddingHorizontal: 5,
-          position: 'relative',
-          zIndex: 1000,
-          elevation: 0,
-        },
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: '600',
-          marginTop: 0,
-          color: '#ffffff',
-          includeFontPadding: false,
-          textAlignVertical: 'center',
-        },
-        tabBarItemStyle: {
-          paddingVertical: 1,
-          paddingHorizontal: 4,
-          backgroundColor: 'transparent',
-        },
-        tabBarIconStyle: {
-          marginBottom: 1,
-        },
         headerStyle: {
           backgroundColor: '#0a0a0a',
           borderBottomColor: '#333',
@@ -194,6 +242,7 @@ const TabNavigator = () => {
         }}
       />
     </Tab.Navigator>
+    </SafeAreaProvider>
   );
 };
 

@@ -7,7 +7,8 @@ const STORAGE_KEYS = {
   USER_SESSION: 'user_session',
   APP_INITIALIZED: 'app_initialized',
   PENDING_ORDERS: 'pending_orders',
-  CONFIRMED_ORDERS: 'confirmed_orders'
+  CONFIRMED_ORDERS: 'confirmed_orders',
+  CASHIER_RECEIVING_RECORDS: 'cashier_receiving_records'
 };
 
 /**
@@ -120,6 +121,44 @@ export const shopStorage = {
       return true;
     } catch (error) {
       console.error(`❌ Failed to remove item ${key}:`, error);
+      return false;
+    }
+  },
+
+  // Cashier receiving records specific methods
+  async getCashierReceivingRecords() {
+    try {
+      const recordsJson = await AsyncStorage.getItem(STORAGE_KEYS.CASHIER_RECEIVING_RECORDS);
+      if (recordsJson) {
+        return JSON.parse(recordsJson);
+      }
+      return [];
+    } catch (error) {
+      console.error('❌ Failed to get cashier receiving records:', error);
+      return [];
+    }
+  },
+
+  async saveCashierReceivingRecord(record) {
+    try {
+      const records = await this.getCashierReceivingRecords();
+      records.push(record);
+      await AsyncStorage.setItem(STORAGE_KEYS.CASHIER_RECEIVING_RECORDS, JSON.stringify(records));
+      console.log('✅ Cashier receiving record saved successfully');
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to save cashier receiving record:', error);
+      return false;
+    }
+  },
+
+  async saveCashierReceivingRecords(records) {
+    try {
+      await AsyncStorage.setItem(STORAGE_KEYS.CASHIER_RECEIVING_RECORDS, JSON.stringify(records));
+      console.log('✅ Cashier receiving records saved successfully');
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to save cashier receiving records:', error);
       return false;
     }
   }

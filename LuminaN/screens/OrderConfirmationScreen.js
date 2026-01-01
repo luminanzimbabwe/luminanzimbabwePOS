@@ -8,17 +8,27 @@ import {
   Dimensions,
   Alert,
   Platform,
+  RefreshControl,
+  Modal,
+  TextInput,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 
 import Icon from 'react-native-vector-icons/MaterialIcons';
+import { shopAPI } from '../services/api';
+import { shopStorage } from '../services/storage';
+
+// Import STORAGE_KEYS for verification
+const STORAGE_KEYS = {
+  CASHIER_RECEIVING_RECORDS: 'cashier_receiving_records'
+};
 
 const { width } = Dimensions.get('window');
 
-const OrderConfirmationScreen = ({ route, navigation }) => {
+const OrderConfirmationScreen = () => {
   const [orderData, setOrderData] = useState(null);
-  const navigation = useNavigation();
   const route = useRoute();
+  const navigation = useNavigation();
   
   // Check if this is being called with specific order data (from navigation)
   const hasSpecificOrder = route.params && route.params.orderId;
@@ -45,6 +55,13 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
   const [selectedTab, setSelectedTab] = useState('pending'); // 'pending' or 'confirmed'
   const [viewingOrder, setViewingOrder] = useState(null);
   const [savingState, setSavingState] = useState(false);
+
+  // Modal states
+  const [showOrderDetailsModal, setShowOrderDetailsModal] = useState(false);
+  const [showEditOrderModal, setShowEditOrderModal] = useState(false);
+  const [showConfirmationModal, setShowConfirmationModal] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [modalOrderData, setModalOrderData] = useState(null);
 
   useEffect(() => {
     // Always load orders when screen mounts
@@ -95,12 +112,43 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
       console.log('📋 Raw pending orders:', pending);
       console.log('📊 Pending orders count:', pending.length);
       
+      // Load cashier receiving records using the dedicated method
+      let cashierReceiving = await shopStorage.getCashierReceivingRecords();
+      console.log('📦 Cashier receiving records loaded:', cashierReceiving.length, 'records');
+      
+      console.log('📋 Raw cashier receiving records:', cashierReceiving);
+      console.log('📊 Cashier receiving count:', cashierReceiving.length);
+      
+      // Debug each cashier record in detail
+      cashierReceiving.forEach((record, index) => {
+        console.log(`💰 Cashier Record ${index + 1} DEBUG:`, {
+          id: record.id,
+          status: record.status,
+          supplierName: record.supplierName,
+          createdBy: record.createdBy,
+          createdByType: typeof record.createdBy,
+          cashierName: record.cashierName,
+          allKeys: Object.keys(record)
+        });
+      });
+      
       // Check each order's status
       pending.forEach((order, index) => {
-        console.log(`Order ${index + 1}:`, {
+        console.log(`Pending Order ${index + 1}:`, {
           id: order.id,
           status: order.status,
           supplierName: order.supplierName
+        });
+      });
+      
+      // Check each cashier receiving record
+      cashierReceiving.forEach((record, index) => {
+        console.log(`Cashier Receiving ${index + 1}:`, {
+          id: record.id,
+          status: record.status,
+          supplierName: record.supplierName,
+          createdBy: record.createdBy,
+          cashierName: record.cashierName
         });
       });
       
@@ -116,25 +164,75 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
         confirmed = [];
       }
       
-      // Filter by status and remove duplicates
-      const pendingOrdersList = pending
-        .filter(order => order && order.status === 'pending_review')
-        .filter((order, index, self) => 
-          index === self.findIndex(o => o.id === order.id)
-        );
+      // Filter by status and remove duplicates - include both owner and cashier pending orders
+      const pendingOrdersList = [
+        ...pending
+          .filter(order => order && order.status === 'pending_review'),
+        ...cashierReceiving
+          .filter(record => record && record.status === 'pending_review')
+          .map(record => ({
+            ...record,
+            // Ensure consistent structure
+            id: record.id,
+            status: 'pending_review',
+            createdBy: 'cashier'
+          }))
+      ];
       
-      const confirmedOrdersList = confirmed
-        .filter(order => order && order.status === 'confirmed')
-        .filter((order, index, self) => 
-          index === self.findIndex(o => o.id === order.id)
-        );
+      // Remove duplicates based on ID across both arrays
+      const uniquePendingOrders = pendingOrdersList.filter((order, index, self) => 
+        index === self.findIndex(o => o.id === order.id)
+      );
       
-      console.log('🔍 Filtered pending orders:', pendingOrdersList);
+      console.log('🔍 Before deduplication:', pendingOrdersList.length, 'orders');
+      console.log('🔍 After deduplication:', uniquePendingOrders.length, 'orders');
+      console.log('🔍 Duplicate IDs found:', pendingOrdersList.length - uniquePendingOrders.length);
+      
+      console.log('🔍 Raw confirmed orders before filtering:', confirmed.length);
+      
+      // Cashier orders now use 'pending_review' status, so they're handled in pending filter
+      // No special handling needed - they appear in pending tab with visual distinction
+      
+      console.log('🔍 Cashier records found:', cashierReceiving.length);
+      console.log('🔍 Cashier records will appear in pending tab for review');
+      
+      // Debug cashier receiving records with names
+      console.log('💰 Debug cashier receiving records:', cashierReceiving.map(record => ({
+        id: record.id,
+        status: record.status,
+        supplierName: record.supplierName,
+        createdBy: record.createdBy,
+        cashierName: record.cashierName
+      })));
+      
+      const confirmedOrdersList = [
+        ...confirmed
+          .filter(order => order && order.status === 'confirmed')
+          .filter((order, index, self) => 
+            index === self.findIndex(o => o.id === order.id)
+          )
+      ];
+      
+      console.log('🔍 Confirmed orders after filtering:', confirmed.filter(order => order && order.status === 'confirmed').length);
+      console.log('🔍 Total confirmed orders (owner only):', confirmed.filter(order => order && order.status === 'confirmed').length);
+      
+      console.log('🔍 Filtered pending orders:', uniquePendingOrders);
       console.log('🔍 Filtered confirmed orders:', confirmedOrdersList);
-      console.log('📈 Final pending count:', pendingOrdersList.length);
+      console.log('📈 Final pending count:', uniquePendingOrders.length);
       console.log('📈 Final confirmed count:', confirmedOrdersList.length);
       
-      setPendingOrders(pendingOrdersList);
+      // Debug: Show detailed info about cashier orders in pending
+      const cashierOrdersInPending = uniquePendingOrders.filter(order => order.createdBy === 'cashier');
+      cashierOrdersInPending.forEach((order, index) => {
+        console.log(`🏪 Cashier Order ${index + 1} (pending review):`, {
+          id: order.id,
+          status: order.status,
+          supplierName: order.supplierName,
+          createdBy: order.createdBy
+        });
+      });
+      
+      setPendingOrders(uniquePendingOrders);
       setConfirmedOrders(confirmedOrdersList);
       
       console.log('✅ Orders loaded successfully!');
@@ -173,12 +271,13 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
     try {
       setSavingState(true);
       console.log('🔄 Starting order confirmation process...');
+      console.log('📦 Confirming order:', order.id);
+      console.log('👤 Order created by:', order.createdBy);
       
       // Update product inventory first
       const inventoryResult = await updateProductInventory(order);
       
-      // Move order from pending to confirmed
-      const updatedPendingOrders = pendingOrders.filter(o => o.id !== order.id);
+      // Create confirmed order with additional metadata
       const confirmedOrder = { 
         ...order, 
         status: 'confirmed', 
@@ -186,16 +285,110 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
         inventoryUpdated: true,
         inventoryUpdateResult: inventoryResult
       };
-      const updatedConfirmedOrders = [...confirmedOrders, confirmedOrder];
       
-      // Save to storage
-      await shopStorage.setItem('pending_orders', JSON.stringify(updatedPendingOrders));
-      await shopStorage.setItem('confirmed_orders', JSON.stringify(updatedConfirmedOrders));
+      console.log('✅ Created confirmed order:', confirmedOrder);
       
-      // Update state
-      setPendingOrders(updatedPendingOrders);
-      setConfirmedOrders(updatedConfirmedOrders);
-      setViewingOrder(null);
+      // Determine order type by checking if it exists in cashier receiving records
+      console.log('🔍 Debug order details:', {
+        orderId: order.id,
+        createdBy: order.createdBy,
+        createdByType: typeof order.createdBy,
+        orderKeys: Object.keys(order),
+        status: order.status
+      });
+      
+      // Check if order exists in cashier receiving records
+      const cashierReceiving = await shopStorage.getCashierReceivingRecords();
+      const existsInCashierRecords = cashierReceiving.some(record => record.id === order.id);
+      console.log('👤 Exists in cashier records?', existsInCashierRecords);
+      console.log('👤 Total cashier records:', cashierReceiving.length);
+      
+      // Use existence in cashier records as the definitive indicator
+      const isCashierOrder = existsInCashierRecords;
+      console.log('👤 Is cashier order (by record existence)?', isCashierOrder);
+      
+      if (isCashierOrder) {
+        // For cashier orders: remove from cashier receiving records, add to confirmed
+        console.log('👤 Processing cashier order confirmation...');
+        
+        // Get current cashier receiving records
+        let cashierReceiving = await shopStorage.getCashierReceivingRecords();
+        console.log('📦 Current cashier records:', cashierReceiving.length);
+        console.log('📦 Cashier records:', cashierReceiving.map(r => ({ id: r.id, status: r.status })));
+        
+        // Remove the confirmed order from cashier receiving records
+        const updatedCashierReceiving = cashierReceiving.filter(record => record.id !== order.id);
+        console.log('🗑️ Removed order from cashier records. Remaining:', updatedCashierReceiving.length);
+        console.log('🗑️ Updated cashier records:', updatedCashierReceiving.map(r => ({ id: r.id, status: r.status })));
+        
+        // Save updated cashier receiving records
+        const saveResult = await shopStorage.saveCashierReceivingRecords(updatedCashierReceiving);
+        console.log('💾 Save result for cashier records:', saveResult);
+        
+        // Add to confirmed orders
+        const updatedConfirmedOrders = [...confirmedOrders, confirmedOrder];
+        const confirmedSaveResult = await shopStorage.setItem('confirmed_orders', JSON.stringify(updatedConfirmedOrders));
+        console.log('💾 Save result for confirmed orders:', confirmedSaveResult);
+        
+        // Update state
+        setConfirmedOrders(updatedConfirmedOrders);
+        
+        console.log('✅ Cashier order confirmation completed');
+        
+      } else {
+        // For owner orders: remove from pending orders, add to confirmed
+        console.log('👤 Processing owner order confirmation...');
+        console.log('📦 Current pending orders:', pendingOrders.length);
+        
+        const updatedPendingOrders = pendingOrders.filter(o => o.id !== order.id);
+        const updatedConfirmedOrders = [...confirmedOrders, confirmedOrder];
+        
+        console.log('🗑️ Updated pending orders count:', updatedPendingOrders.length);
+        console.log('✅ Updated confirmed orders count:', updatedConfirmedOrders.length);
+        
+        // Save to storage
+        const pendingSaveResult = await shopStorage.setItem('pending_orders', JSON.stringify(updatedPendingOrders));
+        const confirmedSaveResult = await shopStorage.setItem('confirmed_orders', JSON.stringify(updatedConfirmedOrders));
+        
+        console.log('💾 Save result for pending orders:', pendingSaveResult);
+        console.log('💾 Save result for confirmed orders:', confirmedSaveResult);
+        
+        // Update state
+        setPendingOrders(updatedPendingOrders);
+        setConfirmedOrders(updatedConfirmedOrders);
+        
+        console.log('✅ Owner order confirmation completed');
+      }
+      
+      setShowConfirmationModal(false);
+      setShowSuccessModal(true);
+      
+      // Verify storage was updated correctly
+      console.log('🔍 Verifying storage updates...');
+      
+      // Check pending orders
+      const verifyPendingJson = await shopStorage.getItem('pending_orders');
+      const verifyPending = JSON.parse(verifyPendingJson || '[]');
+      console.log('🔍 Verified pending orders count:', verifyPending.length);
+      
+      // Check confirmed orders
+      const verifyConfirmedJson = await shopStorage.getItem('confirmed_orders');
+      const verifyConfirmed = JSON.parse(verifyConfirmedJson || '[]');
+      console.log('🔍 Verified confirmed orders count:', verifyConfirmed.length);
+      
+      // Check cashier receiving records (verify removal)
+      const verifyCashierJson = await shopStorage.getItem(STORAGE_KEYS.CASHIER_RECEIVING_RECORDS);
+      const verifyCashier = JSON.parse(verifyCashierJson || '[]');
+      console.log('🔍 Verified cashier records count:', verifyCashier.length);
+      console.log('🔍 Remaining cashier records:', verifyCashier.map(r => ({ id: r.id, status: r.status })));
+      
+      // Check if the order still exists in cashier records (should be removed if it was a cashier order)
+      const stillExistsInCashier = verifyCashier.some(r => r.id === order.id);
+      console.log('🔍 Order still exists in cashier records:', stillExistsInCashier);
+      
+      // Check if the confirmed order is in confirmed orders
+      const confirmedOrderExists = verifyConfirmed.find(o => o.id === order.id);
+      console.log('🔍 Confirmed order exists in storage:', !!confirmedOrderExists);
       
       // Trigger refresh of Products screen by sending a signal
       await shopStorage.setItem('products_need_refresh', 'true');
@@ -424,11 +617,14 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
   };
 
   const handleViewOrder = (order) => {
-    setViewingOrder(order);
+    setModalOrderData(order);
+    setShowOrderDetailsModal(true);
   };
 
   const handleBackToList = () => {
-    setViewingOrder(null);
+    setShowOrderDetailsModal(false);
+    setShowEditOrderModal(false);
+    setModalOrderData(null);
   };
 
   const handleConfirmOrderFromParams = async () => {
@@ -461,11 +657,25 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
   };
 
   const handleEditOrder = () => {
-    if (onEdit) {
-      onEdit();
-    } else {
-      navigation.goBack();
-    }
+    setShowOrderDetailsModal(false);
+    setShowEditOrderModal(true);
+  };
+
+  const handleConfirmOrderClick = (order) => {
+    setModalOrderData(order);
+    setShowConfirmationModal(true);
+  };
+
+  const handleSuccessModalOK = () => {
+    setShowSuccessModal(false);
+    setModalOrderData(null);
+  };
+
+  const closeAllModals = () => {
+    setShowOrderDetailsModal(false);
+    setShowEditOrderModal(false);
+    setShowConfirmationModal(false);
+    setModalOrderData(null);
   };
 
   const renderOrderItem = ({ item }) => (
@@ -513,6 +723,28 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
         <View style={styles.ultimateHeader}>
           {/* Header Background Overlay */}
           <View style={styles.headerBackgroundOverlay} />
+          
+          {/* Navigation Header */}
+          <View style={styles.navigationHeader}>
+            <TouchableOpacity 
+              style={styles.navButton}
+              onPress={() => navigation.goBack()}
+            >
+              <Icon name="arrow-back" size={24} color="#fff" />
+              <Text style={styles.navButtonText}>Back</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.navButton}
+              onPress={onRefresh}
+              disabled={refreshing}
+            >
+              <Icon name={refreshing ? "sync" : "refresh"} size={24} color={refreshing ? "#94a3b8" : "#fff"} />
+              <Text style={[styles.navButtonText, refreshing && { color: '#94a3b8' }]}>
+                {refreshing ? 'Refreshing...' : 'Refresh'}
+              </Text>
+            </TouchableOpacity>
+          </View>
           
           {/* Command Center Badge */}
           <View style={styles.commandCenterBadge}>
@@ -606,7 +838,7 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
           </View>
         </View>
 
-        {/* Orders List */}
+        {/* Orders List Content */}
         <View style={styles.ordersListContent}>
           {currentOrders.length === 0 ? (
             <View style={styles.emptyContainer}>
@@ -622,117 +854,145 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
               </Text>
             </View>
           ) : (
-            currentOrders.map((order, index) => (
-              <TouchableOpacity 
-                key={`${order.id}-${index}`}
-                style={[
-                  styles.ultimateOrderCard,
-                  order.status === 'confirmed' ? styles.confirmedOrderCard : styles.pendingOrderCard
-                ]}
-                onPress={() => handleViewOrder(order)}
-              >
-                {/* Elite Order Header */}
-                <View style={styles.ultimateOrderHeader}>
-                  <View style={styles.orderRankContainer}>
-                    <View style={[
-                      styles.eliteOrderRankBadge, 
-                      { backgroundColor: order.status === 'confirmed' ? '#10b981' : '#fbbf24' }
-                    ]}>
-                      <Text style={styles.eliteOrderRankText}>#{index + 1}</Text>
+            currentOrders.map((order, index) => {
+              // Log to ensure data is flowing correctly
+              console.log(`🎨 Rendering Elite Card ${index + 1}: ${order.id}`);
+              
+              return (
+                <TouchableOpacity 
+                  key={`${order.id}-${index}`}
+                  style={[
+                    styles.ultimateOrderCard,
+                    order.status === 'confirmed' ? styles.confirmedOrderCard : 
+                    order.createdBy === 'cashier' ? styles.cashierPendingOrderCard : 
+                    styles.pendingOrderCard
+                  ]}
+                  onPress={() => handleViewOrder(order)}
+                >
+                  {/* Elite Order Header */}
+                  <View style={styles.ultimateOrderHeader}>
+                    <View style={styles.orderRankContainer}>
+                      <View style={[
+                        styles.eliteOrderRankBadge, 
+                        { backgroundColor: order.status === 'confirmed' ? '#10b981' : order.createdBy === 'cashier' ? '#06b6d4' : '#fbbf24' }
+                      ]}>
+                        <Text style={styles.eliteOrderRankText}>#{index + 1}</Text>
+                      </View>
+                      <View style={[styles.orderBadge, { backgroundColor: order.status === 'confirmed' ? '#10b981' : order.createdBy === 'cashier' ? '#06b6d4' : '#fbbf24'}]}>
+                        <Icon name={order.status === 'confirmed' ? 'check-circle' : order.createdBy === 'cashier' ? 'person' : 'hourglass-empty'} size={12} color="#ffffff" />
+                        <Text style={styles.orderBadgeText}>{order.status === 'confirmed' ? 'CONFIRMED' : order.createdBy === 'cashier' ? 'CASHIER' : 'PENDING'}</Text>
+                      </View>
                     </View>
-                    <View style={[styles.orderBadge, { backgroundColor: order.status === 'confirmed' ? '#10b981' : '#fbbf24'}]}>
-                      <Icon name={order.status === 'confirmed' ? 'check-circle' : 'hourglass-empty'} size={12} color="#ffffff" />
-                      <Text style={styles.orderBadgeText}>{order.status === 'confirmed' ? 'CONFIRMED' : 'PENDING'}</Text>
-                    </View>
-                  </View>
-                  <View style={[styles.orderPerformanceCrown, { backgroundColor: order.status === 'confirmed' ? '#10b981' : '#fbbf24'}]}>
-                    <Icon name="assignment" size={16} color="#ffffff" />
-                  </View>
-                </View>
-                
-                {/* Order Name */}
-                <Text style={styles.ultimateOrderName}>📋 Order {order.id}</Text>
-                
-                {/* Elite Order Metrics */}
-                <View style={styles.ultimateOrderMetrics}>
-                  <View style={styles.orderMetricRow}>
-                    <View style={styles.orderMetricIconContainer}>
-                      <Icon name="business" size={14} color="#3b82f6" />
-                    </View>
-                    <View style={styles.orderMetricContent}>
-                      <Text style={styles.orderMetricLabel}>Supplier</Text>
-                      <Text style={styles.orderMetricValue}>{order.supplierName}</Text>
+                    <View style={[styles.orderPerformanceCrown, { backgroundColor: order.status === 'confirmed' ? '#10b981' : order.createdBy === 'cashier' ? '#06b6d4' : '#fbbf24'}]}>
+                      <Icon name="assignment" size={16} color="#ffffff" />
                     </View>
                   </View>
                   
-                  <View style={styles.orderMetricRow}>
-                    <View style={styles.orderMetricIconContainer}>
-                      <Icon name="inventory" size={14} color="#8b5cf6" />
+                  {/* Order Name */}
+                  <Text style={styles.ultimateOrderName}>📋 Order {order.id}</Text>
+                  
+                  {/* Elite Order Metrics */}
+                  <View style={styles.ultimateOrderMetrics}>
+                    <View style={styles.orderMetricRow}>
+                      <View style={styles.orderMetricIconContainer}>
+                        <Icon name="business" size={14} color="#3b82f6" />
+                      </View>
+                      <View style={styles.orderMetricContent}>
+                        <Text style={styles.orderMetricLabel}>Supplier</Text>
+                        <Text style={styles.orderMetricValue}>{order.supplierName}</Text>
+                      </View>
                     </View>
-                    <View style={styles.orderMetricContent}>
-                      <Text style={styles.orderMetricLabel}>Items</Text>
-                      <Text style={styles.orderMetricValue}>{order.receivingItems?.length || 0}</Text>
+                    
+                    <View style={styles.orderMetricRow}>
+                      <View style={styles.orderMetricIconContainer}>
+                        <Icon name="inventory" size={14} color="#8b5cf6" />
+                      </View>
+                      <View style={styles.orderMetricContent}>
+                        <Text style={styles.orderMetricLabel}>Items</Text>
+                        <Text style={styles.orderMetricValue}>{order.receivingItems?.length || 0}</Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.orderMetricRow}>
+                      <View style={styles.orderMetricIconContainer}>
+                        <Icon name="attach-money" size={14} color="#10b981" />
+                      </View>
+                      <View style={styles.orderMetricContent}>
+                        <Text style={styles.orderMetricLabel}>Total Value</Text>
+                        <Text style={[styles.orderMetricValue, { color: '#10b981'}]}>${order.totals?.totalValue?.toFixed(2) || '0.00'}</Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.orderMetricRow}>
+                      <View style={styles.orderMetricIconContainer}>
+                        <Icon name={order.createdBy === 'cashier' ? "person" : "business"} size={14} color={order.createdBy === 'cashier' ? "#06b6d4" : "#f59e0b"} />
+                      </View>
+                      <View style={styles.orderMetricContent}>
+                        <Text style={styles.orderMetricLabel}>Placed By</Text>
+                        <Text style={[styles.orderMetricValue, { color: order.createdBy === 'cashier' ? '#06b6d4' : '#f59e0b' }]}>
+                          {order.createdBy === 'cashier' ? (() => {
+                            console.log('💰 Debug cashier order display:', {
+                              orderId: order.id,
+                              createdBy: order.createdBy,
+                              cashierName: order.cashierName,
+                              cashierNameType: typeof order.cashierName,
+                              cashierNameExists: !!order.cashierName
+                            });
+                            return order.cashierName || 'Cashier';
+                          })() : 'Owner'}
+                        </Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.orderMetricRow}>
+                      <View style={styles.orderMetricIconContainer}>
+                        <Icon name="schedule" size={14} color="#f59e0b" />
+                      </View>
+                      <View style={styles.orderMetricContent}>
+                        <Text style={styles.orderMetricLabel}>Date</Text>
+                        <Text style={styles.orderMetricValue}>{new Date(order.createdAt).toLocaleDateString()}</Text>
+                      </View>
                     </View>
                   </View>
                   
-                  <View style={styles.orderMetricRow}>
-                    <View style={styles.orderMetricIconContainer}>
-                      <Icon name="attach-money" size={14} color="#10b981" />
+                  {/* Elite Order Progress Bar */}
+                  <View style={styles.ultimateOrderProgress}>
+                    <View style={styles.orderProgressBarBg}>
+                      <View 
+                        style={[
+                          styles.orderProgressBarFill,
+                          { 
+                            width: order.status === 'confirmed' ? '100%' : order.createdBy === 'cashier' ? '80%' : '60%',
+                            backgroundColor: order.status === 'confirmed' ? '#10b981' : order.createdBy === 'cashier' ? '#06b6d4' : '#fbbf24'
+                          }
+                        ]} 
+                      />
                     </View>
-                    <View style={styles.orderMetricContent}>
-                      <Text style={styles.orderMetricLabel}>Total Value</Text>
-                      <Text style={[styles.orderMetricValue, { color: '#10b981'}]}>${order.totals?.totalValue?.toFixed(2) || '0.00'}</Text>
-                    </View>
-                  </View>
-                  
-                  <View style={styles.orderMetricRow}>
-                    <View style={styles.orderMetricIconContainer}>
-                      <Icon name="schedule" size={14} color="#f59e0b" />
-                    </View>
-                    <View style={styles.orderMetricContent}>
-                      <Text style={styles.orderMetricLabel}>Date</Text>
-                      <Text style={styles.orderMetricValue}>{new Date(order.createdAt).toLocaleDateString()}</Text>
-                    </View>
-                  </View>
-                </View>
-                
-                {/* Elite Order Progress */}
-                <View style={styles.ultimateOrderProgress}>
-                  <View style={styles.orderProgressBarBg}>
-                    <View 
-                      style={[
-                        styles.orderProgressBarFill,
-                        { 
-                          width: order.status === 'confirmed' ? '100%' : '60%',
-                          backgroundColor: order.status === 'confirmed' ? '#10b981' : '#fbbf24'
-                        }
-                      ]} 
-                    />
-                  </View>
-                  <Text style={styles.orderProgressLabel}>
-                    {order.status === 'confirmed' ? 'Order Completed' : 'Awaiting Confirmation'}
-                  </Text>
-                </View>
-                
-                {/* Elite Order Stats */}
-                <View style={styles.ultimateOrderStats}>
-                  <View style={styles.orderStatItem}>
-                    <Text style={styles.orderStatLabel}>Reference</Text>
-                    <Text style={styles.orderStatValue}>{order.reference || 'N/A'}</Text>
-                  </View>
-                  <View style={styles.orderStatItem}>
-                    <Text style={styles.orderStatLabel}>Invoice</Text>
-                    <Text style={styles.orderStatValue}>{order.invoiceNumber || 'N/A'}</Text>
-                  </View>
-                  <View style={styles.orderStatItem}>
-                    <Text style={styles.orderStatLabel}>Status</Text>
-                    <Text style={[styles.orderStatValue, { color: order.status === 'confirmed' ? '#10b981' : '#fbbf24'}]}>
-                      {order.status === 'confirmed' ? '✅ Complete' : '⏳ Pending'}
+                    <Text style={styles.orderProgressLabel}>
+                      {order.status === 'confirmed' ? 'Order Completed' : order.createdBy === 'cashier' ? 'Cashier Order - Awaiting Review' : 'Awaiting Confirmation'}
                     </Text>
                   </View>
-                </View>
-              </TouchableOpacity>
-            ))
+                  
+                  {/* Elite Order Stats Footer */}
+                  <View style={styles.ultimateOrderStats}>
+                    <View style={styles.orderStatItem}>
+                      <Text style={styles.orderStatLabel}>Reference</Text>
+                      <Text style={styles.orderStatValue}>{order.reference || 'N/A'}</Text>
+                    </View>
+                    <View style={styles.orderStatItem}>
+                      <Text style={styles.orderStatLabel}>Invoice</Text>
+                      <Text style={styles.orderStatValue}>{order.invoiceNumber || 'N/A'}</Text>
+                    </View>
+                    <View style={styles.orderStatItem}>
+                      <Text style={styles.orderStatLabel}>Status</Text>
+                      <Text style={[styles.orderStatValue, { color: order.status === 'confirmed' ? '#10b981' : order.createdBy === 'cashier' ? '#06b6d4' : '#fbbf24'}]}>
+                        {order.status === 'confirmed' ? '✅ Complete' : order.createdBy === 'cashier' ? '👤 Cashier' : '⏳ Pending'}
+                      </Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ); // Return ends here
+            }) // Map ends here
           )}
         </View>
         
@@ -742,8 +1002,8 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
           minHeight: Platform.OS === 'web' ? 100 : 0
         }} />
       </ScrollView>
-    );
-  };
+    ); // Component return ends here
+}; // Component function ends here
 
   const renderOrderDetails = () => {
     const order = viewingOrder || {
@@ -763,6 +1023,29 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
         <View style={[styles.container, Platform.OS === 'web' && styles.webContainer]}>
           <View style={styles.ultimateHeader}>
             <View style={styles.headerBackgroundOverlay} />
+            
+            {/* Navigation Header */}
+            <View style={styles.navigationHeader}>
+              <TouchableOpacity 
+                style={styles.navButton}
+                onPress={() => navigation.goBack()}
+              >
+                <Icon name="arrow-back" size={24} color="#fff" />
+                <Text style={styles.navButtonText}>Back</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.navButton}
+                onPress={onRefresh}
+                disabled={refreshing}
+              >
+                <Icon name={refreshing ? "sync" : "refresh"} size={24} color={refreshing ? "#94a3b8" : "#fff"} />
+                <Text style={[styles.navButtonText, refreshing && { color: '#94a3b8' }]}>
+                  {refreshing ? 'Refreshing...' : 'Refresh'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            
             <TouchableOpacity onPress={viewingOrder ? handleBackToList : () => navigation.goBack()} style={styles.backButton}>
               <Icon name="arrow-back" size={24} color="#fff" />
               <Text style={styles.backButtonText}>Back</Text>
@@ -801,6 +1084,28 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
         <View style={styles.ultimateHeader}>
           <View style={styles.headerBackgroundOverlay} />
           
+          {/* Navigation Header */}
+          <View style={styles.navigationHeader}>
+            <TouchableOpacity 
+              style={styles.navButton}
+              onPress={viewingOrder ? handleBackToList : () => navigation.goBack()}
+            >
+              <Icon name="arrow-back" size={24} color="#fff" />
+              <Text style={styles.navButtonText}>Back</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.navButton}
+              onPress={onRefresh}
+              disabled={refreshing}
+            >
+              <Icon name={refreshing ? "sync" : "refresh"} size={24} color={refreshing ? "#94a3b8" : "#fff"} />
+              <Text style={[styles.navButtonText, refreshing && { color: '#94a3b8' }]}>
+                {refreshing ? 'Refreshing...' : 'Refresh'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+          
           <TouchableOpacity onPress={viewingOrder ? handleBackToList : () => navigation.goBack()} style={styles.backButton}>
             <Icon name="arrow-back" size={24} color="#fff" />
             <Text style={styles.backButtonText}>Back to Orders</Text>
@@ -816,7 +1121,7 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
           <View style={styles.ultimateHeaderSubtitleContainer}>
             <Icon name="business" size={16} color="#3b82f6" />
             <Text style={styles.ultimateHeaderSubtitle}>{order.supplierName}</Text>
-            <Icon name={order.status === 'confirmed' ? "check-circle" : "hourglass-empty"} size={16} color={order.status === 'confirmed' ? "#10b981" : "#fbbf24"} />
+            <Icon name={order.status === 'confirmed' ? "check-circle" : order.status === 'cashier_received' ? "person" : "hourglass-empty"} size={16} color={order.status === 'confirmed' ? "#10b981" : order.status === 'cashier_received' ? "#06b6d4" : "#fbbf24"} />
           </View>
           
           {/* Premium Status Metrics */}
@@ -850,11 +1155,11 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
           
           {/* Real-time Status Indicator */}
           <View style={styles.realtimeStatus}>
-            <View style={[styles.statusDot, { backgroundColor: order.status === 'confirmed' ? '#10b981' : '#fbbf24'}]} />
-            <Text style={[styles.statusText, { color: order.status === 'confirmed' ? '#10b981' : '#fbbf24'}]}>
-              {order.status === 'confirmed' ? 'Order Completed' : 'Pending Confirmation'}
+            <View style={[styles.statusDot, { backgroundColor: order.status === 'confirmed' ? '#10b981' : order.createdBy === 'cashier' ? '#06b6d4' : '#fbbf24'}]} />
+            <Text style={[styles.statusText, { color: order.status === 'confirmed' ? '#10b981' : order.createdBy === 'cashier' ? '#06b6d4' : '#fbbf24'}]}>
+              {order.status === 'confirmed' ? 'Order Completed' : order.createdBy === 'cashier' ? 'Cashier Order - Pending Review' : 'Pending Confirmation'}
             </Text>
-            <Icon name={order.status === 'confirmed' ? "verified" : "schedule"} size={14} color={order.status === 'confirmed' ? "#10b981" : "#fbbf24"} />
+            <Icon name={order.status === 'confirmed' ? "verified" : order.createdBy === 'cashier' ? "person" : "schedule"} size={14} color={order.status === 'confirmed' ? "#10b981" : order.createdBy === 'cashier' ? "#06b6d4" : "#fbbf24"} />
           </View>
           
           {/* Performance Summary */}
@@ -884,8 +1189,8 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
                   <Text style={styles.categoryBadgeText}>ORDER</Text>
                 </View>
               </View>
-              <View style={[styles.categoryPerformanceIndicator, { backgroundColor: order.status === 'confirmed' ? '#10b981' : '#fbbf24'}]}>
-                <Icon name={order.status === 'confirmed' ? "check-circle" : "hourglass-empty"} size={14} color="#ffffff" />
+              <View style={[styles.categoryPerformanceIndicator, { backgroundColor: order.status === 'confirmed' ? '#10b981' : order.createdBy === 'cashier' ? '#06b6d4' : '#fbbf24'}]}>
+                <Icon name={order.status === 'confirmed' ? "check-circle" : order.createdBy === 'cashier' ? "person" : "hourglass-empty"} size={14} color="#ffffff" />
               </View>
             </View>
             
@@ -944,12 +1249,21 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
               
               <View style={styles.categoryMetricRow}>
                 <View style={styles.categoryMetricIconContainer}>
-                  <Icon name={order.status === 'confirmed' ? "verified" : "pending"} size={14} color={order.status === 'confirmed' ? "#10b981" : "#fbbf24"} />
+                  <Icon name={order.status === 'confirmed' ? "verified" : order.status === 'cashier_received' ? "person" : "pending"} size={14} color={order.status === 'confirmed' ? "#10b981" : order.status === 'cashier_received' ? "#06b6d4" : "#fbbf24"} />
                 </View>
                 <View style={styles.categoryMetricContent}>
                   <Text style={styles.categoryMetricLabel}>Status</Text>
-                  <Text style={[styles.categoryMetricValue, { color: order.status === 'confirmed' ? '#10b981' : '#fbbf24'}]}>
-                    {order.status === 'confirmed' ? 'Confirmed' : 'Pending Review'}
+                  <Text style={[styles.categoryMetricValue, { color: order.createdBy === 'cashier' ? '#06b6d4' : '#f59e0b' }]}>
+                    {order.createdBy === 'cashier' ? (() => {
+                      console.log('💰 Debug modal cashier order display:', {
+                        orderId: order.id,
+                        createdBy: order.createdBy,
+                        cashierName: order.cashierName,
+                        cashierNameType: typeof order.cashierName,
+                        cashierNameExists: !!order.cashierName
+                      });
+                      return order.cashierName || 'Cashier';
+                    })() : 'Owner'}
                   </Text>
                 </View>
               </View>
@@ -961,14 +1275,14 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
                   style={[
                     styles.categoryProgressBarFill,
                     { 
-                      width: order.status === 'confirmed' ? '100%' : '60%',
-                      backgroundColor: order.status === 'confirmed' ? '#10b981' : '#fbbf24'
+                      width: order.status === 'confirmed' ? '100%' : order.createdBy === 'cashier' ? '80%' : '60%',
+                      backgroundColor: order.status === 'confirmed' ? '#10b981' : order.createdBy === 'cashier' ? '#06b6d4' : '#fbbf24'
                     }
                   ]} 
                 />
               </View>
               <Text style={styles.categoryProgressLabel}>
-                {order.status === 'confirmed' ? 'Order Completed' : 'Awaiting Confirmation'}
+                {order.status === 'confirmed' ? 'Order Completed' : order.createdBy === 'cashier' ? 'Cashier Order - Awaiting Review' : 'Awaiting Confirmation'}
               </Text>
             </View>
           </View>
@@ -1306,7 +1620,17 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
                   { borderLeftColor: '#10b981' },
                   styles.singleColumnPaymentCard
                 ]}
-                onPress={() => viewingOrder ? handleConfirmOrder(viewingOrder) : handleConfirmOrderFromParams()}
+                onPress={() => viewingOrder ? handleConfirmOrderClick(viewingOrder) : handleConfirmOrderClick({
+                  id: orderId,
+                  reference: receivingReference,
+                  invoiceNumber: invoiceNumber,
+                  supplierName: supplierName,
+                  receivingDate: receivingDate,
+                  notes: notes,
+                  receivingItems: receivingItems,
+                  totals: totals,
+                  status: 'pending_review'
+                })}
                 disabled={savingState}
               >
                 <View style={styles.enhancedPaymentHeader}>
@@ -1386,6 +1710,29 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
       <View style={[styles.container, Platform.OS === 'web' && styles.webContainer]}>
         <View style={styles.ultimateHeader}>
           <View style={styles.headerBackgroundOverlay} />
+          
+          {/* Navigation Header */}
+          <View style={styles.navigationHeader}>
+            <TouchableOpacity 
+              style={styles.navButton}
+              onPress={() => navigation.goBack()}
+            >
+              <Icon name="arrow-back" size={24} color="#fff" />
+              <Text style={styles.navButtonText}>Back</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.navButton}
+              onPress={onRefresh}
+              disabled={refreshing}
+            >
+              <Icon name={refreshing ? "sync" : "refresh"} size={24} color={refreshing ? "#94a3b8" : "#fff"} />
+              <Text style={[styles.navButtonText, refreshing && { color: '#94a3b8' }]}>
+                {refreshing ? 'Refreshing...' : 'Refresh'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+          
           <Text style={styles.ultimateHeaderTitle}>🚀 Loading Order Center</Text>
           <Text style={styles.ultimateHeaderSubtitle}>Initializing Order Management System</Text>
         </View>
@@ -1399,13 +1746,311 @@ const OrderConfirmationScreen = ({ route, navigation }) => {
     );
   }
 
-  // If viewing specific order details, show details view
-  if (hasSpecificOrder || viewingOrder) {
-    return renderOrderDetails();
-  }
+  // Modal rendering functions
+  const renderOrderDetailsModal = () => {
+    if (!showOrderDetailsModal || !modalOrderData) return null;
+    
+    const order = modalOrderData;
+    
+    return (
+      <Modal
+        visible={showOrderDetailsModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowOrderDetailsModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>📋 Order Details</Text>
+            <TouchableOpacity onPress={() => setShowOrderDetailsModal(false)}>
+              <Text style={styles.modalClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
 
-  // Otherwise show the order list
-  return renderOrderList();
+          <ScrollView style={styles.modalContent}>
+            <View style={styles.modalOrderCard}>
+              <Text style={styles.modalOrderId}>Order {order.id}</Text>
+              <Text style={styles.modalSupplier}>🏢 {order.supplierName}</Text>
+              
+              <View style={styles.modalInfoRow}>
+                <Text style={styles.modalInfoLabel}>Reference:</Text>
+                <Text style={styles.modalInfoValue}>{order.reference || 'N/A'}</Text>
+              </View>
+              
+              <View style={styles.modalInfoRow}>
+                <Text style={styles.modalInfoLabel}>Invoice:</Text>
+                <Text style={styles.modalInfoValue}>{order.invoiceNumber || 'N/A'}</Text>
+              </View>
+              
+              <View style={styles.modalInfoRow}>
+                <Text style={styles.modalInfoLabel}>Date:</Text>
+                <Text style={styles.modalInfoValue}>{order.receivingDate}</Text>
+              </View>
+              
+              <View style={styles.modalInfoRow}>
+                <Text style={styles.modalInfoLabel}>Items:</Text>
+                <Text style={styles.modalInfoValue}>{order.receivingItems?.length || 0}</Text>
+              </View>
+              
+              <View style={styles.modalInfoRow}>
+                <Text style={styles.modalInfoLabel}>Total Value:</Text>
+                <Text style={styles.modalInfoValue}>${order.totals?.totalValue?.toFixed(2) || '0.00'}</Text>
+              </View>
+              
+              <View style={styles.modalInfoRow}>
+                <Text style={styles.modalInfoLabel}>Created By:</Text>
+                <Text style={[
+                  styles.modalInfoValue, 
+                  { color: order.createdBy === 'cashier' ? '#06b6d4' : '#f59e0b' }
+                ]}>
+                  {order.createdBy === 'cashier' ? (() => {
+                    console.log('💰 Debug modal order details display:', {
+                      orderId: order.id,
+                      createdBy: order.createdBy,
+                      cashierName: order.cashierName,
+                      cashierNameType: typeof order.cashierName,
+                      cashierNameExists: !!order.cashierName
+                    });
+                    return order.cashierName || 'Cashier';
+                  })() : 'Owner'}
+                </Text>
+              </View>
+              
+              <View style={styles.modalInfoRow}>
+                <Text style={styles.modalInfoLabel}>Status:</Text>
+                <Text style={[
+                  styles.modalInfoValue, 
+                  { color: order.status === 'confirmed' ? '#10b981' : order.createdBy === 'cashier' ? '#06b6d4' : '#fbbf24' }
+                ]}>
+                  {order.status === 'confirmed' ? '✅ Confirmed' : order.createdBy === 'cashier' ? '👤 Cashier Order' : '⏳ Pending'}
+                </Text>
+              </View>
+            </View>
+            
+            {order.receivingItems && order.receivingItems.length > 0 && (
+              <View style={styles.modalItemsSection}>
+                <Text style={styles.modalSectionTitle}>📦 Items ({order.receivingItems.length})</Text>
+                {order.receivingItems.map((item, index) => (
+                  <View key={index} style={styles.modalItemCard}>
+                    <Text style={styles.modalItemName}>{item.product?.name || `Item ${index + 1}`}</Text>
+                    <View style={styles.modalItemDetails}>
+                      <Text style={styles.modalItemDetail}>Qty: {item.quantity}</Text>
+                      <Text style={styles.modalItemDetail}>Cost: ${item.costPrice?.toFixed(2) || '0.00'}</Text>
+                      <Text style={styles.modalItemDetail}>Total: ${item.totalCost?.toFixed(2) || '0.00'}</Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+            
+            {order.notes && (
+              <View style={styles.modalNotesSection}>
+                <Text style={styles.modalSectionTitle}>📝 Notes</Text>
+                <Text style={styles.modalNotesText}>{order.notes}</Text>
+              </View>
+            )}
+          </ScrollView>
+          
+          <View style={styles.modalActions}>
+            <TouchableOpacity 
+              style={styles.modalSecondaryButton}
+              onPress={() => setShowOrderDetailsModal(false)}
+            >
+              <Text style={styles.modalSecondaryButtonText}>Close</Text>
+            </TouchableOpacity>
+            
+            {order.status === 'pending_review' && (
+              <TouchableOpacity 
+                style={styles.modalPrimaryButton}
+                onPress={() => {
+                  setShowOrderDetailsModal(false);
+                  handleConfirmOrderClick(order);
+                }}
+              >
+                <Text style={styles.modalPrimaryButtonText}>Confirm Order</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  const renderEditOrderModal = () => {
+    if (!showEditOrderModal || !modalOrderData) return null;
+    
+    return (
+      <Modal
+        visible={showEditOrderModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowEditOrderModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>✏️ Edit Order</Text>
+            <TouchableOpacity onPress={() => setShowEditOrderModal(false)}>
+              <Text style={styles.modalClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.modalContent}>
+            <View style={styles.editWarningCard}>
+              <Text style={styles.editWarningText}>
+                ⚠️ Order editing is not fully implemented yet. This would typically allow you to modify items, quantities, or supplier information.
+              </Text>
+            </View>
+            
+            <View style={styles.modalOrderCard}>
+              <Text style={styles.modalOrderId}>Order {modalOrderData.id}</Text>
+              <Text style={styles.modalSupplier}>🏢 {modalOrderData.supplierName}</Text>
+              
+              <Text style={styles.editFeatureText}>
+                📋 Available for future implementation:
+              </Text>
+              
+              <View style={styles.featureList}>
+                <Text style={styles.featureItem}>• Modify item quantities</Text>
+                <Text style={styles.featureItem}>• Add or remove items</Text>
+                <Text style={styles.featureItem}>• Update supplier information</Text>
+                <Text style={styles.featureItem}>• Change receiving date</Text>
+                <Text style={styles.featureItem}>• Update notes</Text>
+              </View>
+            </View>
+          </ScrollView>
+          
+          <View style={styles.modalActions}>
+            <TouchableOpacity 
+              style={styles.modalSecondaryButton}
+              onPress={() => setShowEditOrderModal(false)}
+            >
+              <Text style={styles.modalSecondaryButtonText}>Cancel</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.modalPrimaryButton}
+              onPress={() => {
+                Alert.alert('Feature Not Available', 'Order editing will be available in a future update.');
+              }}
+            >
+              <Text style={styles.modalPrimaryButtonText}>Save Changes</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  const renderConfirmationModal = () => {
+    if (!showConfirmationModal || !modalOrderData) return null;
+    
+    return (
+      <Modal
+        visible={showConfirmationModal}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setShowConfirmationModal(false)}
+      >
+        <View style={styles.confirmationModalContainer}>
+          <View style={styles.confirmationModalContent}>
+            <View style={styles.confirmationIconContainer}>
+              <Text style={styles.confirmationIcon}>⚠️</Text>
+            </View>
+            
+            <Text style={styles.confirmationTitle}>Confirm Order</Text>
+            
+            <Text style={styles.confirmationMessage}>
+              Are you sure you want to confirm this order? This action will:
+            </Text>
+            
+            <View style={styles.confirmationEffects}>
+              <Text style={styles.confirmationEffect}>📦 Update product inventory</Text>
+              <Text style={styles.confirmationEffect}>💰 Process financial totals</Text>
+              <Text style={styles.confirmationEffect}>📋 Mark order as confirmed</Text>
+              <Text style={styles.confirmationEffect}>⚠️ This action cannot be easily undone</Text>
+            </View>
+            
+            <Text style={styles.confirmationOrderId}>
+              Order: {modalOrderData.id}
+            </Text>
+            
+            <View style={styles.modalActions}>
+              <TouchableOpacity 
+                style={styles.modalSecondaryButton}
+                onPress={() => setShowConfirmationModal(false)}
+              >
+                <Text style={styles.modalSecondaryButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.modalPrimaryButton}
+                onPress={() => handleConfirmOrder(modalOrderData)}
+                disabled={savingState}
+              >
+                <Text style={[
+                  styles.modalPrimaryButtonText,
+                  savingState && { opacity: 0.7 }
+                ]}>
+                  {savingState ? 'Processing...' : 'Confirm Order'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  const renderSuccessModal = () => {
+    if (!showSuccessModal) return null;
+    
+    return (
+      <Modal
+        visible={showSuccessModal}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setShowSuccessModal(false)}
+      >
+        <View style={styles.successModalContainer}>
+          <View style={styles.successModalContent}>
+            <View style={styles.successIconContainer}>
+              <Text style={styles.successIcon}>✅</Text>
+            </View>
+            
+            <Text style={styles.successTitle}>Order Confirmed Successfully!</Text>
+            
+            <Text style={styles.successMessage}>
+              Your order has been confirmed and processed. Inventory has been updated accordingly.
+            </Text>
+            
+            <View style={styles.successDetails}>
+              <Text style={styles.successDetail}>📦 Products updated in inventory</Text>
+              <Text style={styles.successDetail}>📋 Order marked as confirmed</Text>
+              <Text style={styles.successDetail}>🔄 Products screen will refresh</Text>
+            </View>
+            
+            <TouchableOpacity 
+              style={styles.successOKButton}
+              onPress={handleSuccessModalOK}
+            >
+              <Text style={styles.successOKButtonText}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  // Show the order list (modals will overlay when needed)
+  return (
+    <>
+      {renderOrderList()}
+      {renderOrderDetailsModal()}
+      {renderEditOrderModal()}
+      {renderConfirmationModal()}
+      {renderSuccessModal()}
+    </>
+  );
 };
 
 const styles = StyleSheet.create({
@@ -1642,6 +2287,36 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 6,
   },
+  // Navigation Header Styles
+  navigationHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    position: 'relative',
+    zIndex: 2,
+  },
+  navButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.4)',
+    elevation: 2,
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  navButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
   backButton: {
     color: '#3b82f6',
     fontSize: 16,
@@ -1732,8 +2407,14 @@ const styles = StyleSheet.create({
   pendingOrderCard: {
     borderLeftColor: '#fbbf24',
   },
+  cashierPendingOrderCard: {
+    borderLeftColor: '#06b6d4',  // Cyan for cashier orders in pending
+  },
   confirmedOrderCard: {
     borderLeftColor: '#10b981',
+  },
+  cashierReceivedOrderCard: {
+    borderLeftColor: '#06b6d4',
   },
   ultimateOrderHeader: {
     flexDirection: 'row',
@@ -2203,6 +2884,301 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   errorButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+
+  // Modal Styles
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#0a0a0a',
+    paddingTop: 50,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  modalTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  modalClose: {
+    color: '#3b82f6',
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  modalContent: {
+    flex: 1,
+    padding: 20,
+  },
+  modalOrderCard: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  modalOrderId: {
+    color: '#3b82f6',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  modalSupplier: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  modalInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  modalInfoLabel: {
+    color: '#ccc',
+    fontSize: 14,
+  },
+  modalInfoValue: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalItemsSection: {
+    marginTop: 16,
+  },
+  modalSectionTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  modalItemCard: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+  },
+  modalItemName: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  modalItemDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  modalItemDetail: {
+    color: '#ccc',
+    fontSize: 12,
+  },
+  modalNotesSection: {
+    marginTop: 16,
+  },
+  modalNotesText: {
+    color: '#ccc',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+    gap: 12,
+  },
+  modalPrimaryButton: {
+    backgroundColor: '#10b981',
+    borderRadius: 8,
+    padding: 12,
+    paddingHorizontal: 20,
+    flex: 1,
+  },
+  modalPrimaryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  modalSecondaryButton: {
+    backgroundColor: '#374151',
+    borderRadius: 8,
+    padding: 12,
+    paddingHorizontal: 20,
+    flex: 1,
+  },
+  modalSecondaryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  editWarningCard: {
+    backgroundColor: 'rgba(251, 191, 36, 0.1)',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#fbbf24',
+  },
+  editWarningText: {
+    color: '#fbbf24',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  editFeatureText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  featureList: {
+    marginLeft: 16,
+  },
+  featureItem: {
+    color: '#ccc',
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  // Confirmation Modal Styles
+  confirmationModalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+  },
+  confirmationModalContent: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 20,
+    padding: 30,
+    margin: 20,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fbbf24',
+    maxWidth: '90%',
+  },
+  confirmationIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#fbbf24',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  confirmationIcon: {
+    fontSize: 40,
+  },
+  confirmationTitle: {
+    color: '#fbbf24',
+    fontSize: 22,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 15,
+  },
+  confirmationMessage: {
+    color: '#ccc',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 22,
+  },
+  confirmationEffects: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 20,
+    width: '100%',
+  },
+  confirmationEffect: {
+    color: '#fff',
+    fontSize: 14,
+    marginBottom: 8,
+    fontFamily: 'monospace',
+  },
+  confirmationOrderId: {
+    color: '#3b82f6',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 25,
+    textAlign: 'center',
+  },
+  // Success Modal Styles
+  successModalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+  },
+  successModalContent: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 20,
+    padding: 30,
+    margin: 20,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#10b981',
+    maxWidth: '90%',
+  },
+  successIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#10b981',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  successIcon: {
+    fontSize: 40,
+  },
+  successTitle: {
+    color: '#10b981',
+    fontSize: 22,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 15,
+  },
+  successMessage: {
+    color: '#ccc',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 22,
+  },
+  successDetails: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 20,
+    width: '100%',
+  },
+  successDetail: {
+    color: '#fff',
+    fontSize: 14,
+    marginBottom: 8,
+    fontFamily: 'monospace',
+  },
+  successOKButton: {
+    backgroundColor: '#10b981',
+    borderRadius: 10,
+    padding: 15,
+    alignItems: 'center',
+    marginTop: 20,
+    width: '80%',
+  },
+  successOKButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',

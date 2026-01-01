@@ -1,75 +1,85 @@
 #!/usr/bin/env python3
-
+"""
+Debug script to check product data and API endpoints
+"""
 import os
+import sys
 import django
+
+# Add the project directory to Python path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Setup Django
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'luminan_backend.settings')
 django.setup()
 
-from core.models import Product, ShopConfiguration
-from django.db import models
+from core.models import ShopConfiguration, Product
+from core.serializers import ProductSerializer
 
 def debug_products():
+    print("DEBUGGING PRODUCT LOADING...")
+    print("=" * 50)
+    
     try:
+        # Check if shop exists
         shop = ShopConfiguration.objects.get()
-        print(f"Found shop: {shop.name}")
+        print(f"Shop found: {shop.name}")
+        print(f"   Email: {shop.email}")
+        print(f"   ID: {shop.id}")
+        print()
         
-        products = Product.objects.filter(shop=shop).order_by('-created_at')[:20]
-        print(f"Total products: {products.count()}")
+        # Check products count
+        products = Product.objects.filter(shop=shop)
+        product_count = products.count()
+        print(f"Products count: {product_count}")
         
-        print("\nRecent products:")
-        for p in products:
-            barcode_status = "No Barcode" if not p.barcode or p.barcode.strip() == "" else f"Has Barcode: {p.barcode}"
-            print(f"ID: {p.id}")
-            print(f"  Name: {p.name}")
-            print(f"  Line Code: {p.line_code}")
-            print(f"  Barcode: {barcode_status}")
-            print(f"  Stock: {p.stock_quantity}")
-            print(f"  Created: {p.created_at}")
-            print()
-        
-        # Check for split products specifically
-        print("\n=== SPLIT PRODUCT ANALYSIS ===")
-        split_products = products.filter(
-            models.Q(name__icontains='half') |
-            models.Q(name__icontains='quarter') |
-            models.Q(name__icontains='small') |
-            models.Q(name__icontains='mini')
-        )
-        print(f"Products with split-related names: {split_products.count()}")
-        
-        no_barcode_products = products.filter(
-            models.Q(barcode__isnull=True) |
-            models.Q(barcode__exact='') |
-            models.Q(barcode__strip__exact='')
-        )
-        print(f"Products with no barcode: {no_barcode_products.count()}")
-        
-        # Combined filter like in HalfProductsScreen
-        split_criteria = products.filter(
-            models.Q(name__icontains='half') |
-            models.Q(name__icontains='quarter') |
-            models.Q(name__icontains='small') |
-            models.Q(name__icontains='mini')
-        )
-        
-        no_barcode_criteria = products.filter(
-            models.Q(barcode__isnull=True) |
-            models.Q(barcode__exact='') |
-            models.Q(barcode__strip__exact='')
-        )
-        
-        all_split_products = split_criteria | no_barcode_criteria
-        print(f"Total split products (combined criteria): {all_split_products.count()}")
-        
-        if all_split_products.exists():
-            print("\nSplit products found:")
-            for p in all_split_products:
-                print(f"  - {p.name} (Barcode: {p.barcode or 'None'})")
+        if product_count == 0:
+            print("NO PRODUCTS FOUND!")
+            print("   This explains why the stock take screen shows no products.")
+            print("   You need to add some products first.")
+        else:
+            print(f"Found {product_count} products:")
+            print("-" * 30)
+            
+            # Show first few products
+            for i, product in enumerate(products[:5]):
+                print(f"   {i+1}. {product.name}")
+                print(f"      ID: {product.id}")
+                print(f"      Stock: {product.stock_quantity}")
+                print(f"      Price: ${product.price}")
+                print(f"      Category: {product.category}")
+                print()
+            
+            if product_count > 5:
+                print(f"   ... and {product_count - 5} more products")
+                print()
+            
+            # Test serializer
+            print("Testing ProductSerializer...")
+            try:
+                serializer = ProductSerializer(products, many=True)
+                serialized_data = serializer.data
+                print(f"Serializer works! Generated {len(serialized_data)} product records")
+                
+                # Show first product structure
+                if serialized_data:
+                    print("First product structure:")
+                    first_product = serialized_data[0]
+                    for key, value in first_product.items():
+                        print(f"   {key}: {value}")
+                    print()
+                
+            except Exception as e:
+                print(f"Serializer error: {e}")
+                import traceback
+                traceback.print_exc()
+                
+    except ShopConfiguration.DoesNotExist:
+        print("NO SHOP FOUND!")
+        print("   Please register your shop first.")
         
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Unexpected error: {e}")
         import traceback
         traceback.print_exc()
 
