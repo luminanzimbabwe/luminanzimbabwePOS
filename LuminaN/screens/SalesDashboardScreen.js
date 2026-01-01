@@ -25,6 +25,11 @@ const SalesDashboardScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [showAllCashiers, setShowAllCashiers] = useState(false);
   const [showAllProducts, setShowAllProducts] = useState(false);
+  const [showAllTopProducts, setShowAllTopProducts] = useState(false);
+  const [showAllProfitProducts, setShowAllProfitProducts] = useState(false);
+  const [topProductsPage, setTopProductsPage] = useState(1);
+  const [profitProductsPage, setProfitProductsPage] = useState(1);
+  const PRODUCTS_PER_PAGE = 6;
 
   useEffect(() => {
     fetchAnalyticsData();
@@ -305,10 +310,30 @@ const SalesDashboardScreen = () => {
     fetchAnalyticsData();
   };
 
+  // Pagination helper functions
+  const getPaginatedItems = (items, page, itemsPerPage) => {
+    const startIndex = (page - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return items.slice(startIndex, endIndex);
+  };
+
+  const getTotalPages = (totalItems, itemsPerPage) => {
+    return Math.ceil(totalItems / itemsPerPage);
+  };
+
+  const resetPagination = () => {
+    setTopProductsPage(1);
+    setProfitProductsPage(1);
+  };
+
+  useEffect(() => {
+    resetPagination();
+  }, [analyticsData]);
+
   const renderMetricCard = (title, value, subtitle, color, icon) => (
     <View style={[styles.metricCard, { borderLeftColor: color }]}>
       <View style={styles.metricHeader}>
-        <Icon name={icon} size={24} color={color} />
+        <Icon name={icon} size={18} color={color} />
         <Text style={styles.metricTitle}>{title}</Text>
       </View>
       <Text style={styles.metricValue}>{value}</Text>
@@ -640,7 +665,7 @@ const SalesDashboardScreen = () => {
           styles.ultimateProductGrid, 
           analyticsData?.top_products?.length > 6 ? styles.singleColumnUltimateProductGrid : null
         ]}>
-          {analyticsData?.top_products.map((product, index) => {
+          {getPaginatedItems(analyticsData?.top_products || [], topProductsPage, PRODUCTS_PER_PAGE).map((product, index) => {
             const maxRevenue = Math.max(...analyticsData.top_products.map(p => p.total_revenue));
             const revenuePercentage = (product.total_revenue / maxRevenue) * 100;
             const performanceColor = product.profit_margin > 25 ? '#10b981' : product.profit_margin > 15 ? '#f59e0b' : '#ef4444';
@@ -772,10 +797,33 @@ const SalesDashboardScreen = () => {
         </View>
         
         {analyticsData?.top_products?.length > 0 && (
-          <View style={styles.ultimateProductSummary}>
-            <Text style={styles.ultimateProductSummaryText}>
-              🏆 Elite Performance • Top {Math.min(4, analyticsData.top_products.length)} Products • Total Revenue: ${analyticsData.top_products.reduce((sum, p) => sum + p.total_revenue, 0).toLocaleString()}
-            </Text>
+          <View>
+            <View style={styles.ultimateProductSummary}>
+              <Text style={styles.ultimateProductSummaryText}>
+                🏆 Elite Performance • Showing {getPaginatedItems(analyticsData.top_products, topProductsPage, PRODUCTS_PER_PAGE).length} of {analyticsData.top_products.length} Products • Total Revenue: ${analyticsData.top_products.reduce((sum, p) => sum + p.total_revenue, 0).toLocaleString()}
+              </Text>
+            </View>
+            {getTotalPages(analyticsData.top_products.length, PRODUCTS_PER_PAGE) > 1 && (
+              <View style={styles.paginationContainer}>
+                <TouchableOpacity 
+                  style={[styles.paginationButton, topProductsPage === 1 && styles.paginationButtonDisabled]}
+                  onPress={() => setTopProductsPage(Math.max(1, topProductsPage - 1))}
+                  disabled={topProductsPage === 1}
+                >
+                  <Icon name="chevron-left" size={20} color={topProductsPage === 1 ? '#666' : '#3b82f6'} />
+                </TouchableOpacity>
+                <Text style={styles.paginationText}>
+                  Page {topProductsPage} of {getTotalPages(analyticsData.top_products.length, PRODUCTS_PER_PAGE)}
+                </Text>
+                <TouchableOpacity 
+                  style={[styles.paginationButton, topProductsPage === getTotalPages(analyticsData.top_products.length, PRODUCTS_PER_PAGE) && styles.paginationButtonDisabled]}
+                  onPress={() => setTopProductsPage(Math.min(getTotalPages(analyticsData.top_products.length, PRODUCTS_PER_PAGE), topProductsPage + 1))}
+                  disabled={topProductsPage === getTotalPages(analyticsData.top_products.length, PRODUCTS_PER_PAGE)}
+                >
+                  <Icon name="chevron-right" size={20} color={topProductsPage === getTotalPages(analyticsData.top_products.length, PRODUCTS_PER_PAGE) ? '#666' : '#3b82f6'} />
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         )}
       </View>
@@ -1309,7 +1357,7 @@ const SalesDashboardScreen = () => {
           styles.enhancedProductGrid, 
           showAllProducts && analyticsData?.top_products?.length > 12 ? styles.singleColumnProductGrid : null
         ]}>
-          {(showAllProducts ? analyticsData?.top_products : analyticsData?.top_products?.slice(0, 8))?.map((product, index) => {
+          {getPaginatedItems(analyticsData?.top_products || [], profitProductsPage, PRODUCTS_PER_PAGE).map((product, index) => {
             const maxRevenue = Math.max(...analyticsData.top_products.map(p => p.total_revenue));
             const revenuePercentage = (product.total_revenue / maxRevenue) * 100;
             const performanceColor = product.profit_margin > 25 ? '#10b981' : product.profit_margin > 15 ? '#f59e0b' : '#ef4444';
@@ -1414,12 +1462,35 @@ const SalesDashboardScreen = () => {
           })}
         </View>
         
-        {analyticsData?.top_products?.length > 8 && (
-          <View style={styles.productSummary}>
-            <Text style={styles.productSummaryText}>
-              📊 Showing {Math.min(8, analyticsData.top_products.length)} of {analyticsData.top_products.length} products • 
-              Top Product: {analyticsData.top_products[0]?.name} (${analyticsData.top_products[0]?.total_revenue.toLocaleString()})
-            </Text>
+        {analyticsData?.top_products?.length > 0 && (
+          <View>
+            <View style={styles.productSummary}>
+              <Text style={styles.productSummaryText}>
+                📊 Showing {getPaginatedItems(analyticsData.top_products, profitProductsPage, PRODUCTS_PER_PAGE).length} of {analyticsData.top_products.length} products • 
+                Top Product: {analyticsData.top_products[0]?.name} (${analyticsData.top_products[0]?.total_revenue.toLocaleString()})
+              </Text>
+            </View>
+            {getTotalPages(analyticsData.top_products.length, PRODUCTS_PER_PAGE) > 1 && (
+              <View style={styles.paginationContainer}>
+                <TouchableOpacity 
+                  style={[styles.paginationButton, profitProductsPage === 1 && styles.paginationButtonDisabled]}
+                  onPress={() => setProfitProductsPage(Math.max(1, profitProductsPage - 1))}
+                  disabled={profitProductsPage === 1}
+                >
+                  <Icon name="chevron-left" size={20} color={profitProductsPage === 1 ? '#666' : '#f97316'} />
+                </TouchableOpacity>
+                <Text style={styles.paginationText}>
+                  Page {profitProductsPage} of {getTotalPages(analyticsData.top_products.length, PRODUCTS_PER_PAGE)}
+                </Text>
+                <TouchableOpacity 
+                  style={[styles.paginationButton, profitProductsPage === getTotalPages(analyticsData.top_products.length, PRODUCTS_PER_PAGE) && styles.paginationButtonDisabled]}
+                  onPress={() => setProfitProductsPage(Math.min(getTotalPages(analyticsData.top_products.length, PRODUCTS_PER_PAGE), profitProductsPage + 1))}
+                  disabled={profitProductsPage === getTotalPages(analyticsData.top_products.length, PRODUCTS_PER_PAGE)}
+                >
+                  <Icon name="chevron-right" size={20} color={profitProductsPage === getTotalPages(analyticsData.top_products.length, PRODUCTS_PER_PAGE) ? '#666' : '#f97316'} />
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         )}
       </View>
@@ -1439,7 +1510,7 @@ const SalesDashboardScreen = () => {
             <Text style={styles.velocityCardSubtitle}>Average per day</Text>
             <View style={styles.velocityTrend}>
               <Icon name="arrow-upward" size={14} color="#10b981" />
-              <Text style={styles.velocityTrendText}>+12.5% vs last week</Text>
+              <Text style={styles.velocityTrendText}>{analyticsData?.growth_metrics?.revenue_growth} vs last period</Text>
             </View>
           </View>
           
@@ -1452,7 +1523,7 @@ const SalesDashboardScreen = () => {
             <Text style={styles.velocityCardSubtitle}>Transactions per hour</Text>
             <View style={styles.velocityTrend}>
               <Icon name="arrow-upward" size={14} color="#10b981" />
-              <Text style={styles.velocityTrendText}>+8.2% vs last week</Text>
+              <Text style={styles.velocityTrendText}>{analyticsData?.growth_metrics?.transaction_growth} vs last period</Text>
             </View>
           </View>
         </View>
@@ -1486,47 +1557,112 @@ const SalesDashboardScreen = () => {
             <Text style={styles.secondaryCardSubtitle}>Per completed sale</Text>
           </View>
           
-          <View style={styles.secondaryVelocityCard}>
-            <View style={styles.secondaryCardHeader}>
-              <Icon name="schedule" size={16} color="#8b5cf6" />
-              <Text style={styles.secondaryCardTitle}>Peak Hours</Text>
-            </View>
-            <Text style={styles.secondaryCardValue}>2-4 PM</Text>
-            <Text style={styles.secondaryCardSubtitle}>Highest activity</Text>
-          </View>
+          {(() => {
+            const hourlyPattern = analyticsData?.performance_metrics?.hourly_pattern || [];
+            const peakHour = hourlyPattern.length > 0 ? hourlyPattern.reduce((prev, current) => 
+              (prev.revenue > current.revenue) ? prev : current
+            ) : null;
+            
+            if (peakHour) {
+              return (
+                <View style={styles.secondaryVelocityCard}>
+                  <View style={styles.secondaryCardHeader}>
+                    <Icon name="schedule" size={16} color="#8b5cf6" />
+                    <Text style={styles.secondaryCardTitle}>Peak Hour</Text>
+                  </View>
+                  <Text style={styles.secondaryCardValue}>{peakHour.hour}:00</Text>
+                  <Text style={styles.secondaryCardSubtitle}>Highest revenue</Text>
+                </View>
+              );
+            }
+            
+            return (
+              <View style={styles.secondaryVelocityCard}>
+                <View style={styles.secondaryCardHeader}>
+                  <Icon name="schedule" size={16} color="#8b5cf6" />
+                  <Text style={styles.secondaryCardTitle}>Operating Hours</Text>
+                </View>
+                <Text style={styles.secondaryCardValue}>8AM-8PM</Text>
+                <Text style={styles.secondaryCardSubtitle}>Business hours</Text>
+              </View>
+            );
+          })()}
         </View>
         
         {/* Advanced Analytics */}
         <View style={styles.advancedAnalyticsContainer}>
           <Text style={styles.advancedAnalyticsTitle}>🚀 Performance Insights</Text>
           <View style={styles.insightsGrid}>
-            <View style={styles.insightCard}>
-              <Icon name="emoji-events" size={18} color="#10b981" />
-              <Text style={styles.insightTitle}>Peak Performance</Text>
-              <Text style={styles.insightValue}>$12,450</Text>
-              <Text style={styles.insightSubtitle}>Best single day</Text>
-            </View>
+            {(() => {
+              const dailyBreakdown = analyticsData?.revenue_analytics?.daily_breakdown || [];
+              const peakDay = dailyBreakdown.length > 0 ? dailyBreakdown.reduce((prev, current) => 
+                (prev.net_revenue > current.net_revenue) ? prev : current
+              ) : null;
+              
+              return (
+                <View style={styles.insightCard}>
+                  <Icon name="emoji-events" size={18} color="#10b981" />
+                  <Text style={styles.insightTitle}>Peak Performance</Text>
+                  <Text style={styles.insightValue}>${peakDay?.net_revenue.toLocaleString() || '0'}</Text>
+                  <Text style={styles.insightSubtitle}>Best single day</Text>
+                </View>
+              );
+            })()}
             
-            <View style={styles.insightCard}>
-              <Icon name="local-fire-department" size={18} color="#f97316" />
-              <Text style={styles.insightTitle}>Hot Products</Text>
-              <Text style={styles.insightValue}>Bakery</Text>
-              <Text style={styles.insightSubtitle}>Top category</Text>
-            </View>
+            {(() => {
+              if (analyticsData?.category_contribution?.length > 0) {
+                const topCategory = analyticsData.category_contribution.reduce((prev, current) => 
+                  (prev.revenue > current.revenue) ? prev : current
+                );
+                
+                return (
+                  <View style={styles.insightCard}>
+                    <Icon name="local-fire-department" size={18} color="#f97316" />
+                    <Text style={styles.insightTitle}>Hot Products</Text>
+                    <Text style={styles.insightValue}>{topCategory.category}</Text>
+                    <Text style={styles.insightSubtitle}>Top category</Text>
+                  </View>
+                );
+              }
+              
+              return (
+                <View style={styles.insightCard}>
+                  <Icon name="local-fire-department" size={18} color="#f97316" />
+                  <Text style={styles.insightTitle}>Hot Products</Text>
+                  <Text style={styles.insightValue}>N/A</Text>
+                  <Text style={styles.insightSubtitle}>No data</Text>
+                </View>
+              );
+            })()}
             
-            <View style={styles.insightCard}>
-              <Icon name="verified-user" size={18} color="#3b82f6" />
-              <Text style={styles.insightTitle}>Conversion Rate</Text>
-              <Text style={styles.insightValue}>94.2%</Text>
-              <Text style={styles.insightSubtitle}>Sales success</Text>
-            </View>
+            {(() => {
+              const totalTransactions = analyticsData?.revenue_analytics?.total_transactions || 0;
+              const netTransactions = analyticsData?.revenue_analytics?.net_transactions || 0;
+              const conversionRate = totalTransactions > 0 ? (netTransactions / totalTransactions) * 100 : 0;
+              
+              return (
+                <View style={styles.insightCard}>
+                  <Icon name="verified-user" size={18} color="#3b82f6" />
+                  <Text style={styles.insightTitle}>Conversion Rate</Text>
+                  <Text style={styles.insightValue}>{conversionRate.toFixed(1)}%</Text>
+                  <Text style={styles.insightSubtitle}>Sales success</Text>
+                </View>
+              );
+            })()}
             
-            <View style={styles.insightCard}>
-              <Icon name="trending-down" size={18} color="#ef4444" />
-              <Text style={styles.insightTitle}>Shrinkage Rate</Text>
-              <Text style={styles.insightValue}>1.1%</Text>
-              <Text style={styles.insightSubtitle}>Within target</Text>
-            </View>
+            {(() => {
+              const shrinkageRate = analyticsData?.shrinkage_analysis?.shrinkage_percentage || 0;
+              const isWithinTarget = shrinkageRate <= 2;
+              
+              return (
+                <View style={styles.insightCard}>
+                  <Icon name="trending-down" size={18} color={isWithinTarget ? "#10b981" : "#ef4444"} />
+                  <Text style={styles.insightTitle}>Shrinkage Rate</Text>
+                  <Text style={styles.insightValue}>{shrinkageRate.toFixed(2)}%</Text>
+                  <Text style={styles.insightSubtitle}>{isWithinTarget ? 'Within target' : 'Above target'}</Text>
+                </View>
+              );
+            })()}
           </View>
         </View>
         
@@ -1538,7 +1674,7 @@ const SalesDashboardScreen = () => {
             </View>
             <View style={styles.trendContent}>
               <Text style={styles.trendLabel}>Revenue Trend</Text>
-              <Text style={styles.trendValue}>📈 Growing +8.3%</Text>
+              <Text style={styles.trendValue}>📈 Growing {analyticsData?.growth_metrics?.revenue_growth || '+0.0%'}</Text>
             </View>
           </View>
           
@@ -1547,8 +1683,8 @@ const SalesDashboardScreen = () => {
               <Icon name="people" size={16} color="#3b82f6" />
             </View>
             <View style={styles.trendContent}>
-              <Text style={styles.trendLabel}>Customer Engagement</Text>
-              <Text style={styles.trendValue}>📊 Stable +2.1%</Text>
+              <Text style={styles.trendLabel}>Transaction Trend</Text>
+              <Text style={styles.trendValue}>📊 {analyticsData?.growth_metrics?.transaction_growth || '+0.0%'}</Text>
             </View>
           </View>
         </View>
@@ -1568,68 +1704,119 @@ const SalesDashboardScreen = () => {
         <View style={styles.criticalInsightsSection}>
           <Text style={styles.sectionSubtitle}>🚨 Critical Alerts & Actions</Text>
           <View style={styles.criticalInsightsGrid}>
-            <View style={[styles.criticalInsightCard, styles.alertCard]}>
-              <View style={styles.criticalInsightHeader}>
-                <Icon name="warning" size={20} color="#ef4444" />
-                <Text style={styles.criticalInsightTitle}>High Priority Alert</Text>
-              </View>
-              <Text style={styles.criticalInsightValue}>Refunds Spike</Text>
-              <Text style={styles.criticalInsightText}>Customer complaints increased 15% this week</Text>
-              <View style={styles.criticalInsightAction}>
-                <Text style={styles.criticalActionText}>📋 Review Quality Issues</Text>
-              </View>
-            </View>
+            {(() => {
+              const refundRate = ((analyticsData?.revenue_analytics?.total_refunds / analyticsData?.revenue_analytics?.gross_revenue) * 100 || 0);
+              const hasHighRefundRate = refundRate > 5;
+              
+              if (hasHighRefundRate) {
+                return (
+                  <View style={[styles.criticalInsightCard, styles.alertCard]}>
+                    <View style={styles.criticalInsightHeader}>
+                      <Icon name="warning" size={20} color="#ef4444" />
+                      <Text style={styles.criticalInsightTitle}>High Priority Alert</Text>
+                    </View>
+                    <Text style={styles.criticalInsightValue}>Refund Rate High</Text>
+                    <Text style={styles.criticalInsightText}>{refundRate.toFixed(1)}% of revenue in refunds - above 5% target</Text>
+                    <View style={styles.criticalInsightAction}>
+                      <Text style={styles.criticalActionText}>📋 Review Quality Issues</Text>
+                    </View>
+                  </View>
+                );
+              }
+              
+              return null;
+            })()}
             
-            <View style={[styles.criticalInsightCard, styles.opportunityCard]}>
-              <View style={styles.criticalInsightHeader}>
-                <Icon name="trending-up" size={20} color="#10b981" />
-                <Text style={styles.criticalInsightTitle}>Growth Opportunity</Text>
-              </View>
-              <Text style={styles.criticalInsightValue}>Bakery Boom</Text>
-              <Text style={styles.criticalInsightText}>28.5% profit margin - 6.4% above average</Text>
-              <View style={styles.criticalInsightAction}>
-                <Text style={styles.criticalActionText}>🎯 Expand Inventory</Text>
-              </View>
-            </View>
+            {(() => {
+              if (analyticsData?.category_contribution?.length > 0) {
+                const topCategory = analyticsData.category_contribution.reduce((prev, current) => 
+                  (prev.revenue > current.revenue) ? prev : current
+                );
+                const avgMargin = analyticsData.category_contribution.reduce((sum, cat) => sum + cat.margin, 0) / analyticsData.category_contribution.length;
+                const marginDiff = topCategory.margin - avgMargin;
+                
+                if (topCategory.margin > avgMargin + 3) {
+                  return (
+                    <View style={[styles.criticalInsightCard, styles.opportunityCard]}>
+                      <View style={styles.criticalInsightHeader}>
+                        <Icon name="trending-up" size={20} color="#10b981" />
+                        <Text style={styles.criticalInsightTitle}>Growth Opportunity</Text>
+                      </View>
+                      <Text style={styles.criticalInsightValue}>{topCategory.category} Boom</Text>
+                      <Text style={styles.criticalInsightText}>{topCategory.margin.toFixed(1)}% profit margin - {marginDiff.toFixed(1)}% above average</Text>
+                      <View style={styles.criticalInsightAction}>
+                        <Text style={styles.criticalActionText}>🎯 Expand Inventory</Text>
+                      </View>
+                    </View>
+                  );
+                }
+              }
+              
+              return null;
+            })()}
           </View>
         </View>
         
         {/* AI Analytics Grid */}
         <View style={styles.aiAnalyticsGrid}>
-          <View style={[styles.aiInsightCard, styles.performanceCard]}>
-            <View style={styles.aiInsightIconContainer}>
-              <Icon name="emoji-events" size={24} color="#10b981" />
-            </View>
-            <Text style={styles.aiInsightMetric}>$12,450</Text>
-            <Text style={styles.aiInsightTitle}>Peak Performance Day</Text>
-            <Text style={styles.aiInsightDescription}>Sales peak at 2-4 PM with 35% higher transaction volume</Text>
-            <View style={styles.aiInsightTrend}>
-              <Icon name="arrow-upward" size={14} color="#10b981" />
-              <Text style={styles.aiInsightTrendText}>+12.5% vs last week</Text>
-            </View>
-          </View>
+          {(() => {
+            const dailyBreakdown = analyticsData?.revenue_analytics?.daily_breakdown || [];
+            const peakDay = dailyBreakdown.length > 0 ? dailyBreakdown.reduce((prev, current) => 
+              (prev.net_revenue > current.net_revenue) ? prev : current
+            ) : null;
+            
+            if (peakDay) {
+              return (
+                <View style={[styles.aiInsightCard, styles.performanceCard]}>
+                  <View style={styles.aiInsightIconContainer}>
+                    <Icon name="emoji-events" size={24} color="#10b981" />
+                  </View>
+                  <Text style={styles.aiInsightMetric}>${peakDay.net_revenue.toLocaleString()}</Text>
+                  <Text style={styles.aiInsightTitle}>Peak Performance Day</Text>
+                  <Text style={styles.aiInsightDescription}>Best day: {peakDay.date} with {peakDay.transactions} transactions</Text>
+                  <View style={styles.aiInsightTrend}>
+                    <Icon name="arrow-upward" size={14} color="#10b981" />
+                    <Text style={styles.aiInsightTrendText}>{analyticsData?.growth_metrics?.revenue_growth}</Text>
+                  </View>
+                </View>
+              );
+            }
+            return null;
+          })()}
           
-          <View style={[styles.aiInsightCard, styles.optimizationCard]}>
-            <View style={styles.aiInsightIconContainer}>
-              <Icon name="lightbulb" size={24} color="#f59e0b" />
-            </View>
-            <Text style={styles.aiInsightMetric}>Bakery</Text>
-            <Text style={styles.aiInsightTitle}>Optimization Focus</Text>
-            <Text style={styles.aiInsightDescription}>28.5% margin vs 22.1% average - expand this category</Text>
-            <View style={styles.aiInsightRecommendation}>
-              <Text style={styles.aiRecommendationText}>💡 Add 3 new bakery items</Text>
-            </View>
-          </View>
+          {(() => {
+            if (analyticsData?.category_contribution?.length > 0) {
+              const topCategory = analyticsData.category_contribution.reduce((prev, current) => 
+                (prev.revenue > current.revenue) ? prev : current
+              );
+              const avgMargin = analyticsData.category_contribution.reduce((sum, cat) => sum + cat.margin, 0) / analyticsData.category_contribution.length;
+              
+              return (
+                <View style={[styles.aiInsightCard, styles.optimizationCard]}>
+                  <View style={styles.aiInsightIconContainer}>
+                    <Icon name="lightbulb" size={24} color="#f59e0b" />
+                  </View>
+                  <Text style={styles.aiInsightMetric}>{topCategory.category}</Text>
+                  <Text style={styles.aiInsightTitle}>Optimization Focus</Text>
+                  <Text style={styles.aiInsightDescription}>{topCategory.margin.toFixed(1)}% margin vs {avgMargin.toFixed(1)}% average - expand this category</Text>
+                  <View style={styles.aiInsightRecommendation}>
+                    <Text style={styles.aiRecommendationText}>💡 Add 3 new {topCategory.category.toLowerCase()} items</Text>
+                  </View>
+                </View>
+              );
+            }
+            return null;
+          })()}
           
           <View style={[styles.aiInsightCard, styles.growthCard]}>
             <View style={styles.aiInsightIconContainer}>
               <Icon name="show-chart" size={24} color="#3b82f6" />
             </View>
-            <Text style={styles.aiInsightMetric}>+12.5%</Text>
+            <Text style={styles.aiInsightMetric}>{analyticsData?.growth_metrics?.revenue_growth}</Text>
             <Text style={styles.aiInsightTitle}>Growth Trajectory</Text>
-            <Text style={styles.aiInsightDescription}>Consistent revenue growth with improving profit margins</Text>
+            <Text style={styles.aiInsightDescription}>Revenue growth with {analyticsData?.revenue_analytics?.gross_profit_margin}% profit margin</Text>
             <View style={styles.aiInsightForecast}>
-              <Text style={styles.aiForecastText}>📈 Target: $145K next month</Text>
+              <Text style={styles.aiForecastText}>📈 Target: ${((analyticsData?.revenue_analytics?.net_revenue || 0) * 1.15).toLocaleString()} next month</Text>
             </View>
           </View>
           
@@ -1637,11 +1824,11 @@ const SalesDashboardScreen = () => {
             <View style={styles.aiInsightIconContainer}>
               <Icon name="shield" size={24} color="#ef4444" />
             </View>
-            <Text style={styles.aiInsightMetric}>1.11%</Text>
+            <Text style={styles.aiInsightMetric}>{(analyticsData?.shrinkage_analysis?.shrinkage_percentage || 0).toFixed(2)}%</Text>
             <Text style={styles.aiInsightTitle}>Risk Assessment</Text>
-            <Text style={styles.aiInsightDescription}>Shrinkage rate within acceptable range but monitor closely</Text>
+            <Text style={styles.aiInsightDescription}>Shrinkage rate {analyticsData?.shrinkage_analysis?.shrinkage_percentage > 2 ? 'exceeds' : 'within'} target range</Text>
             <View style={styles.aiInsightMonitoring}>
-              <Text style={styles.aiMonitoringText}>👁️ Weekly review recommended</Text>
+              <Text style={styles.aiMonitoringText}>👁️ {analyticsData?.shrinkage_analysis?.shrinkage_percentage > 2 ? 'Daily' : 'Weekly'} review recommended</Text>
             </View>
           </View>
         </View>
@@ -1659,21 +1846,47 @@ const SalesDashboardScreen = () => {
               <Text style={styles.predictiveSubtitle}>Next 30 days (projected)</Text>
               <View style={styles.predictiveConfidence}>
                 <View style={styles.confidenceBar}>
-                  <View style={[styles.confidenceFill, { width: '87%' }]} />
+                  <View style={[styles.confidenceFill, { 
+                    width: `${Math.min(95, Math.max(70, (analyticsData?.revenue_analytics?.net_revenue || 0) > 100000 ? 90 : 75))}%` 
+                  }]} />
                 </View>
-                <Text style={styles.confidenceText}>87% Confidence</Text>
+                <Text style={styles.confidenceText}>{Math.min(95, Math.max(70, (analyticsData?.revenue_analytics?.net_revenue || 0) > 100000 ? 90 : 75)).toFixed(0)}% Confidence</Text>
               </View>
             </View>
             
             <View style={styles.predictiveCard}>
               <View style={styles.predictiveCardHeader}>
                 <Icon name="inventory" size={18} color="#10b981" />
-                <Text style={styles.predictiveCardTitle}>Top Products</Text>
+                <Text style={styles.predictiveCardTitle}>Revenue Concentration</Text>
               </View>
-              <Text style={styles.predictiveValue}>{analyticsData?.top_products?.length || 0} Items</Text>
-              <Text style={styles.predictiveSubtitle}>Generating {((analyticsData?.top_products?.reduce((sum, p) => sum + p.total_revenue, 0) || 0) / (analyticsData?.revenue_analytics?.net_revenue || 1) * 100).toFixed(1)}% of revenue</Text>
+              <Text style={styles.predictiveValue}>{((analyticsData?.top_products?.reduce((sum, p) => sum + p.total_revenue, 0) || 0) / (analyticsData?.revenue_analytics?.net_revenue || 1) * 100).toFixed(1)}%</Text>
+              <Text style={styles.predictiveSubtitle}>Top products generate this % of revenue</Text>
               <View style={styles.predictiveAction}>
                 <Text style={styles.predictiveActionText}>📊 Focus on top performers</Text>
+              </View>
+            </View>
+            
+            <View style={styles.predictiveCard}>
+              <View style={styles.predictiveCardHeader}>
+                <Icon name="trending-up" size={18} color="#3b82f6" />
+                <Text style={styles.predictiveCardTitle}>Daily Average</Text>
+              </View>
+              <Text style={styles.predictiveValue}>${((analyticsData?.revenue_analytics?.net_revenue || 0) / (analyticsData?.period?.days || 1)).toFixed(0)}</Text>
+              <Text style={styles.predictiveSubtitle}>Average daily revenue</Text>
+              <View style={styles.predictiveAction}>
+                <Text style={styles.predictiveActionText}>📈 Growth target</Text>
+              </View>
+            </View>
+            
+            <View style={styles.predictiveCard}>
+              <View style={styles.predictiveCardHeader}>
+                <Icon name="shopping-cart" size={18} color="#f59e0b" />
+                <Text style={styles.predictiveCardTitle}>Transaction Forecast</Text>
+              </View>
+              <Text style={styles.predictiveValue}>{Math.round((analyticsData?.revenue_analytics?.net_transactions || 0) * 1.1)}</Text>
+              <Text style={styles.predictiveSubtitle}>Projected next month</Text>
+              <View style={styles.predictiveAction}>
+                <Text style={styles.predictiveActionText}>🛒 Customer growth</Text>
               </View>
             </View>
           </View>
@@ -1698,6 +1911,15 @@ const SalesDashboardScreen = () => {
                   impact: `Potential savings: ${((analyticsData?.revenue_analytics?.total_refunds || 0) * 0.3).toFixed(0)} monthly`,
                   priority: 'HIGH'
                 });
+              } else if (refundRate > 2) {
+                recommendations.push({
+                  icon: 'warning',
+                  iconColor: '#f59e0b',
+                  title: 'Monitor Refund Trends',
+                  description: `Refund rate at ${refundRate.toFixed(1)}% is trending upward. Stay vigilant.`,
+                  impact: `Current impact: ${(analyticsData?.revenue_analytics?.total_refunds || 0).toFixed(0)}`,
+                  priority: 'MED'
+                });
               }
               
               // Check top performing category and suggest expansion
@@ -1705,12 +1927,14 @@ const SalesDashboardScreen = () => {
                 const topCategory = analyticsData.category_contribution.reduce((prev, current) => 
                   (prev.revenue > current.revenue) ? prev : current
                 );
-                if (topCategory.margin > 25) {
+                const avgMargin = analyticsData.category_contribution.reduce((sum, cat) => sum + cat.margin, 0) / analyticsData.category_contribution.length;
+                
+                if (topCategory.margin > avgMargin + 3) {
                   recommendations.push({
                     icon: 'trending-up',
                     iconColor: '#10b981',
                     title: `Expand ${topCategory.category} Category`,
-                    description: `${topCategory.category} shows ${topCategory.margin}% margin vs ${(analyticsData.category_contribution.reduce((sum, cat) => sum + cat.margin, 0) / analyticsData.category_contribution.length).toFixed(1)}% average`,
+                    description: `${topCategory.category} shows ${topCategory.margin.toFixed(1)}% margin vs ${avgMargin.toFixed(1)}% average`,
                     impact: `Estimated revenue boost: ${(topCategory.revenue * 0.15).toFixed(0)} monthly`,
                     priority: 'HIGH'
                   });
@@ -1725,7 +1949,7 @@ const SalesDashboardScreen = () => {
                   iconColor: '#ef4444',
                   title: 'Reduce Shrinkage',
                   description: `Shrinkage at ${shrinkageRate.toFixed(2)}% exceeds 2% target. Implement security measures.`,
-                  impact: `Loss prevention: ${(analyticsData?.shrinkage_analysis?.total_shrinkage || 0 * 0.6).toFixed(0)} monthly`,
+                  impact: `Loss prevention: ${((analyticsData?.shrinkage_analysis?.total_shrinkage || 0) * 0.6).toFixed(0)} monthly`,
                   priority: 'MED'
                 });
               }
@@ -1738,22 +1962,52 @@ const SalesDashboardScreen = () => {
                   iconColor: '#3b82f6',
                   title: 'Increase Basket Size',
                   description: `Average transaction ${avgTransaction.toFixed(2)} could be improved with upselling`,
-                  impact: `Potential increase: ${(analyticsData?.revenue_analytics?.net_transactions || 0 * 5).toFixed(0)} monthly`,
+                  impact: `Potential increase: ${((analyticsData?.revenue_analytics?.net_transactions || 0) * 5).toFixed(0)} monthly`,
                   priority: 'MED'
                 });
               }
               
               // Check transaction growth
               const transactionGrowth = analyticsData?.growth_metrics?.transaction_growth || '+0%';
-              if (parseFloat(transactionGrowth.replace('%', '').replace('+', '')) < 3) {
+              const growthValue = parseFloat(transactionGrowth.replace('%', '').replace('+', ''));
+              if (growthValue < 3) {
                 recommendations.push({
                   icon: 'people',
                   iconColor: '#f59e0b',
                   title: 'Boost Customer Traffic',
                   description: `Transaction growth ${transactionGrowth} below 3% target`,
-                  impact: `Marketing ROI: +${(analyticsData?.revenue_analytics?.net_revenue || 0 * 0.05).toFixed(0)} potential`,
+                  impact: `Marketing ROI: +${((analyticsData?.revenue_analytics?.net_revenue || 0) * 0.05).toFixed(0)} potential`,
                   priority: 'MED'
                 });
+              }
+              
+              // Check profit margin trends
+              if (analyticsData?.revenue_analytics?.gross_profit_margin < 20) {
+                recommendations.push({
+                  icon: 'percent',
+                  iconColor: '#8b5cf6',
+                  title: 'Improve Profit Margins',
+                  description: `Current margin ${analyticsData.revenue_analytics.gross_profit_margin}% could be optimized`,
+                  impact: `Potential improvement: ${((analyticsData?.revenue_analytics?.net_revenue || 0) * 0.05).toFixed(0)} monthly`,
+                  priority: 'MED'
+                });
+              }
+              
+              // Check top products concentration
+              if (analyticsData?.top_products?.length > 0) {
+                const topProductsRevenue = analyticsData.top_products.reduce((sum, p) => sum + p.total_revenue, 0);
+                const concentration = (topProductsRevenue / (analyticsData?.revenue_analytics?.net_revenue || 1)) * 100;
+                
+                if (concentration > 80) {
+                  recommendations.push({
+                    icon: 'inventory',
+                    iconColor: '#06b6d4',
+                    title: 'Diversify Product Mix',
+                    description: `Top products generate ${concentration.toFixed(1)}% of revenue - consider diversification`,
+                    impact: `Risk reduction: Lower dependency on few products`,
+                    priority: 'LOW'
+                  });
+                }
               }
               
               // If no specific recommendations, provide general insights
@@ -4368,6 +4622,38 @@ const styles = StyleSheet.create({
     fontSize: 9,
     marginLeft: 6,
     fontWeight: '500',
+  },
+
+  // Pagination Styles
+  paginationContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginTop: 8,
+    backgroundColor: 'rgba(30, 41, 59, 0.5)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  paginationButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    borderWidth: 1,
+    borderColor: '#3b82f6',
+  },
+  paginationButtonDisabled: {
+    backgroundColor: 'rgba(75, 85, 99, 0.3)',
+    borderColor: '#6b7280',
+  },
+  paginationText: {
+    fontSize: 12,
+    color: '#e2e8f0',
+    fontWeight: '600',
+    marginHorizontal: 16,
   },
 
 });

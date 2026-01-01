@@ -176,202 +176,477 @@ const SettingsScreen = () => {
 
   return (
     <ScrollView 
-      style={styles.container}
+      style={[styles.container, Platform.OS === 'web' && styles.webContainer]}
       contentContainerStyle={styles.scrollContentContainer}
       showsVerticalScrollIndicator={true}
-      showsHorizontalScrollIndicator={false}
       scrollEventThrottle={16}
+      nestedScrollEnabled={Platform.OS === 'web'}
+      removeClippedSubviews={false}
       onScroll={(event) => {
-        // Web-specific scroll handling
         if (Platform.OS === 'web') {
           const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
           const isAtBottom = contentOffset.y >= (contentSize.height - layoutMeasurement.height - 10);
-          // You can add custom scroll logic here if needed
         }
       }}
     >
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>⚙️ Settings</Text>
-        <Text style={styles.headerSubtitle}>System information and preferences</Text>
-      </View>
-
-      {/* System Information Section */}
-      <View style={styles.systemSection}>
-        <Text style={styles.sectionTitle}>📋 System Information</Text>
-        <Text style={styles.sectionSubtitle}>Registration details and system identifiers</Text>
+      {/* Ultimate Enterprise Settings Header */}
+      <View style={styles.ultimateHeader}>
+        {/* Header Background Overlay */}
+        <View style={styles.headerBackgroundOverlay} />
         
-        <View style={styles.systemCards}>
-          <View style={styles.systemCard}>
-            <Text style={styles.systemCardTitle}>🔑 Identity</Text>
-            <View style={styles.systemInfoRow}>
-              <Text style={styles.systemLabel}>Shop ID:</Text>
-              <Text style={styles.systemValue}>{shopData.shop_id || 'N/A'}</Text>
+        {/* Settings Command Center Badge */}
+        <View style={styles.commandCenterBadge}>
+          <Text style={styles.commandCenterBadgeText}>SYSTEM CONTROL</Text>
+        </View>
+        
+        {/* Main Title */}
+        <Text style={styles.ultimateHeaderTitle}>⚙️ Enterprise Settings Command Center</Text>
+        
+        {/* Subtitle with Enhanced Styling */}
+        <View style={styles.ultimateHeaderSubtitleContainer}>
+          <Text style={styles.ultimateHeaderSubtitle}>Complete System Configuration & Management</Text>
+        </View>
+        
+        {/* System Status Overview */}
+        <View style={styles.ultimateGrowthMetrics}>
+          <View style={styles.growthMetricCard}>
+            <View style={styles.growthMetricIconContainer}>
+              <Text style={styles.growthMetricIcon}>🔒</Text>
             </View>
-            <View style={styles.systemInfoRow}>
-              <Text style={styles.systemLabel}>Register ID:</Text>
-              <Text style={styles.systemValue}>{shopData.register_id || 'N/A'}</Text>
+            <View style={styles.growthMetricContent}>
+              <Text style={styles.growthMetricLabel}>Security Status</Text>
+              <Text style={styles.growthMetricValue}>Active</Text>
             </View>
-            <View style={styles.systemInfoRow}>
-              <Text style={styles.systemLabel}>Owner ID:</Text>
-              <Text style={styles.systemValue}>{shopData.owner_id || 'N/A'}</Text>
-            </View>
-          </View>
-          
-          <View style={styles.systemCard}>
-            <Text style={styles.systemCardTitle}>📱 Device</Text>
-            <View style={styles.systemInfoRow}>
-              <Text style={styles.systemLabel}>Device ID:</Text>
-              <Text style={styles.systemValue}>{shopData.device_id || 'N/A'}</Text>
-            </View>
-            <View style={styles.systemInfoRow}>
-              <Text style={styles.systemLabel}>API Key:</Text>
-              <Text style={styles.systemValue}>
-                {shopData.api_key ? shopData.api_key.substring(0, 20) + '...' : 'N/A'}
-              </Text>
-            </View>
-            <View style={styles.systemInfoRow}>
-              <Text style={styles.systemLabel}>Version:</Text>
-              <Text style={styles.systemValue}>{shopData.version || '1.0.0'}</Text>
+            <View style={styles.growthTrendIndicator}>
+              <Text style={styles.growthTrendText}>🛡️</Text>
             </View>
           </View>
           
-          <View style={styles.systemCard}>
-            <Text style={styles.systemCardTitle}>🕒 Registration</Text>
-            <View style={styles.systemInfoRow}>
-              <Text style={styles.systemLabel}>Registered:</Text>
-              <Text style={styles.systemValue}>
-                {shopData.registration_time ? new Date(shopData.registration_time).toLocaleDateString() : 'N/A'}
-              </Text>
+          <View style={styles.growthMetricCard}>
+            <View style={styles.growthMetricIconContainer}>
+              <Text style={styles.growthMetricIcon}>⚡</Text>
             </View>
-            <View style={styles.systemInfoRow}>
-              <Text style={styles.systemLabel}>Checksum:</Text>
-              <Text style={styles.systemValue}>
-                {shopData.checksum ? shopData.checksum.substring(0, 12) + '...' : 'N/A'}
-              </Text>
+            <View style={styles.growthMetricContent}>
+              <Text style={styles.growthMetricLabel}>System Health</Text>
+              <Text style={styles.growthMetricValue}>Optimal</Text>
             </View>
-            <View style={styles.systemInfoRow}>
-              <Text style={styles.systemLabel}>Status:</Text>
-              <Text style={[styles.systemValue, { color: '#22c55e' }]}>Active</Text>
-            </View>
-            <View style={styles.systemInfoRow}>
-              <Text style={styles.systemLabel}>Master Password:</Text>
-              <Text style={styles.systemValue}>{shopData.master_password ? '••••••••' : 'Generated'}</Text>
+            <View style={styles.growthTrendIndicator}>
+              <Text style={styles.growthTrendText}>💚</Text>
             </View>
           </View>
         </View>
+        
+        {/* Real-time Status Indicator */}
+        <View style={styles.realtimeStatus}>
+          <View style={styles.statusDot} />
+          <Text style={styles.statusText}>System Control Active</Text>
+          <Text style={styles.statusText}>•</Text>
+          <Text style={styles.statusText}>Live Configuration</Text>
+        </View>
+        
+        {/* Performance Summary */}
+        <View style={styles.performanceSummary}>
+          <Text style={styles.performanceSummaryText}>
+            🏆 Enterprise Control • {shopData.name || 'Shop'} • System v{shopData.version || '1.0.0'} • All Systems Operational
+          </Text>
+        </View>
       </View>
 
-      {/* Security Information Section */}
-      <View style={styles.securitySection}>
-        <Text style={styles.sectionTitle}>🔐 Security Information</Text>
-        <Text style={styles.sectionSubtitle}>Important credentials and recovery information</Text>
+      {/* Enterprise System Information */}
+      <View style={styles.section}>
+        <View style={styles.categorySectionHeader}>
+          <Text style={styles.sectionTitle}>🏢 Enterprise System Intelligence</Text>
+          <View style={styles.categoryStatusBadge}>
+            <Text style={styles.categoryStatusText}>System Control</Text>
+          </View>
+        </View>
         
-        <View style={styles.securityCard}>
-          <View style={styles.securityInfoRow}>
-            <Text style={styles.securityLabel}>Recovery Codes:</Text>
-            <Text style={styles.securityValue}>
-              {shopData.recovery_codes ? `${shopData.recovery_codes.length} codes available` : '8 codes generated'}
-            </Text>
-            {__DEV__ && (
-              <Text style={styles.debugText}>
-                Recovery codes data: {JSON.stringify(shopData.recovery_codes)}
-              </Text>
-            )}
-          </View>
-          <View style={styles.securityInfoRow}>
-            <Text style={styles.securityLabel}>Master Password:</Text>
-            <Text style={styles.securityValue}>••••••••••••••</Text>
-          </View>
-          <View style={styles.securityInfoRow}>
-            <Text style={styles.securityLabel}>API Access:</Text>
-            <Text style={[styles.securityValue, { color: '#22c55e' }]}>Enabled</Text>
-          </View>
-          <TouchableOpacity 
-            style={[
-              styles.securityAction,
-              isButtonPressed && { backgroundColor: 'rgba(245, 158, 11, 0.4)' }
-            ]}
-            onPressIn={() => {
-              setIsButtonPressed(true);
-              Vibration.vibrate(50);
-            }}
-            onPressOut={() => {
-              setIsButtonPressed(false);
-            }}
-            onPress={() => {
-              console.log('🔑 Recovery codes button pressed!');
-              console.log('Recovery codes data:', shopData.recovery_codes);
-              console.log('Shop data keys:', Object.keys(shopData));
+        <View style={styles.ultimateCategoryGrid}>
+          <View style={[
+            styles.ultimateCategoryCard,
+            { borderLeftColor: '#10b981' }
+          ]}>
+            <View style={styles.ultimateCategoryHeader}>
+              <View style={styles.categoryRankContainer}>
+                <View style={[styles.categoryBadge, { backgroundColor: '#10b981'}]}>
+                  <Text style={styles.categoryBadgeText}>🔑</Text>
+                </View>
+                <Text style={styles.categoryRank}>ID</Text>
+              </View>
+              <View style={[styles.categoryPerformanceIndicator, { backgroundColor: '#10b981'}]}>
+                <Text style={styles.performanceCrownText}>✓</Text>
+              </View>
+            </View>
+            
+            <Text style={styles.ultimateCategoryName}>System Identity</Text>
+            
+            <View style={styles.ultimateCategoryMetrics}>
+              <View style={styles.categoryMetricRow}>
+                <View style={styles.categoryMetricIconContainer}>
+                  <Text style={styles.metricIcon}>🏪</Text>
+                </View>
+                <View style={styles.categoryMetricContent}>
+                  <Text style={styles.categoryMetricLabel}>Shop ID</Text>
+                  <Text style={styles.categoryMetricValue}>{shopData.shop_id || 'N/A'}</Text>
+                </View>
+              </View>
               
-              try {
-                // Always show codes - either from shopData or generate defaults
-                let codesToShow = [];
-                
-                if (shopData.recovery_codes && shopData.recovery_codes.length > 0) {
-                  codesToShow = shopData.recovery_codes;
-                  console.log('Using recovery codes from shopData:', codesToShow);
-                } else {
-                  // Generate default codes if none exist
-                  codesToShow = ['1HAEJ9', 'MS1QCX', 'K08XWJ', 'SJXAYI', '1ORIXN', 'XXDURU', 'I4PJIJ', 'P4CFG8'];
-                  console.log('Using default recovery codes:', codesToShow);
-                }
-                
-                const codesText = codesToShow.join('\n');
-                console.log('Codes text to show:', codesText);
-                
-                Alert.alert(
-                  '🔑 Recovery Codes',
-                  `Your 8 recovery codes:\n\n${codesText}\n\nKeep these codes safe!`,
-                  [
-                    { 
-                      text: 'Copy to Clipboard', 
-                      onPress: () => {
-                        console.log('✅ Recovery codes copied to clipboard');
-                        Vibration.vibrate(100);
-                      }
-                    },
-                    { text: 'OK', style: 'default' }
-                  ]
-                );
-              } catch (error) {
-                console.error('❌ Error showing recovery codes:', error);
-                Alert.alert('Error', 'Unable to display recovery codes. Please try again.');
-              }
-            }}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.securityActionText}>🔑 View Recovery Codes</Text>
-          </TouchableOpacity>
+              <View style={styles.categoryMetricRow}>
+                <View style={styles.categoryMetricIconContainer}>
+                  <Text style={styles.metricIcon}>💻</Text>
+                </View>
+                <View style={styles.categoryMetricContent}>
+                  <Text style={styles.categoryMetricLabel}>Register ID</Text>
+                  <Text style={styles.categoryMetricValue}>{shopData.register_id || 'N/A'}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.categoryMetricRow}>
+                <View style={styles.categoryMetricIconContainer}>
+                  <Text style={styles.metricIcon}>👤</Text>
+                </View>
+                <View style={styles.categoryMetricContent}>
+                  <Text style={styles.categoryMetricLabel}>Owner ID</Text>
+                  <Text style={styles.categoryMetricValue}>{shopData.owner_id || 'N/A'}</Text>
+                </View>
+              </View>
+            </View>
+          </View>
+          
+          <View style={[
+            styles.ultimateCategoryCard,
+            { borderLeftColor: '#3b82f6' }
+          ]}>
+            <View style={styles.ultimateCategoryHeader}>
+              <View style={styles.categoryRankContainer}>
+                <View style={[styles.categoryBadge, { backgroundColor: '#3b82f6'}]}>
+                  <Text style={styles.categoryBadgeText}>📱</Text>
+                </View>
+                <Text style={styles.categoryRank}>DEV</Text>
+              </View>
+              <View style={[styles.categoryPerformanceIndicator, { backgroundColor: '#3b82f6'}]}>
+                <Text style={styles.performanceCrownText}>⚡</Text>
+              </View>
+            </View>
+            
+            <Text style={styles.ultimateCategoryName}>Device & API</Text>
+            
+            <View style={styles.ultimateCategoryMetrics}>
+              <View style={styles.categoryMetricRow}>
+                <View style={styles.categoryMetricIconContainer}>
+                  <Text style={styles.metricIcon}>📱</Text>
+                </View>
+                <View style={styles.categoryMetricContent}>
+                  <Text style={styles.categoryMetricLabel}>Device ID</Text>
+                  <Text style={styles.categoryMetricValue}>{shopData.device_id || 'N/A'}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.categoryMetricRow}>
+                <View style={styles.categoryMetricIconContainer}>
+                  <Text style={styles.metricIcon}>🔑</Text>
+                </View>
+                <View style={styles.categoryMetricContent}>
+                  <Text style={styles.categoryMetricLabel}>API Key</Text>
+                  <Text style={styles.categoryMetricValue}>
+                    {shopData.api_key ? shopData.api_key.substring(0, 20) + '...' : 'N/A'}
+                  </Text>
+                </View>
+              </View>
+              
+              <View style={styles.categoryMetricRow}>
+                <View style={styles.categoryMetricIconContainer}>
+                  <Text style={styles.metricIcon}>📋</Text>
+                </View>
+                <View style={styles.categoryMetricContent}>
+                  <Text style={styles.categoryMetricLabel}>Version</Text>
+                  <Text style={styles.categoryMetricValue}>{shopData.version || '1.0.0'}</Text>
+                </View>
+              </View>
+            </View>
+          </View>
+          
+          <View style={[
+            styles.ultimateCategoryCard,
+            { borderLeftColor: '#f59e0b' }
+          ]}>
+            <View style={styles.ultimateCategoryHeader}>
+              <View style={styles.categoryRankContainer}>
+                <View style={[styles.categoryBadge, { backgroundColor: '#f59e0b'}]}>
+                  <Text style={styles.categoryBadgeText}>🕒</Text>
+                </View>
+                <Text style={styles.categoryRank}>REG</Text>
+              </View>
+              <View style={[styles.categoryPerformanceIndicator, { backgroundColor: '#f59e0b'}]}>
+                <Text style={styles.performanceCrownText}>✓</Text>
+              </View>
+            </View>
+            
+            <Text style={styles.ultimateCategoryName}>Registration Data</Text>
+            
+            <View style={styles.ultimateCategoryMetrics}>
+              <View style={styles.categoryMetricRow}>
+                <View style={styles.categoryMetricIconContainer}>
+                  <Text style={styles.metricIcon}>📅</Text>
+                </View>
+                <View style={styles.categoryMetricContent}>
+                  <Text style={styles.categoryMetricLabel}>Registered</Text>
+                  <Text style={styles.categoryMetricValue}>
+                    {shopData.registration_time ? new Date(shopData.registration_time).toLocaleDateString() : 'N/A'}
+                  </Text>
+                </View>
+              </View>
+              
+              <View style={styles.categoryMetricRow}>
+                <View style={styles.categoryMetricIconContainer}>
+                  <Text style={styles.metricIcon}>🔒</Text>
+                </View>
+                <View style={styles.categoryMetricContent}>
+                  <Text style={styles.categoryMetricLabel}>Checksum</Text>
+                  <Text style={styles.categoryMetricValue}>
+                    {shopData.checksum ? shopData.checksum.substring(0, 12) + '...' : 'N/A'}
+                  </Text>
+                </View>
+              </View>
+              
+              <View style={styles.categoryMetricRow}>
+                <View style={styles.categoryMetricIconContainer}>
+                  <Text style={styles.metricIcon}>🟢</Text>
+                </View>
+                <View style={styles.categoryMetricContent}>
+                  <Text style={styles.categoryMetricLabel}>Status</Text>
+                  <Text style={[styles.categoryMetricValue, { color: '#10b981'}]}>Active</Text>
+                </View>
+              </View>
+            </View>
+          </View>
+        </View>
+        
+        <View style={styles.ultimateCategorySummary}>
+          <Text style={styles.ultimateCategorySummaryText}>
+            🏢 System Intelligence • All Systems Operational • {shopData.name || 'Enterprise Shop'} • Security: Active
+          </Text>
         </View>
       </View>
 
-      {/* Shop Information Section */}
-      <View style={styles.shopSection}>
-        <Text style={styles.sectionTitle}>🏪 Shop Information</Text>
-        <Text style={styles.sectionSubtitle}>Your business details</Text>
+      {/* Enterprise Security Intelligence */}
+      <View style={styles.section}>
+        <View style={styles.topProductsSectionHeader}>
+          <Text style={styles.sectionTitle}>🛡️ Enterprise Security Intelligence</Text>
+          <View style={styles.topProductsStatusBadge}>
+            <Text style={styles.topProductsStatusText}>Security Active</Text>
+          </View>
+        </View>
         
-        <View style={styles.shopCard}>
-          <View style={styles.shopInfoRow}>
-            <Text style={styles.shopLabel}>Shop Name:</Text>
-            <Text style={styles.shopValue}>{shopData.name || 'N/A'}</Text>
+        <View style={styles.ultimateProductGrid}>
+          <View style={[
+            styles.ultimateProductCard,
+            { borderLeftColor: '#f59e0b' },
+            styles.topRankCard
+          ]}>
+            <View style={styles.ultimateProductHeader}>
+              <View style={styles.productRankContainer}>
+                <View style={[
+                  styles.eliteRankBadge, 
+                  { backgroundColor: '#f59e0b' }
+                ]}>
+                  <Text style={styles.eliteRankText}>🔑</Text>
+                </View>
+                <View style={[styles.categoryBadge, { backgroundColor: '#f59e0b'}]}>
+                  <Text style={styles.categoryBadgeText}>SEC</Text>
+                </View>
+              </View>
+              <View style={[styles.performanceCrown, { backgroundColor: '#10b981'}]}>
+                <Text style={styles.performanceCrownText}>✓</Text>
+              </View>
+            </View>
+            
+            <Text style={styles.ultimateProductName}>Recovery System</Text>
+            
+            <View style={styles.ultimateProductMetrics}>
+              <View style={styles.productMetricRow}>
+                <View style={styles.productMetricIconContainer}>
+                  <Text style={styles.metricIcon}>🔐</Text>
+                </View>
+                <View style={styles.productMetricContent}>
+                  <Text style={styles.productMetricLabel}>Recovery Codes</Text>
+                  <Text style={styles.productMetricValue}>
+                    {shopData.recovery_codes ? `${shopData.recovery_codes.length} codes` : '8 codes'}
+                  </Text>
+                </View>
+              </View>
+              
+              <View style={styles.productMetricRow}>
+                <View style={styles.productMetricIconContainer}>
+                  <Text style={styles.metricIcon}>🗝️</Text>
+                </View>
+                <View style={styles.productMetricContent}>
+                  <Text style={styles.productMetricLabel}>Master Password</Text>
+                  <Text style={styles.productMetricValue}>••••••••••</Text>
+                </View>
+              </View>
+              
+              <View style={styles.productMetricRow}>
+                <View style={styles.productMetricIconContainer}>
+                  <Text style={styles.metricIcon}>🟢</Text>
+                </View>
+                <View style={styles.productMetricContent}>
+                  <Text style={styles.productMetricLabel}>API Access</Text>
+                  <Text style={[styles.productMetricValue, { color: '#10b981'}]}>Enabled</Text>
+                </View>
+              </View>
+            </View>
+            
+            <TouchableOpacity 
+              style={[
+                styles.securityAction,
+                isButtonPressed && { backgroundColor: 'rgba(245, 158, 11, 0.4)' }
+              ]}
+              onPressIn={() => {
+                setIsButtonPressed(true);
+                Vibration.vibrate(50);
+              }}
+              onPressOut={() => {
+                setIsButtonPressed(false);
+              }}
+              onPress={() => {
+                console.log('🔑 Recovery codes button pressed!');
+                console.log('Recovery codes data:', shopData.recovery_codes);
+                console.log('Shop data keys:', Object.keys(shopData));
+                
+                try {
+                  let codesToShow = [];
+                  
+                  if (shopData.recovery_codes && shopData.recovery_codes.length > 0) {
+                    codesToShow = shopData.recovery_codes;
+                    console.log('Using recovery codes from shopData:', codesToShow);
+                  } else {
+                    codesToShow = ['1HAEJ9', 'MS1QCX', 'K08XWJ', 'SJXAYI', '1ORIXN', 'XXDURU', 'I4PJIJ', 'P4CFG8'];
+                    console.log('Using default recovery codes:', codesToShow);
+                  }
+                  
+                  const codesText = codesToShow.join('\n');
+                  console.log('Codes text to show:', codesText);
+                  
+                  Alert.alert(
+                    '🔑 Recovery Codes',
+                    `Your 8 recovery codes:\n\n${codesText}\n\nKeep these codes safe!`,
+                    [
+                      { 
+                        text: 'Copy to Clipboard', 
+                        onPress: () => {
+                          console.log('✅ Recovery codes copied to clipboard');
+                          Vibration.vibrate(100);
+                        }
+                      },
+                      { text: 'OK', style: 'default' }
+                    ]
+                  );
+                } catch (error) {
+                  console.error('❌ Error showing recovery codes:', error);
+                  Alert.alert('Error', 'Unable to display recovery codes. Please try again.');
+                }
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.securityActionText}>🔑 View Recovery Codes</Text>
+            </TouchableOpacity>
           </View>
-          <View style={styles.shopInfoRow}>
-            <Text style={styles.shopLabel}>Email:</Text>
-            <Text style={styles.shopValue}>{shopData.email || 'N/A'}</Text>
+        </View>
+        
+        <View style={styles.ultimateProductSummary}>
+          <Text style={styles.ultimateProductSummaryText}>
+            🛡️ Security Intelligence • All Systems Secured • {shopData.recovery_codes?.length || 8} Recovery Codes • API: Active
+          </Text>
+        </View>
+      </View>
+
+      {/* Enterprise Business Intelligence */}
+      <View style={styles.section}>
+        <View style={styles.paymentSectionHeader}>
+          <Text style={styles.sectionTitle}>🏢 Enterprise Business Intelligence</Text>
+          <View style={styles.paymentStatusBadge}>
+            <Text style={styles.paymentStatusText}>Business Data</Text>
           </View>
-          <View style={styles.shopInfoRow}>
-            <Text style={styles.shopLabel}>Address:</Text>
-            <Text style={styles.shopValue}>{shopData.address || 'N/A'}</Text>
+        </View>
+        
+        <View style={styles.enhancedPaymentGrid}>
+          <View style={[
+            styles.enhancedPaymentCard,
+            { borderLeftColor: '#10b981' }
+          ]}>
+            <View style={styles.enhancedPaymentHeader}>
+              <View style={styles.paymentRankContainer}>
+                <Text style={styles.paymentRank}>#1</Text>
+                <View style={[styles.paymentBadge, { backgroundColor: '#10b981'}]}>
+                  <Text style={styles.paymentBadgeText}>🏪</Text>
+                </View>
+              </View>
+              <View style={[styles.paymentPerformanceIndicator, { backgroundColor: '#10b981'}]}>
+                <Text style={styles.performanceCrownText}>✓</Text>
+              </View>
+            </View>
+            
+            <Text style={styles.enhancedPaymentMethod}>Business Profile</Text>
+            
+            <View style={styles.enhancedPaymentMetrics}>
+              <View style={styles.paymentMetricRow}>
+                <View style={styles.paymentMetricIconContainer}>
+                  <Text style={styles.metricIcon}>🏢</Text>
+                </View>
+                <View style={styles.paymentMetricContent}>
+                  <Text style={styles.paymentMetricLabel}>Shop Name</Text>
+                  <Text style={styles.paymentMetricValue}>{shopData.name || 'N/A'}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.paymentMetricRow}>
+                <View style={styles.paymentMetricIconContainer}>
+                  <Text style={styles.metricIcon}>📧</Text>
+                </View>
+                <View style={styles.paymentMetricContent}>
+                  <Text style={styles.paymentMetricLabel}>Email</Text>
+                  <Text style={styles.paymentMetricValue}>{shopData.email || 'N/A'}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.paymentMetricRow}>
+                <View style={styles.paymentMetricIconContainer}>
+                  <Text style={styles.metricIcon}>📍</Text>
+                </View>
+                <View style={styles.paymentMetricContent}>
+                  <Text style={styles.paymentMetricLabel}>Address</Text>
+                  <Text style={styles.paymentMetricValue}>{shopData.address || 'N/A'}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.paymentMetricRow}>
+                <View style={styles.paymentMetricIconContainer}>
+                  <Text style={styles.metricIcon}>💼</Text>
+                </View>
+                <View style={styles.paymentMetricContent}>
+                  <Text style={styles.paymentMetricLabel}>Business Type</Text>
+                  <Text style={styles.paymentMetricValue}>{shopData.business_type || 'N/A'}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.paymentMetricRow}>
+                <View style={styles.paymentMetricIconContainer}>
+                  <Text style={styles.metricIcon}>🏭</Text>
+                </View>
+                <View style={styles.paymentMetricContent}>
+                  <Text style={styles.paymentMetricLabel}>Industry</Text>
+                  <Text style={styles.paymentMetricValue}>{shopData.industry || 'N/A'}</Text>
+                </View>
+              </View>
+            </View>
           </View>
-          <View style={styles.shopInfoRow}>
-            <Text style={styles.shopLabel}>Business Type:</Text>
-            <Text style={styles.shopValue}>{shopData.business_type || 'N/A'}</Text>
-          </View>
-          <View style={styles.shopInfoRow}>
-            <Text style={styles.shopLabel}>Industry:</Text>
-            <Text style={styles.shopValue}>{shopData.industry || 'N/A'}</Text>
-          </View>
+        </View>
+        
+        <View style={styles.paymentSummary}>
+          <Text style={styles.paymentSummaryText}>
+            🏢 Business Intelligence • {shopData.name || 'Enterprise Shop'} • {shopData.business_type || 'Business'} • Status: Active
+          </Text>
         </View>
       </View>
 
@@ -714,37 +989,32 @@ const SettingsScreen = () => {
         </View>
       )}
 
-      {/* Debug Info (Development only) */}
-      {__DEV__ && (
-        <View style={styles.debugSection}>
-          <Text style={styles.debugTitle}>Debug Info (Development)</Text>
-          <Text style={styles.debugText}>
-            Register ID: {shopData.register_id || 'N/A'}{'\n'}
-            Device ID: {shopData.device_id || 'N/A'}{'\n'}
-            Owner ID: {shopData.owner_id || 'N/A'}{'\n'}
-            API Key: {shopData.api_key || 'N/A'}{'\n'}
-            Checksum: {shopData.checksum || 'N/A'}{'\n'}
-            Shop ID: {shopData.shop_id || 'N/A'}{'\n'}
-            Name: {shopData.name || 'N/A'}{'\n'}
-            Email: {shopData.email || 'N/A'}{'\n'}
-            Business Type: {shopData.business_type || 'N/A'}{'\n'}
-            Industry: {shopData.industry || 'N/A'}
-          </Text>
-        </View>
-      )}
 
-      {/* Bottom Padding */}
-      <View style={styles.bottomPadding} />
+
+      {/* Bottom padding for web scrolling */}
+      <View style={{ 
+        height: Platform.OS === 'web' ? 100 : 20,
+        minHeight: Platform.OS === 'web' ? 100 : 0
+      }} />
       
-      {/* Floating Action Button */}
-      <TouchableOpacity style={styles.floatingActionButton}>
-        <Text style={styles.floatingActionButtonText}>⚡</Text>
-      </TouchableOpacity>
-      
-      {/* App Version Footer */}
-      <View style={styles.appFooter}>
-        <Text style={styles.appFooterText}>LuminaN POS v{shopData.version || '1.0.0'} | Hybrid System</Text>
-        <Text style={styles.appFooterSubtext}>© 2025 LuminaN Zimbabwe | All rights reserved</Text>
+      {/* Enterprise App Footer */}
+      <View style={styles.ultimateAppFooter}>
+        <View style={styles.ultimateFooterContent}>
+          <View style={styles.ultimateFooterLeft}>
+            <Text style={styles.ultimateFooterLogo}>⚙️</Text>
+            <View style={styles.ultimateFooterInfo}>
+              <Text style={styles.ultimateFooterTitle}>LuminaN POS v{shopData.version || '1.0.0'}</Text>
+              <Text style={styles.ultimateFooterSubtitle}>Enterprise System Control</Text>
+            </View>
+          </View>
+          <View style={styles.ultimateFooterRight}>
+            <View style={styles.ultimateFooterStatus}>
+              <View style={styles.ultimateStatusDot} />
+              <Text style={styles.ultimateStatusText}>All Systems Operational</Text>
+            </View>
+            <Text style={styles.ultimateFooterCopyright}>© 2025 LuminaN Zimbabwe | Enterprise Edition</Text>
+          </View>
+        </View>
       </View>
     </ScrollView>
   );
@@ -753,20 +1023,46 @@ const SettingsScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f0f0f',
+    backgroundColor: '#0f172a',
+    ...Platform.select({
+      web: {
+        height: '100vh',
+        overflow: 'auto',
+        WebkitOverflowScrolling: 'auto',
+        scrollBehavior: 'smooth',
+      },
+    }),
+  },
+  webContainer: {
+    ...Platform.select({
+      web: {
+        height: '100vh',
+        maxHeight: '100vh',
+        overflow: 'auto',
+        WebkitOverflowScrolling: 'auto',
+        scrollBehavior: 'smooth',
+      },
+    }),
   },
   scrollContentContainer: {
     flexGrow: 1,
-    paddingBottom: Platform.OS === 'web' ? 100 : 40, // Extra padding for web
+    paddingBottom: Platform.OS === 'web' ? 100 : 0,
+    ...Platform.select({
+      web: {
+        minHeight: '100vh',
+        width: '100%',
+        flexGrow: 1,
+      },
+    }),
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0f0f0f',
+    backgroundColor: '#0f172a',
   },
   loadingText: {
-    color: '#ffffff',
+    color: '#e2e8f0',
     fontSize: 16,
     marginTop: 16,
   },
@@ -774,8 +1070,711 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0f0f0f',
+    backgroundColor: '#0f172a',
     padding: 20,
+  },
+
+  // Ultimate Header Styles
+  ultimateHeader: {
+    backgroundColor: '#1e293b',
+    padding: 24,
+    paddingTop: 24,
+    position: 'relative',
+    overflow: 'hidden',
+    borderBottomWidth: 2,
+    borderBottomColor: '#374151',
+  },
+  headerBackgroundOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+    opacity: 0.95,
+  },
+  commandCenterBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 25,
+    borderWidth: 1,
+    borderColor: '#fbbf24',
+    alignSelf: 'flex-start',
+    marginBottom: 16,
+    elevation: 3,
+    shadowColor: '#fbbf24',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  commandCenterBadgeText: {
+    color: '#fbbf24',
+    fontSize: 10,
+    fontWeight: 'bold',
+    letterSpacing: 1,
+  },
+  ultimateHeaderTitle: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 12,
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+    position: 'relative',
+    zIndex: 1,
+  },
+  ultimateHeaderSubtitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+    position: 'relative',
+    zIndex: 1,
+  },
+  ultimateHeaderSubtitle: {
+    fontSize: 18,
+    color: '#e2e8f0',
+    fontWeight: '500',
+  },
+  ultimateGrowthMetrics: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    position: 'relative',
+    zIndex: 1,
+  },
+  growthMetricCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 12,
+    padding: 12,
+    flex: 1,
+    marginHorizontal: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  growthMetricIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  growthMetricIcon: {
+    fontSize: 16,
+  },
+  growthMetricContent: {
+    flex: 1,
+  },
+  growthMetricLabel: {
+    fontSize: 11,
+    color: '#94a3b8',
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  growthMetricValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+  growthTrendIndicator: {
+    marginLeft: 8,
+  },
+  growthTrendText: {
+    fontSize: 14,
+  },
+  realtimeStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    position: 'relative',
+    zIndex: 1,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#10b981',
+    marginRight: 8,
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 4,
+  },
+  statusText: {
+    fontSize: 12,
+    color: '#10b981',
+    fontWeight: '600',
+    marginRight: 8,
+  },
+  performanceSummary: {
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+    position: 'relative',
+    zIndex: 1,
+  },
+  performanceSummaryText: {
+    fontSize: 13,
+    color: '#10b981',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+
+  // Enterprise Category Analysis Styles
+  section: {
+    padding: 16,
+    marginBottom: 8,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#f1f5f9',
+    marginBottom: 12,
+  },
+  categorySectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  categoryStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+  },
+  categoryStatusText: {
+    color: '#8b5cf6',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+  ultimateCategoryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  ultimateCategoryCard: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    padding: 16,
+    width: '32%',
+    marginBottom: 16,
+    borderLeftWidth: 6,
+    boxShadow: '0 8px 16px rgba(0, 0, 0, 0.4)',
+    elevation: 6,
+    borderTopWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 2,
+    borderColor: '#334155',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  ultimateCategoryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  categoryRankContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  categoryRank: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    backgroundColor: '#374151',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    minWidth: 24,
+    textAlign: 'center',
+  },
+  categoryBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderRadius: 4,
+    gap: 4,
+  },
+  categoryBadgeText: {
+    color: '#ffffff',
+    fontSize: 12,
+  },
+  categoryPerformanceIndicator: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+  },
+  performanceCrownText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  ultimateCategoryName: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 12,
+    lineHeight: 19,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  ultimateCategoryMetrics: {
+    marginBottom: 12,
+  },
+  categoryMetricRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  categoryMetricIconContainer: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  metricIcon: {
+    fontSize: 14,
+  },
+  categoryMetricContent: {
+    flex: 1,
+  },
+  categoryMetricLabel: {
+    fontSize: 10,
+    color: '#94a3b8',
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  categoryMetricValue: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+  ultimateCategorySummary: {
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.2)',
+    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
+  },
+  ultimateCategorySummaryText: {
+    fontSize: 13,
+    color: '#8b5cf6',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+
+  // Top Products Performance Styles
+  topProductsSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  topProductsStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.3)',
+  },
+  topProductsStatusText: {
+    color: '#f59e0b',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+  ultimateProductGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  ultimateProductCard: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    padding: 16,
+    width: '100%',
+    marginBottom: 16,
+    borderLeftWidth: 6,
+    boxShadow: '0 8px 16px rgba(0, 0, 0, 0.4)',
+    elevation: 6,
+    borderTopWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 2,
+    borderColor: '#334155',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  topRankCard: {
+    borderTopWidth: 3,
+    borderTopColor: '#f59e0b',
+    transform: [{ scale: 1.02 }],
+  },
+  ultimateProductHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  productRankContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  eliteRankBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+  },
+  eliteRankText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  categoryBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    gap: 4,
+  },
+  categoryBadgeText: {
+    color: '#ffffff',
+    fontSize: 9,
+    fontWeight: '600',
+  },
+  performanceCrown: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+  },
+  performanceCrownText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  ultimateProductName: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 12,
+    lineHeight: 18,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  ultimateProductMetrics: {
+    marginBottom: 12,
+  },
+  productMetricRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  productMetricIconContainer: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  productMetricContent: {
+    flex: 1,
+  },
+  productMetricLabel: {
+    fontSize: 10,
+    color: '#94a3b8',
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  productMetricValue: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+  securityAction: {
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginTop: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.3)',
+  },
+  securityActionText: {
+    color: '#f59e0b',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  ultimateProductSummary: {
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.2)',
+    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
+  },
+  ultimateProductSummaryText: {
+    fontSize: 13,
+    color: '#f59e0b',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+
+  // Enhanced Payment Methods Section Styles
+  paymentSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  paymentStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.3)',
+  },
+  paymentStatusText: {
+    color: '#3b82f6',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+  enhancedPaymentGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  enhancedPaymentCard: {
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    padding: 12,
+    width: '100%',
+    marginBottom: 12,
+    borderLeftWidth: 4,
+    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
+    elevation: 3,
+    borderTopWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#334155',
+  },
+  enhancedPaymentHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  paymentRankContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  paymentRank: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    backgroundColor: '#374151',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    minWidth: 24,
+    textAlign: 'center',
+  },
+  paymentBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+    borderRadius: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  paymentBadgeText: {
+    color: '#ffffff',
+    fontSize: 12,
+  },
+  paymentPerformanceIndicator: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 2,
+  },
+  enhancedPaymentMethod: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 8,
+    lineHeight: 16,
+  },
+  enhancedPaymentMetrics: {
+    marginBottom: 8,
+  },
+  paymentMetricRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+    paddingHorizontal: 2,
+  },
+  paymentMetricIconContainer: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  paymentMetricContent: {
+    flex: 1,
+  },
+  paymentMetricLabel: {
+    fontSize: 9,
+    color: '#94a3b8',
+    fontWeight: '500',
+    marginBottom: 1,
+  },
+  paymentMetricValue: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+  paymentSummary: {
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.2)',
+  },
+  paymentSummaryText: {
+    fontSize: 12,
+    color: '#3b82f6',
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+
+  // Ultimate App Footer Styles
+  ultimateAppFooter: {
+    backgroundColor: '#1e293b',
+    paddingVertical: 20,
+    paddingHorizontal: 24,
+    borderTopWidth: 2,
+    borderTopColor: '#374151',
+    marginTop: 20,
+  },
+  ultimateFooterContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  ultimateFooterLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  ultimateFooterLogo: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  ultimateFooterInfo: {
+    flexDirection: 'column',
+  },
+  ultimateFooterTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  ultimateFooterSubtitle: {
+    color: '#94a3b8',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  ultimateFooterRight: {
+    alignItems: 'flex-end',
+  },
+  ultimateFooterStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  ultimateStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#10b981',
+    marginRight: 6,
+  },
+  ultimateStatusText: {
+    color: '#10b981',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  ultimateFooterCopyright: {
+    color: '#64748b',
+    fontSize: 10,
   },
   errorTitle: {
     color: '#ef4444',
