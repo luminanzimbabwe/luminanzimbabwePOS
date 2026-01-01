@@ -20,6 +20,19 @@ from django.shortcuts import get_object_or_404
 from .waste_views import WasteListView, WasteSummaryView, WasteProductSearchView
 
 @method_decorator(csrf_exempt, name='dispatch')
+class HealthCheckView(APIView):
+    """Simple health check endpoint for sync system"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    def get(self, request):
+        return Response({
+            "status": "healthy",
+            "timestamp": timezone.now().isoformat(),
+            "service": "luminan_pos_sync",
+            "version": "1.0.0"
+        })
+
+@method_decorator(csrf_exempt, name='dispatch')
 class ShopStatusView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []

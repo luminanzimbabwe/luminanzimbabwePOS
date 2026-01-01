@@ -148,7 +148,7 @@ class NetworkService extends EventEmitter {
         const endpoints = [
           'https://8.8.8.8', // Google DNS
           'https://1.1.1.1', // Cloudflare DNS
-          'https://luminanzimbabwepos.onrender.com/api/health' // Real Render server
+          'https://luminanzimbabwepos.onrender.com/api/v1/shop/health' // Real Render server
         ];
 
         for (const endpoint of endpoints) {

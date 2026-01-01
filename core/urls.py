@@ -22,6 +22,9 @@ router.register(r'stock-transfers', views.StockTransferViewSet, basename='stockt
 router.register(r'product-splits', views.ProductSplittingViewSet, basename='productsplit')
 
 urlpatterns = [
+    # Health check endpoint for sync system - MUST BE FIRST
+    path('health/', views.HealthCheckView.as_view(), name='health-check'),
+    
     # Include router URLs
     path('', include(router.urls)),
     

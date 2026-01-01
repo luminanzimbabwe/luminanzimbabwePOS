@@ -217,15 +217,15 @@ class SyncQueueService extends EventEmitter {
       // Determine endpoint and method based on operation
       switch (operationType) {
         case 'create':
-          endpoint = `/api/${tableName}/`;
+          endpoint = `/api/v1/shop/${tableName}/`;
           method = 'POST';
           break;
         case 'update':
-          endpoint = `/api/${tableName}/${data.id}/`;
+          endpoint = `/api/v1/shop/${tableName}/${data.id}/`;
           method = 'PUT';
           break;
         case 'delete':
-          endpoint = `/api/${tableName}/${data.id}/`;
+          endpoint = `/api/v1/shop/${tableName}/${data.id}/`;
           method = 'DELETE';
           break;
         default:

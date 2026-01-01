@@ -235,7 +235,7 @@ class SyncEngine extends EventEmitter {
       const lastSync = this.lastSyncTime || '1970-01-01T00:00:00.000Z';
 
       // Pull products
-      const productsResponse = await fetch(`${serverUrl}/api/products/?updated_since=${lastSync}`, {
+      const productsResponse = await fetch(`${serverUrl}/api/v1/shop/products/?updated_since=${lastSync}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -282,7 +282,7 @@ class SyncEngine extends EventEmitter {
       // Push each unsynced sale
       for (const sale of unsyncedSales) {
         try {
-          const response = await fetch(`${serverUrl}/api/sales/`, {
+          const response = await fetch(`${serverUrl}/api/v1/shop/sales/`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
