@@ -11,9 +11,9 @@ class ShopConfigurationSerializer(serializers.ModelSerializer):
     class Meta:
         model = ShopConfiguration
         fields = [
-            'shop_id', 'register_id', 'name', 'address', 'business_type', 'industry', 'description', 
-            'email', 'phone', 'shop_owner_master_password', 'recovery_codes',
-            'device_id', 'owner_id', 'api_key', 'version', 'checksum', 
+            'shop_id', 'register_id', 'name', 'address', 'business_type', 'industry', 'description',
+            'email', 'phone', 'base_currency', 'shop_owner_master_password', 'recovery_codes',
+            'device_id', 'owner_id', 'api_key', 'version', 'checksum',
             'registration_time', 'is_active', 'last_login', 'registered_at'
         ]
         read_only_fields = ['shop_id', 'register_id', 'device_id', 'owner_id', 'api_key', 'checksum', 'registered_at']
@@ -163,6 +163,20 @@ class CreateSaleSerializer(serializers.Serializer):
         ('card', 'Card'),
         ('transfer', 'Bank Transfer'),
     ])
+    # CRITICAL FIX: product_price_currency is always USD (products are priced in USD in database)
+    product_price_currency = serializers.ChoiceField(choices=[
+        ('USD', 'US Dollar'),
+        ('ZIG', 'Zimbabwe Gold'),
+        ('RAND', 'South African Rand'),
+    ], default='USD', required=False)
+    # CRITICAL FIX: payment_currency is what the customer actually paid in
+    payment_currency = serializers.ChoiceField(choices=[
+        ('USD', 'US Dollar'),
+        ('ZIG', 'Zimbabwe Gold'),
+        ('RAND', 'South African Rand'),
+    ], default='USD', required=False)
+    # CRITICAL FIX: total_amount is in payment_currency (converted from USD product prices)
+    total_amount = serializers.DecimalField(max_digits=15, decimal_places=2, required=False)
     customer_name = serializers.CharField(required=False, allow_blank=True)
     customer_phone = serializers.CharField(required=False, allow_blank=True)
 

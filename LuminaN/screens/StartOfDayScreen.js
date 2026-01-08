@@ -30,12 +30,16 @@ const StartOfDayScreen = ({ navigation, route }) => {
   const [drawerLoading, setDrawerLoading] = useState(false);
   const [lastUpdatedDrawer, setLastUpdatedDrawer] = useState(null);
 
-  // Cash Float Management State - Simplified
+  // Cash Float Management State - Multi-currency
   const [cashiers, setCashiers] = useState([]);
   const [drawerStatus, setDrawerStatus] = useState(null);
   const [showFloatModal, setShowFloatModal] = useState(false);
   const [selectedCashier, setSelectedCashier] = useState(null);
-  const [floatAmount, setFloatAmount] = useState('');
+  
+  // Multi-currency float amounts
+  const [floatAmountUSD, setFloatAmountUSD] = useState('');
+  const [floatAmountZIG, setFloatAmountZIG] = useState('');
+  const [floatAmountRAND, setFloatAmountRAND] = useState('');
   const [loadingFloat, setLoadingFloat] = useState(false);
 
   useEffect(() => {
@@ -163,17 +167,27 @@ const StartOfDayScreen = ({ navigation, route }) => {
     }
   };
 
-  const handleSetFloat = async (cashierId, amount) => {
-    if (!amount || isNaN(amount) || parseFloat(amount) < 0) {
-      Alert.alert('Error', 'Please enter a valid float amount');
+  const handleSetFloat = async () => {
+    // Check that at least one currency has a value
+    const usdValue = parseFloat(floatAmountUSD) || 0;
+    const zigValue = parseFloat(floatAmountZIG) || 0;
+    const randValue = parseFloat(floatAmountRAND) || 0;
+    
+    if (usdValue < 0 || zigValue < 0 || randValue < 0) {
+      Alert.alert('Error', 'Float amounts cannot be negative');
+      return;
+    }
+    
+    if (usdValue === 0 && zigValue === 0 && randValue === 0) {
+      Alert.alert('Error', 'Please enter at least one float amount');
       return;
     }
 
     try {
       setLoadingFloat(true);
-      // Allow passing null/undefined cashierId (use selectedCashier fallback)
+      
       // Resolve cashier id: prefer explicit param, then selectedCashier.cashier_id, then try to match name to known cashiers
-      let idToUse = cashierId || selectedCashier?.cashier_id || null;
+      let idToUse = selectedCashier?.cashier_id || null;
       if (!idToUse && selectedCashier?.cashier) {
         const match = cashiers.find(c => (c.name === selectedCashier.cashier) || (c.username === selectedCashier.cashier) || (c.cashier_name === selectedCashier.cashier) || (String(c.id) === String(selectedCashier.cashier)));
         if (match) idToUse = match.id;
@@ -185,7 +199,13 @@ const StartOfDayScreen = ({ navigation, route }) => {
         return;
       }
 
-      const payload = { cashier_id: idToUse, float_amount: parseFloat(amount) };
+      const payload = { 
+        cashier_id: idToUse, 
+        float_amount_usd: usdValue,
+        float_amount_zig: zigValue,
+        float_amount_rand: randValue
+      };
+      
       try {
         await shopAPI.setCashFloat(payload);
       } catch (err) {
@@ -196,10 +216,17 @@ const StartOfDayScreen = ({ navigation, route }) => {
         throw err;
       }
 
-      Alert.alert('Success', 'Float amount set successfully');
+      const currencyDetails = [];
+      if (usdValue > 0) currencyDetails.push(`${usdValue.toFixed(2)} USD`);
+      if (zigValue > 0) currencyDetails.push(`${zigValue.toFixed(2)} ZIG`);
+      if (randValue > 0) currencyDetails.push(`R${randValue.toFixed(2)} RAND`);
+      
+      Alert.alert('Success', `Float set successfully: ${currencyDetails.join(', ')}`);
       setShowFloatModal(false);
       setSelectedCashier(null);
-      setFloatAmount('');
+      setFloatAmountUSD('');
+      setFloatAmountZIG('');
+      setFloatAmountRAND('');
       fetchDrawerStatus();
     } catch (error) {
       console.error('❌ Error setting float:', error);
@@ -217,7 +244,9 @@ const StartOfDayScreen = ({ navigation, route }) => {
     const payload = {
       cashier_id: cashier?.cashier_id || cashier?.id || cashier?.cashier_id || null,
       cashier: cashier?.cashier || cashier?.cashier_name || cashier?.name || 'Unknown',
-      current_float: (cashier?.float_amount ?? cashier?.current_float ?? cashier?.opening_balance) || ''
+      float_amount: cashier?.float_amount ?? cashier?.current_float ?? cashier?.opening_balance ?? 0,
+      float_amount_zig: cashier?.float_amount_zig ?? 0,
+      float_amount_rand: cashier?.float_amount_rand ?? 0,
     };
     // If we don't have an id but we have a cashier name, try to match against loaded cashiers
     if (!payload.cashier_id && payload.cashier && cashiers && cashiers.length > 0) {
@@ -226,7 +255,9 @@ const StartOfDayScreen = ({ navigation, route }) => {
     }
 
     setSelectedCashier(payload);
-    setFloatAmount(payload.current_float?.toString() || '');
+    setFloatAmountUSD(payload.float_amount?.toString() || '');
+    setFloatAmountZIG(payload.float_amount_zig?.toString() || '');
+    setFloatAmountRAND(payload.float_amount_rand?.toString() || '');
     setShowFloatModal(true);
   };
 
@@ -406,7 +437,9 @@ const StartOfDayScreen = ({ navigation, route }) => {
             </View>
             <View style={styles.growthMetricContent}>
               <Text style={styles.growthMetricLabel}>Active Cashiers</Text>
-              <Text style={styles.growthMetricValue}>{activeShifts.length}</Text>
+              <Text style={styles.growthMetricValue}>
+                {drawerStatus?.active_drawers ?? (drawerStatus?.drawers?.filter(d => d.status === 'ACTIVE').length ?? 0)}
+              </Text>
             </View>
             <View style={styles.growthTrendIndicator}>
               <Icon name="trending-up" size={14} color="#10b981" />
@@ -426,7 +459,7 @@ const StartOfDayScreen = ({ navigation, route }) => {
         {/* Performance Summary */}
         <View style={styles.performanceSummary}>
           <Text style={styles.performanceSummaryText}>
-            🏆 Daily Operations • {activeShifts.length} Active Shifts • 
+            🏆 Daily Operations • {drawerStatus?.active_drawers ?? (drawerStatus?.drawers?.filter(d => d.status === 'ACTIVE').length ?? 0)} Active Shifts •
             {shopStatus?.date ? new Date(shopStatus.date).toLocaleDateString() : new Date().toLocaleDateString()}
           </Text>
         </View>
@@ -567,16 +600,26 @@ const StartOfDayScreen = ({ navigation, route }) => {
             <View style={styles.cashFlowFinancialGrid}>
               <View style={styles.cashFlowFinancialCard}>
                 <Text style={styles.cashFlowFinancialLabel}>Expected Cash</Text>
-                <Text style={styles.cashFlowFinancialValue}>${(drawerStatus.cash_flow?.total_expected_cash ?? 0).toFixed(2)}</Text>
+                <Text style={styles.cashFlowFinancialValue}>
+                  ${(drawerStatus.cash_flow?.expected_usd ?? drawerStatus.cash_flow?.total_expected_cash ?? 0).toFixed(2)} USD
+                  {(drawerStatus.cash_flow?.expected_zig ?? 0) > 0 ? `\n${(drawerStatus.cash_flow?.expected_zig ?? 0).toFixed(2)} ZIG` : ''}
+                  {(drawerStatus.cash_flow?.expected_rand ?? 0) > 0 ? `\nR${(drawerStatus.cash_flow?.expected_rand ?? 0).toFixed(2)} RAND` : ''}
+                </Text>
               </View>
               <View style={styles.cashFlowFinancialCard}>
                 <Text style={styles.cashFlowFinancialLabel}>Current Cash</Text>
-                <Text style={styles.cashFlowFinancialValue}>${(drawerStatus.cash_flow?.total_current_cash ?? 0).toFixed(2)}</Text>
+                <Text style={styles.cashFlowFinancialValue}>
+                  ${(drawerStatus.cash_flow?.current_usd ?? drawerStatus.cash_flow?.total_current_cash ?? 0).toFixed(2)} USD
+                  {(drawerStatus.cash_flow?.current_zig ?? 0) > 0 ? `\n${(drawerStatus.cash_flow?.current_zig ?? 0).toFixed(2)} ZIG` : ''}
+                  {(drawerStatus.cash_flow?.current_rand ?? 0) > 0 ? `\nR${(drawerStatus.cash_flow?.current_rand ?? 0).toFixed(2)} RAND` : ''}
+                </Text>
               </View>
               <View style={styles.cashFlowFinancialCard}>
                 <Text style={styles.cashFlowFinancialLabel}>Variance</Text>
-                <Text style={[styles.cashFlowFinancialValue, { color: (drawerStatus.cash_flow?.variance || 0) === 0 ? '#10b981' : '#ef4444' }]}>
-                  ${(drawerStatus.cash_flow?.variance ?? 0).toFixed(2)}
+                <Text style={[styles.cashFlowFinancialValue, { color: (drawerStatus.cash_flow?.usd_variance ?? 0) === 0 ? '#10b981' : '#ef4444' }]}>
+                  ${(drawerStatus.cash_flow?.usd_variance ?? drawerStatus.cash_flow?.variance ?? 0).toFixed(2)} USD
+                  {(drawerStatus.cash_flow?.zig_variance ?? 0) > 0 ? `\n${(drawerStatus.cash_flow?.zig_variance ?? 0).toFixed(2)} ZIG` : ''}
+                  {(drawerStatus.cash_flow?.rand_variance ?? 0) > 0 ? `\nR${(drawerStatus.cash_flow?.rand_variance ?? 0).toFixed(2)} RAND` : ''}
                 </Text>
               </View>
             </View>
@@ -601,13 +644,16 @@ const StartOfDayScreen = ({ navigation, route }) => {
                     <Text style={styles.ultimateDrawerTitle}>{d.cashier || 'Unknown Cashier'}</Text>
                     
                     <View style={styles.ultimateDrawerMetrics}>
+                      {/* Multi-Currency Float Display */}
                       <View style={styles.drawerMetricRow}>
                         <View style={styles.drawerMetricIconContainer}>
                           <Icon name="attach-money" size={14} color="#10b981" />
                         </View>
                         <View style={styles.drawerMetricContent}>
-                          <Text style={styles.drawerMetricLabel}>Float Amount</Text>
-                          <Text style={[styles.drawerMetricValue, { color: '#10b981' }]}>${(d.float_amount ?? 0).toFixed(2)}</Text>
+                          <Text style={styles.drawerMetricLabel}>Float (USD/ZIG/RAND)</Text>
+                          <Text style={[styles.drawerMetricValue, { color: '#10b981' }]}>
+                            ${(d.float_amount ?? 0).toFixed(2)} / {(d.float_amount_zig ?? 0).toFixed(2)} / R{(d.float_amount_rand ?? 0).toFixed(2)}
+                          </Text>
                         </View>
                       </View>
                       
@@ -617,7 +663,11 @@ const StartOfDayScreen = ({ navigation, route }) => {
                         </View>
                         <View style={styles.drawerMetricContent}>
                           <Text style={styles.drawerMetricLabel}>Current Total</Text>
-                          <Text style={styles.drawerMetricValue}>${(d.current_breakdown?.total ?? 0).toFixed(2)}</Text>
+                          <Text style={styles.drawerMetricValue}>
+                            ${(d.current_breakdown?.usd ?? d.current_cash_usd ?? 0).toFixed(2)} USD
+                            {(d.current_breakdown?.zig ?? d.current_cash_zig ?? 0) > 0 ? `\n${(d.current_breakdown?.zig ?? d.current_cash_zig ?? 0).toFixed(2)} ZIG` : ''}
+                            {(d.current_breakdown?.rand ?? d.current_cash_rand ?? 0) > 0 ? `\nR${(d.current_breakdown?.rand ?? d.current_cash_rand ?? 0).toFixed(2)} RAND` : ''}
+                          </Text>
                         </View>
                       </View>
                       
@@ -627,7 +677,11 @@ const StartOfDayScreen = ({ navigation, route }) => {
                         </View>
                         <View style={styles.drawerMetricContent}>
                           <Text style={styles.drawerMetricLabel}>Session Sales</Text>
-                          <Text style={styles.drawerMetricValue}>${(d.session_sales?.total ?? 0).toFixed(2)}</Text>
+                          <Text style={styles.drawerMetricValue}>
+                            ${(d.session_sales_by_currency?.usd?.total ?? d.session_sales_usd ?? 0).toFixed(2)} USD
+                            {(d.session_sales_by_currency?.zig?.total ?? d.session_sales_zig ?? 0) > 0 ? `\n${(d.session_sales_by_currency?.zig?.total ?? d.session_sales_zig ?? 0).toFixed(2)} ZIG` : ''}
+                            {(d.session_sales_by_currency?.rand?.total ?? d.session_sales_rand ?? 0) > 0 ? `\nR${(d.session_sales_by_currency?.rand?.total ?? d.session_sales_rand ?? 0).toFixed(2)} RAND` : ''}
+                          </Text>
                         </View>
                       </View>
                       
@@ -637,7 +691,11 @@ const StartOfDayScreen = ({ navigation, route }) => {
                         </View>
                         <View style={styles.drawerMetricContent}>
                           <Text style={styles.drawerMetricLabel}>EOD Expected</Text>
-                          <Text style={styles.drawerMetricValue}>${(d.eod_expectations?.expected_cash ?? 0).toFixed(2)} ({(d.eod_expectations?.variance ?? 0).toFixed(2)})</Text>
+                          <Text style={styles.drawerMetricValue}>
+                            ${(d.float_amount ?? 0).toFixed(2)} (float) + ${(d.session_sales_by_currency?.usd?.cash ?? d.session_cash_sales_usd ?? 0).toFixed(2)} (sales)
+                            {(d.float_amount_zig ?? 0) > 0 || (d.session_sales_by_currency?.zig?.cash ?? d.session_cash_sales_zig ?? 0) > 0 ? `\n${(d.float_amount_zig ?? 0).toFixed(2)} (float) + ${(d.session_sales_by_currency?.zig?.cash ?? d.session_cash_sales_zig ?? 0).toFixed(2)} ZIG` : ''}
+                            {(d.float_amount_rand ?? 0) > 0 || (d.session_sales_by_currency?.rand?.cash ?? d.session_cash_sales_rand ?? 0) > 0 ? `\nR${(d.float_amount_rand ?? 0).toFixed(2)} (float) + R${(d.session_sales_by_currency?.rand?.cash ?? d.session_cash_sales_rand ?? 0).toFixed(2)} RAND` : ''}
+                          </Text>
                         </View>
                       </View>
                     </View>
@@ -736,7 +794,9 @@ const StartOfDayScreen = ({ navigation, route }) => {
                 </View>
                 <View style={styles.summaryMetricContent}>
                   <Text style={styles.summaryMetricLabel}>Active Cashiers</Text>
-                  <Text style={[styles.summaryMetricValue, { color: '#10b981' }]}>{activeShifts.length}</Text>
+                  <Text style={[styles.summaryMetricValue, { color: '#10b981' }]}>
+                    {drawerStatus?.active_drawers ?? (drawerStatus?.drawers?.filter(d => d.status === 'ACTIVE').length ?? 0)}
+                  </Text>
                 </View>
               </View>
               
@@ -900,9 +960,9 @@ const StartOfDayScreen = ({ navigation, route }) => {
             >
               <Icon name="close" size={24} color="#64748b" />
             </TouchableOpacity>
-            <Text style={styles.modalTitle}>Set Cash Float</Text>
+            <Text style={styles.modalTitle}>Set Multi-Currency Cash Float</Text>
             <TouchableOpacity 
-              onPress={() => handleSetFloat(selectedCashier?.cashier_id, floatAmount)}
+              onPress={handleSetFloat}
               style={[styles.saveButton, loadingFloat && styles.disabledButton]}
               disabled={loadingFloat}
             >
@@ -920,13 +980,40 @@ const StartOfDayScreen = ({ navigation, route }) => {
               </View>
             )}
 
+            {/* USD Float Input */}
             <View style={styles.formSection}>
-              <Text style={styles.formLabel}>Float Amount ($) *</Text>
+              <Text style={styles.formLabel}>💵 USD Float Amount ($)</Text>
               <TextInput
                 style={styles.floatInput}
-                value={floatAmount}
-                onChangeText={setFloatAmount}
-                placeholder="Enter float amount"
+                value={floatAmountUSD}
+                onChangeText={setFloatAmountUSD}
+                placeholder="0.00"
+                keyboardType="numeric"
+                editable={!loadingFloat}
+              />
+            </View>
+
+            {/* ZIG Float Input */}
+            <View style={styles.formSection}>
+              <Text style={styles.formLabel}>💰 ZIG Float Amount</Text>
+              <TextInput
+                style={styles.floatInput}
+                value={floatAmountZIG}
+                onChangeText={setFloatAmountZIG}
+                placeholder="0.00"
+                keyboardType="numeric"
+                editable={!loadingFloat}
+              />
+            </View>
+
+            {/* RAND Float Input */}
+            <View style={styles.formSection}>
+              <Text style={styles.formLabel}>💴 RAND Float Amount (R)</Text>
+              <TextInput
+                style={styles.floatInput}
+                value={floatAmountRAND}
+                onChangeText={setFloatAmountRAND}
+                placeholder="0.00"
                 keyboardType="numeric"
                 editable={!loadingFloat}
               />
@@ -935,11 +1022,11 @@ const StartOfDayScreen = ({ navigation, route }) => {
             <View style={styles.infoCard}>
               <Icon name="info" size={20} color="#3b82f6" />
               <View style={styles.infoContent}>
-                <Text style={styles.infoTitle}>About Cash Floats:</Text>
-                <Text style={styles.infoText}>• Float amount is the starting cash for the cashier's drawer</Text>
-                <Text style={styles.infoText}>• This amount will be subtracted during EOD reconciliation</Text>
+                <Text style={styles.infoTitle}>About Multi-Currency Floats:</Text>
+                <Text style={styles.infoText}>• Set starting cash for the cashier's drawer in each currency</Text>
+                <Text style={styles.infoText}>• Each cashier can have USD, ZIG, and RAND floats</Text>
+                <Text style={styles.infoText}>• Floats are tracked separately per currency</Text>
                 <Text style={styles.infoText}>• You can set or update floats at any time during business hours</Text>
-                <Text style={styles.infoText}>• Each cashier should have their own float amount</Text>
               </View>
             </View>
           </ScrollView>

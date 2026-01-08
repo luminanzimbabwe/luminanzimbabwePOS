@@ -40,8 +40,10 @@ class CashierCount(models.Model):
     total_other = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     grand_total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     
-    # Expected vs Actual
+    # Expected vs Actual (multi-currency support)
     expected_cash = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    expected_cash_usd = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    expected_cash_rand = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     expected_card = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     expected_ecocash = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     
@@ -210,9 +212,13 @@ class ReconciliationSession(models.Model):
     started_by = models.ForeignKey(Cashier, on_delete=models.SET_NULL, null=True, blank=True, related_name='reconciliation_sessions_started')
     completed_by = models.ForeignKey(Cashier, on_delete=models.SET_NULL, null=True, blank=True, related_name='reconciliation_sessions_completed')
     
-    # Overall Summary
+    # Overall Summary (multi-currency support)
     total_expected_cash = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_expected_cash_usd = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_expected_cash_rand = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_counted_cash = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_counted_cash_usd = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_counted_cash_rand = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_variance = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     
     # Notes
@@ -276,18 +282,22 @@ class ReconciliationSession(models.Model):
         return self
     
     def calculate_session_summary(self):
-        """Calculate overall session summary from cashier counts"""
+        """Calculate overall session summary from cashier counts (multi-currency)"""
         counts = CashierCount.objects.filter(shop=self.shop, date=self.date)
         
         self.total_expected_cash = sum(count.expected_cash for count in counts)
+        self.total_expected_cash_usd = sum(count.expected_cash_usd for count in counts)
+        self.total_expected_cash_rand = sum(count.expected_cash_rand for count in counts)
         self.total_counted_cash = sum(count.total_cash for count in counts)
+        self.total_counted_cash_usd = sum(count.total_cash for count in counts)  # Note: total_cash is ZIG only currently
+        self.total_counted_cash_rand = sum(count.total_cash for count in counts)
         self.total_variance = self.total_counted_cash - self.total_expected_cash
         
         self.save()
         return self
     
     def get_session_summary(self):
-        """Get comprehensive session summary"""
+        """Get comprehensive session summary (multi-currency)"""
         counts = CashierCount.objects.filter(shop=self.shop, date=self.date)
         
         return {
@@ -299,7 +309,11 @@ class ReconciliationSession(models.Model):
             },
             'summary': {
                 'total_expected_cash': float(self.total_expected_cash),
+                'total_expected_cash_usd': float(self.total_expected_cash_usd),
+                'total_expected_cash_rand': float(self.total_expected_cash_rand),
                 'total_counted_cash': float(self.total_counted_cash),
+                'total_counted_cash_usd': float(self.total_counted_cash_usd),
+                'total_counted_cash_rand': float(self.total_counted_cash_rand),
                 'total_variance': float(self.total_variance),
                 'variance_percentage': (float(self.total_variance) / float(self.total_expected_cash) * 100) if self.total_expected_cash > 0 else 0,
             },

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { createStackNavigator } from '@react-navigation/stack';
 import { ROUTES } from '../constants/navigation';
 
@@ -6,6 +6,9 @@ import { ROUTES } from '../constants/navigation';
 import WelcomeScreen from '../screens/WelcomeScreen';
 import RegisterScreen from '../screens/RegisterScreen';
 import LoginScreen from '../screens/LoginScreen';
+import LicenseFirstLoginScreen from '../screens/LicenseFirstLoginScreen';
+import LicenseRenewalScreen from '../components/LicenseRenewalScreen';
+import LicenseManagementScreen from '../screens/LicenseManagementScreen';
 import CashierDashboardScreen from '../screens/CashierDashboardScreen';
 import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
 import CashierResetPasswordScreen from '../screens/CashierResetPasswordScreen';
@@ -47,16 +50,64 @@ import SupplierManagementScreen from '../screens/SupplierManagementScreen';
 import StockMovementScreen from '../screens/StockMovementScreen';
 import PriceComparisonScreen from '../screens/PriceComparisonScreen';
 import DemandForecastingScreen from '../screens/DemandForecastingScreen';
+import StaffLunchScreen from '../screens/StaffLunchScreen';
+import ExchangeRateManagementScreen from '../screens/ExchangeRateManagementScreen';
 
 // Import Tab Navigator
 import TabNavigator from './TabNavigator';
 
+// Import API service
+import { apiService } from '../services/api';
+
 const Stack = createStackNavigator();
 
 const AppNavigator = () => {
+  const [initialRoute, setInitialRoute] = useState(ROUTES.LICENSE_FIRST_LOGIN);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const checkShopStatus = async () => {
+      try {
+        console.log('🔍 Checking shop registration status...');
+        const response = await apiService.getShopStatus();
+        
+        if (response.is_registered) {
+          console.log('✅ Shop is registered, showing login screen');
+          setInitialRoute(ROUTES.LOGIN);
+        } else {
+          console.log('❌ No shop registered, showing welcome screen');
+          setInitialRoute(ROUTES.WELCOME);
+        }
+      } catch (error) {
+        console.error('Error checking shop status:', error);
+        // If there's an error checking shop status, assume no shop exists
+        console.log('❌ Error checking shop status, showing welcome screen');
+        setInitialRoute(ROUTES.WELCOME);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    checkShopStatus();
+  }, []);
+
+  if (isLoading) {
+    // You could return a loading screen here
+    return (
+      <Stack.Navigator
+        initialRouteName={ROUTES.WELCOME}
+        screenOptions={{
+          headerShown: false,
+        }}
+      >
+        <Stack.Screen name={ROUTES.WELCOME} component={WelcomeScreen} />
+      </Stack.Navigator>
+    );
+  }
+
   return (
     <Stack.Navigator
-      initialRouteName={ROUTES.WELCOME}
+      initialRouteName={initialRoute}
       screenOptions={{
         headerShown: false,
       }}
@@ -65,6 +116,9 @@ const AppNavigator = () => {
       <Stack.Screen name={ROUTES.WELCOME} component={WelcomeScreen} />
       <Stack.Screen name={ROUTES.REGISTER} component={RegisterScreen} />
       <Stack.Screen name={ROUTES.LOGIN} component={LoginScreen} />
+      <Stack.Screen name={ROUTES.LICENSE_FIRST_LOGIN} component={LicenseFirstLoginScreen} />
+      <Stack.Screen name={ROUTES.LICENSE_RENEWAL} component={LicenseRenewalScreen} />
+      <Stack.Screen name={ROUTES.LICENSE_MANAGEMENT} component={LicenseManagementScreen} />
       <Stack.Screen name={ROUTES.CASHIER_DASHBOARD} component={CashierDashboardScreen} />
       <Stack.Screen name={ROUTES.FORGOT_PASSWORD} component={ForgotPasswordScreen} />
       <Stack.Screen name={ROUTES.CASHIER_RESET_PASSWORD} component={CashierResetPasswordScreen} />
@@ -117,6 +171,8 @@ const AppNavigator = () => {
       <Stack.Screen name={ROUTES.STOCK_MOVEMENTS} component={StockMovementScreen} />
       <Stack.Screen name={ROUTES.PRICE_COMPARISON} component={PriceComparisonScreen} />
       <Stack.Screen name={ROUTES.DEMAND_FORECASTING} component={DemandForecastingScreen} />
+      <Stack.Screen name={ROUTES.STAFF_LUNCH} component={StaffLunchScreen} />
+      <Stack.Screen name={ROUTES.EXCHANGE_RATE_MANAGEMENT} component={ExchangeRateManagementScreen} />
 
     </Stack.Navigator>
   );

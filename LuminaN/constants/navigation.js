@@ -26,6 +26,10 @@ export const ROUTES = {
   CASHIER_SALES: 'CashierSales',
   CASHIER_PRODUCT_RECEIVING: 'CashierProductReceiving',
   QUICK_PRODUCTS: 'QuickProducts',
+  // License Management routes
+  LICENSE_FIRST_LOGIN: 'LicenseFirstLogin',
+  LICENSE_RENEWAL: 'LicenseRenewal',
+  LICENSE_MANAGEMENT: 'LicenseManagement',
   // Sales Command Center routes
   SALES_DASHBOARD: 'SalesDashboard',
   SALES_LEDGER: 'SalesLedger',
@@ -42,6 +46,8 @@ export const ROUTES = {
   STOCK_MOVEMENTS: 'StockMovements',
   PRICE_COMPARISON: 'PriceComparison',
   DEMAND_FORECASTING: 'DemandForecasting',
+  STAFF_LUNCH: 'StaffLunch',
+  EXCHANGE_RATE_MANAGEMENT: 'ExchangeRateManagement',
 };
 
 // Screen titles
@@ -71,6 +77,10 @@ export const SCREEN_TITLES = {
   [ROUTES.SALES_AND_REFUNDS]: 'Sales & Refunds',
   [ROUTES.CASHIER_PRODUCT_RECEIVING]: 'Cashier Product Receiving',
   [ROUTES.QUICK_PRODUCTS]: 'Quick Products',
+  // License Management titles
+  [ROUTES.LICENSE_FIRST_LOGIN]: 'License Required',
+  [ROUTES.LICENSE_RENEWAL]: 'License Renewal',
+  [ROUTES.LICENSE_MANAGEMENT]: 'License Management',
   // Sales Command Center titles
   [ROUTES.SALES_DASHBOARD]: 'Sales Dashboard',
   [ROUTES.SALES_LEDGER]: 'Sales Ledger',
@@ -87,4 +97,6 @@ export const SCREEN_TITLES = {
   [ROUTES.STOCK_MOVEMENTS]: 'Stock Movements',
   [ROUTES.PRICE_COMPARISON]: 'Price Comparison',
   [ROUTES.DEMAND_FORECASTING]: 'Demand Forecasting',
+  [ROUTES.STAFF_LUNCH]: 'Staff Lunch',
+  [ROUTES.EXCHANGE_RATE_MANAGEMENT]: 'Exchange Rate Management',
 };

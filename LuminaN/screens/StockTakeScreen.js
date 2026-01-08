@@ -24,10 +24,19 @@ const StockTakeScreen = () => {
   const [stockTakeResults, setStockTakeResults] = useState([]);
   const [finalizing, setFinalizing] = useState(false);
   const [currentStockTake, setCurrentStockTake] = useState(null);
+  
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(10);
 
   useEffect(() => {
     loadProductsForStockTake();
   }, []);
+
+  // Reset to first page when products change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [products.length]);
 
   const loadProductsForStockTake = async () => {
     try {
@@ -235,6 +244,151 @@ const StockTakeScreen = () => {
     // Keep existing counts for user to edit
   };
 
+  const generateAIInsights = (results) => {
+    const insights = [];
+    const totalProducts = results.length;
+    const discrepancies = results.filter(item => item.difference !== 0);
+    const shortages = results.filter(item => item.difference < 0);
+    const overstocks = results.filter(item => item.difference > 0);
+    const balanced = results.filter(item => item.difference === 0);
+    
+    // Calculate financial impacts
+    const totalVarianceValue = discrepancies.reduce((sum, item) => {
+      return sum + (item.difference * item.unit_cost);
+    }, 0);
+    
+    const totalShortageValue = shortages.reduce((sum, item) => {
+      return sum + (Math.abs(item.difference) * item.unit_cost);
+    }, 0);
+    
+    const totalOverstockValue = overstocks.reduce((sum, item) => {
+      return sum + (item.difference * item.unit_cost);
+    }, 0);
+    
+    // Calculate potential revenue impact
+    const potentialRevenueLoss = shortages.reduce((sum, item) => {
+      const margin = item.unit_price - item.unit_cost;
+      return sum + (Math.abs(item.difference) * margin);
+    }, 0);
+    
+    const potentialRevenueGain = overstocks.reduce((sum, item) => {
+      const margin = item.unit_price - item.unit_cost;
+      return sum + (item.difference * margin);
+    }, 0);
+    
+    // Generate AI insights
+    if (shortages.length > 0) {
+      insights.push(`🚨 CRITICAL: ${shortages.length} products with shortages worth ${formatCurrency(totalShortageValue)}`);
+      insights.push(`💸 Potential revenue loss from shortages: ${formatCurrency(potentialRevenueLoss)}`);
+      
+      // Find top 3 shortage items by financial impact
+      const topShortages = shortages
+        .map(item => ({
+          ...item,
+          financialImpact: Math.abs(item.difference * (item.unit_price - item.unit_cost))
+        }))
+        .sort((a, b) => b.financialImpact - a.financialImpact)
+        .slice(0, 3);
+      
+      if (topShortages.length > 0) {
+        insights.push(`🎯 URGENT restocks: ${topShortages.map(item => `${item.product_name} (${formatCurrency(item.financialImpact)})`).join(', ')}`);
+      }
+    }
+    
+    if (overstocks.length > 0) {
+      insights.push(`📦 EXCESS: ${overstocks.length} products with overstock worth ${formatCurrency(totalOverstockValue)}`);
+      insights.push(`💰 Potential revenue from selling excess: ${formatCurrency(potentialRevenueGain)}`);
+      insights.push(`🛍️ Consider promotions, discounts, or bundle deals to move excess inventory`);
+    }
+    
+    // Accuracy analysis
+    const accuracyRate = totalProducts > 0 ? (balanced.length / totalProducts) * 100 : 0;
+    if (accuracyRate >= 95) {
+      insights.push(`🏆 EXCELLENT inventory accuracy! ${accuracyRate.toFixed(1)}% of products are perfectly balanced`);
+    } else if (accuracyRate >= 80) {
+      insights.push(`✅ GOOD inventory accuracy: ${accuracyRate.toFixed(1)}%. Minor adjustments needed`);
+    } else if (accuracyRate >= 60) {
+      insights.push(`⚠️ MODERATE accuracy: ${accuracyRate.toFixed(1)}%. Consider recounting high-value items`);
+    } else {
+      insights.push(`🚨 LOW accuracy: ${accuracyRate.toFixed(1)}%. Recommend full recount of inventory`);
+    }
+    
+    // Financial impact summary
+    if (totalVarianceValue < 0) {
+      insights.push(`📉 NET LOSS: ${formatCurrency(Math.abs(totalVarianceValue))} inventory value decrease`);
+      insights.push(`🔍 Investigate potential causes: theft, spoilage, recording errors`);
+    } else if (totalVarianceValue > 0) {
+      insights.push(`📈 NET GAIN: ${formatCurrency(totalVarianceValue)} inventory value increase`);
+      insights.push(`📝 Review for potential overcounting or unrecorded purchases`);
+    }
+    
+    // Category analysis
+    const categoryAnalysis = {};
+    discrepancies.forEach(item => {
+      if (!categoryAnalysis[item.category]) {
+        categoryAnalysis[item.category] = { 
+          shortages: 0, 
+          overstocks: 0, 
+          value: 0,
+          items: []
+        };
+      }
+      if (item.difference < 0) {
+        categoryAnalysis[item.category].shortages++;
+      } else {
+        categoryAnalysis[item.category].overstocks++;
+      }
+      categoryAnalysis[item.category].value += Math.abs(item.difference * item.unit_cost);
+      categoryAnalysis[item.category].items.push(item);
+    });
+    
+    // Find most problematic categories
+    const problematicCategories = Object.entries(categoryAnalysis)
+      .filter(([_, data]) => data.shortages > 3 || data.overstocks > 3)
+      .sort((a, b) => b[1].value - a[1].value);
+    
+    if (problematicCategories.length > 0) {
+      const [categoryName, data] = problematicCategories[0];
+      insights.push(`🎯 FOCUS AREA: ${categoryName} category has highest variance (${formatCurrency(data.value)})`);
+      
+      if (data.shortages > data.overstocks) {
+        insights.push(`📋 Action: Increase ${categoryName} reorder frequency`);
+      } else {
+        insights.push(`📋 Action: Review ${categoryName} ordering quantities and supplier terms`);
+      }
+    }
+    
+    // High-value item analysis
+    const highValueItems = results.filter(item => item.unit_cost > 50);
+    const highValueDiscrepancies = highValueItems.filter(item => item.difference !== 0);
+    
+    if (highValueDiscrepancies.length > 0) {
+      insights.push(`💎 HIGH-VALUE ALERT: ${highValueDiscrepancies.length} expensive items have discrepancies`);
+      insights.push(`🔒 Consider implementing stricter controls for high-cost inventory`);
+    }
+    
+    // Margin analysis
+    const avgMargin = results.length > 0 ? 
+      results.reduce((sum, item) => sum + ((item.unit_price - item.unit_cost) / item.unit_price * 100), 0) / results.length : 0;
+    
+    if (avgMargin < 20) {
+      insights.push(`⚠️ LOW MARGINS: Average gross margin is ${avgMargin.toFixed(1)}%. Consider reviewing pricing`);
+    } else if (avgMargin > 50) {
+      insights.push(`💰 HEALTHY MARGINS: Average gross margin is ${avgMargin.toFixed(1)}%. Great pricing strategy`);
+    }
+    
+    // Recommendations
+    if (shortages.length > 0) {
+      insights.push(`📞 NEXT STEPS: Contact suppliers for emergency restocks on critical items`);
+    }
+    
+    if (overstocks.length > 10) {
+      insights.push(`📈 STRATEGY: Plan promotional campaigns for excess inventory`);
+    }
+    
+    return insights;
+  };
+
   const handleFinalizeStockTake = async () => {
     try {
       setFinalizing(true);
@@ -327,6 +481,84 @@ const StockTakeScreen = () => {
     return new Intl.NumberFormat('en-US').format(num || 0);
   };
 
+  // Pagination logic
+  const totalPages = Math.ceil(products.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const currentProducts = products.slice(startIndex, endIndex);
+
+  const handlePageChange = (newPage) => {
+    if (newPage >= 1 && newPage <= totalPages) {
+      setCurrentPage(newPage);
+    }
+  };
+
+  const renderPaginationControls = () => {
+    if (totalPages <= 1) return null;
+
+    return (
+      <View style={styles.paginationContainer}>
+        <Text style={styles.paginationInfo}>
+          Showing {startIndex + 1}-{Math.min(endIndex, products.length)} of {products.length} products
+        </Text>
+        <View style={styles.paginationControls}>
+          <TouchableOpacity
+            style={[styles.paginationButton, currentPage === 1 && styles.paginationButtonDisabled]}
+            onPress={() => handlePageChange(currentPage - 1)}
+            disabled={currentPage === 1}
+          >
+            <Text style={[styles.paginationButtonText, currentPage === 1 && styles.paginationButtonTextDisabled]}>
+              ← Previous
+            </Text>
+          </TouchableOpacity>
+          
+          <View style={styles.pageNumbers}>
+            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+              let pageNum;
+              if (totalPages <= 5) {
+                pageNum = i + 1;
+              } else if (currentPage <= 3) {
+                pageNum = i + 1;
+              } else if (currentPage >= totalPages - 2) {
+                pageNum = totalPages - 4 + i;
+              } else {
+                pageNum = currentPage - 2 + i;
+              }
+
+              return (
+                <TouchableOpacity
+                  key={pageNum}
+                  style={[
+                    styles.pageNumber,
+                    currentPage === pageNum && styles.pageNumberActive
+                  ]}
+                  onPress={() => handlePageChange(pageNum)}
+                >
+                  <Text style={[
+                    styles.pageNumberText,
+                    currentPage === pageNum && styles.pageNumberTextActive
+                  ]}>
+                    {pageNum}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          
+          <TouchableOpacity
+            style={[styles.paginationButton, currentPage === totalPages && styles.paginationButtonDisabled]}
+            onPress={() => handlePageChange(currentPage + 1)}
+            disabled={currentPage === totalPages}
+          >
+            <Text style={[styles.paginationButtonText, currentPage === totalPages && styles.paginationButtonTextDisabled]}>
+              Next →
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
   const getDifferenceStyle = (difference) => {
     if (difference === 0) return styles.differenceZero;
     if (difference > 0) return styles.differencePositive;
@@ -381,7 +613,7 @@ const StockTakeScreen = () => {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, Platform.OS === 'web' && styles.webContainer]}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Text style={styles.backButton}>← Back</Text>
@@ -398,15 +630,26 @@ const StockTakeScreen = () => {
       {/* Phase 1: Counting - Show only product details and counting fields */}
       {currentPhase === 'counting' && (
         <ScrollView 
-          style={styles.mainContent}
+          style={styles.scrollContainer}
           contentContainerStyle={styles.scrollContentContainer}
-          showsVerticalScrollIndicator={Platform.OS === 'web'}
+          showsVerticalScrollIndicator={true}
+          scrollEventThrottle={16}
+          nestedScrollEnabled={Platform.OS === 'web'}
+          removeClippedSubviews={false}
+          onScroll={(event) => {
+            if (Platform.OS === 'web') {
+              const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+              const isAtBottom = contentOffset.y >= (contentSize.height - layoutMeasurement.height - 10);
+            }
+          }}
         >
           {/* Instructions */}
           <View style={styles.instructionsContainer}>
             <Text style={styles.instructionsTitle}>📋 Stock Take Process</Text>
             <Text style={styles.instructionsText}>
               Count the physical quantity of each product in your store.{'\n'}
+              Products are shown {itemsPerPage} at a time for easier navigation.{'\n'}
+              Use the pagination controls to browse through all products.{'\n'}
               Enter your count in the "Counted" column below.{'\n'}
               After counting, we'll compare with system stock and update the database.{'\n'}
               {currentStockTake ? `Session: ${currentStockTake.name}` : 'Creating new session...'}
@@ -414,8 +657,9 @@ const StockTakeScreen = () => {
           </View>
 
           {/* Counting Table - Comprehensive product information */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'}>
-            <View style={styles.countingTable}>
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'}>
+              <View style={styles.countingTable}>
               <View style={styles.tableHeader}>
                 <Text style={[styles.tableCell, styles.headerCellName]}>Product Name</Text>
                 <Text style={[styles.tableCell, styles.headerCellCategory]}>Category</Text>
@@ -430,7 +674,7 @@ const StockTakeScreen = () => {
                 <Text style={[styles.tableCell, styles.headerCellCounted]}>COUNTED</Text>
               </View>
 
-            {products.map((product, index) => {
+            {currentProducts.map((product, index) => {
               const count = stockCounts[product.id] || {};
               const stockQty = parseFloat(product.stock_quantity) || 0;
               const minStockLevel = parseFloat(product.min_stock_level) || 5;
@@ -491,6 +735,16 @@ const StockTakeScreen = () => {
             })}
             </View>
           </ScrollView>
+          </View>
+
+          {/* Pagination Controls */}
+          {renderPaginationControls()}
+
+          {/* Bottom padding for web scrolling */}
+          <View style={{ 
+            height: Platform.OS === 'web' ? 100 : 20,
+            minHeight: Platform.OS === 'web' ? 100 : 0
+          }} />
 
           {/* Action Buttons */}
           <View style={styles.actionContainer}>
@@ -512,9 +766,18 @@ const StockTakeScreen = () => {
       {/* Phase 2 & 3: Processing/Review - Show comparison */}
       {(currentPhase === 'processing' || currentPhase === 'review' || currentPhase === 'finalizing') && (
         <ScrollView 
-          style={styles.mainContent}
+          style={styles.scrollContainer}
           contentContainerStyle={styles.scrollContentContainer}
-          showsVerticalScrollIndicator={Platform.OS === 'web'}
+          showsVerticalScrollIndicator={true}
+          scrollEventThrottle={16}
+          nestedScrollEnabled={Platform.OS === 'web'}
+          removeClippedSubviews={false}
+          onScroll={(event) => {
+            if (Platform.OS === 'web') {
+              const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+              const isAtBottom = contentOffset.y >= (contentSize.height - layoutMeasurement.height - 10);
+            }
+          }}
         >
           {/* Processing Indicator */}
           {currentPhase === 'processing' && (
@@ -550,14 +813,63 @@ const StockTakeScreen = () => {
                     {stockTakeResults.filter(item => item.difference !== 0).length}
                   </Text>
                 </View>
+                <View style={styles.summaryCard}>
+                  <Text style={styles.summaryLabel}>Total Variance Value</Text>
+                  <Text style={[styles.summaryValue, { color: '#10b981' }]}>
+                    {(() => {
+                      const discrepancies = stockTakeResults.filter(item => item.difference !== 0);
+                      const totalVarianceValue = discrepancies.reduce((sum, item) => {
+                        return sum + (item.difference * item.unit_cost);
+                      }, 0);
+                      return formatCurrency(totalVarianceValue);
+                    })()}
+                  </Text>
+                </View>
+                <View style={styles.summaryCard}>
+                  <Text style={styles.summaryLabel}>Shortage Value</Text>
+                  <Text style={[styles.summaryValue, { color: '#ef4444' }]}>
+                    {(() => {
+                      const shortages = stockTakeResults.filter(item => item.difference < 0);
+                      const totalShortageValue = shortages.reduce((sum, item) => {
+                        return sum + (Math.abs(item.difference) * item.unit_cost);
+                      }, 0);
+                      return formatCurrency(totalShortageValue);
+                    })()}
+                  </Text>
+                </View>
+                <View style={styles.summaryCard}>
+                  <Text style={styles.summaryLabel}>Overstock Value</Text>
+                  <Text style={[styles.summaryValue, { color: '#22c55e' }]}>
+                    {(() => {
+                      const overstocks = stockTakeResults.filter(item => item.difference > 0);
+                      const totalOverstockValue = overstocks.reduce((sum, item) => {
+                        return sum + (item.difference * item.unit_cost);
+                      }, 0);
+                      return formatCurrency(totalOverstockValue);
+                    })()}
+                  </Text>
+                </View>
               </View>
+            </View>
+          )}
+
+          {/* AI Insights Section */}
+          {(currentPhase === 'review' || currentPhase === 'finalizing') && (
+            <View style={styles.aiInsightsContainer}>
+              <Text style={styles.aiInsightsTitle}>🤖 AI Stock Analysis</Text>
+              {generateAIInsights(stockTakeResults).map((insight, index) => (
+                <View key={index} style={styles.aiInsightItem}>
+                  <Text style={styles.aiInsightText}>{insight}</Text>
+                </View>
+              ))}
             </View>
           )}
 
           {/* Comparison Table */}
           {(currentPhase === 'review' || currentPhase === 'finalizing') && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'}>
-              <View style={styles.comparisonTable}>
+            <View style={{ alignItems: 'center' }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'}>
+                <View style={styles.comparisonTable}>
                 <View style={styles.tableHeader}>
                   <Text style={[styles.tableCell, styles.headerCellName]}>Product</Text>
                   <Text style={[styles.tableCell, styles.headerCellCategory]}>Category</Text>
@@ -623,6 +935,7 @@ const StockTakeScreen = () => {
               ))}
               </View>
             </ScrollView>
+            </View>
           )}
 
           {/* Action Buttons */}
@@ -648,6 +961,12 @@ const StockTakeScreen = () => {
               </TouchableOpacity>
             </View>
           )}
+
+          {/* Bottom padding for web scrolling */}
+          <View style={{ 
+            height: Platform.OS === 'web' ? 100 : 20,
+            minHeight: Platform.OS === 'web' ? 100 : 0
+          }} />
         </ScrollView>
       )}
     </View>
@@ -658,6 +977,25 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0a0a0a',
+    ...Platform.select({
+      web: {
+        height: '100vh',
+        overflow: 'auto',
+        WebkitOverflowScrolling: 'auto',
+        scrollBehavior: 'smooth',
+      },
+    }),
+  },
+  webContainer: {
+    ...Platform.select({
+      web: {
+        height: '100vh',
+        maxHeight: '100vh',
+        overflow: 'auto',
+        WebkitOverflowScrolling: 'auto',
+        scrollBehavior: 'smooth',
+      },
+    }),
   },
   header: {
     flexDirection: 'row',
@@ -737,7 +1075,20 @@ const styles = StyleSheet.create({
   },
   scrollContentContainer: {
     flexGrow: 1,
-    paddingBottom: 100,
+    paddingBottom: Platform.OS === 'web' ? 100 : 40,
+    ...Platform.select({
+      web: {
+        minHeight: '100vh',
+        width: '100%',
+        flexGrow: 1,
+      },
+    }),
+  },
+  scrollContainer: {
+    flex: 1,
+  },
+  mainContent: {
+    flex: 1,
   },
 
   // Instructions
@@ -775,6 +1126,14 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
 
+  // Tables
+  centeredTableContainer: {
+    alignSelf: 'center',
+    width: '100%',
+  },
+  scrollContentCentered: {
+    alignSelf: 'center',
+  },
   // Tables
   countingTable: {
     margin: 16,
@@ -1027,11 +1386,41 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
+  // AI Insights
+  aiInsightsContainer: {
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    padding: 20,
+    margin: 16,
+    borderWidth: 2,
+    borderColor: '#10b981',
+  },
+  aiInsightsTitle: {
+    color: '#10b981',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  aiInsightItem: {
+    backgroundColor: '#0f172a',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#10b981',
+  },
+  aiInsightText: {
+    color: '#e5e7eb',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+
   // Action buttons
   actionContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    padding: 20,
+    padding: 12,
     gap: 12,
   },
   processButton: {
@@ -1076,6 +1465,71 @@ const styles = StyleSheet.create({
   disabledButton: {
     backgroundColor: '#6b7280',
     opacity: 0.6,
+  },
+
+  // Pagination styles
+  paginationContainer: {
+    backgroundColor: '#1f2937',
+    margin: 16,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  paginationInfo: {
+    color: '#9ca3af',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  paginationControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  paginationButton: {
+    backgroundColor: '#10b981',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  paginationButtonDisabled: {
+    backgroundColor: '#374151',
+  },
+  paginationButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  paginationButtonTextDisabled: {
+    color: '#6b7280',
+  },
+  pageNumbers: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  pageNumber: {
+    backgroundColor: '#374151',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 4,
+    minWidth: 32,
+    alignItems: 'center',
+  },
+  pageNumberActive: {
+    backgroundColor: '#10b981',
+  },
+  pageNumberText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  pageNumberTextActive: {
+    color: '#ffffff',
+    fontWeight: '700',
   },
 });
 

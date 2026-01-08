@@ -8,7 +8,9 @@ const STORAGE_KEYS = {
   APP_INITIALIZED: 'app_initialized',
   PENDING_ORDERS: 'pending_orders',
   CONFIRMED_ORDERS: 'confirmed_orders',
-  CASHIER_RECEIVING_RECORDS: 'cashier_receiving_records'
+  CASHIER_RECEIVING_RECORDS: 'cashier_receiving_records',
+  LICENSE_DATA: 'license_data',
+  LICENSE_SECURITY_DATA: 'license_security_data'
 };
 
 /**
@@ -159,6 +161,58 @@ export const shopStorage = {
       return true;
     } catch (error) {
       console.error('❌ Failed to save cashier receiving records:', error);
+      return false;
+    }
+  },
+
+  // License data storage methods
+  async saveLicenseData(licenseData) {
+    try {
+      await AsyncStorage.setItem(STORAGE_KEYS.LICENSE_DATA, licenseData);
+      console.log('✅ License data saved successfully');
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to save license data:', error);
+      return false;
+    }
+  },
+
+  async getLicenseData() {
+    try {
+      const licenseData = await AsyncStorage.getItem(STORAGE_KEYS.LICENSE_DATA);
+      console.log('📋 License data retrieved:', licenseData ? 'Found' : 'Not found');
+      return licenseData;
+    } catch (error) {
+      console.error('❌ Failed to get license data:', error);
+      return null;
+    }
+  },
+
+  async clearLicenseData() {
+    try {
+      await AsyncStorage.removeItem(STORAGE_KEYS.LICENSE_DATA);
+      console.log('✅ License data cleared');
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to clear license data:', error);
+      return false;
+    }
+  },
+
+  async hasLicenseData() {
+    const licenseData = await this.getLicenseData();
+    return licenseData !== null;
+  },
+
+  // Clear all app data including license
+  async clearAllData() {
+    try {
+      const keys = Object.values(STORAGE_KEYS);
+      await Promise.all(keys.map(key => AsyncStorage.removeItem(key)));
+      console.log('✅ All app data cleared including license');
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to clear all data:', error);
       return false;
     }
   }

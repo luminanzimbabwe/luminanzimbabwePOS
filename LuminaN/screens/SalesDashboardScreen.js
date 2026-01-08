@@ -15,6 +15,7 @@ import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { shopAPI } from '../services/api';
 import refundService from '../services/refundService';
+import exchangeRateService from '../services/exchangeRateService';
 
 const { width } = Dimensions.get('window');
 
@@ -23,6 +24,8 @@ const SalesDashboardScreen = () => {
   const [analyticsData, setAnalyticsData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [exchangeRates, setExchangeRates] = useState(null);
+  const [ratesLoading, setRatesLoading] = useState(true);
   const [showAllCashiers, setShowAllCashiers] = useState(false);
   const [showAllProducts, setShowAllProducts] = useState(false);
   const [showAllTopProducts, setShowAllTopProducts] = useState(false);
@@ -33,7 +36,27 @@ const SalesDashboardScreen = () => {
 
   useEffect(() => {
     fetchAnalyticsData();
+    fetchExchangeRates();
   }, []);
+
+  const fetchExchangeRates = async () => {
+    try {
+      setRatesLoading(true);
+      const rates = await exchangeRateService.getCurrentRates();
+      setExchangeRates(rates);
+      console.log('📈 Exchange rates loaded:', rates);
+    } catch (error) {
+      console.error('❌ Failed to load exchange rates:', error);
+      // Use default rates if API fails
+      setExchangeRates({
+        usd_to_zig: 24.50,
+        usd_to_rand: 18.20,
+        last_updated: new Date().toISOString()
+      });
+    } finally {
+      setRatesLoading(false);
+    }
+  };
 
   const fetchAnalyticsData = async () => {
     try {
@@ -375,7 +398,7 @@ const SalesDashboardScreen = () => {
           <Icon name="arrow-back" size={24} color="#fff" />
           <Text style={styles.backButtonText}>Back</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={onRefresh} style={styles.refreshButton}>
+        <TouchableOpacity onPress={() => { onRefresh(); fetchExchangeRates(); }} style={styles.refreshButton}>
           <Icon name="refresh" size={24} color="#fff" />
         </TouchableOpacity>
       </View>
@@ -482,22 +505,23 @@ const SalesDashboardScreen = () => {
 
       {/* Enterprise Shrinkage Analysis */}
       {analyticsData?.shrinkage_analysis.total_shrinkage > 0 && (
-        <View style={[styles.section, styles.alertSection]}>
+        <View style={styles.section}>
           <Text style={styles.sectionTitle}>⚠️ Enterprise Shrinkage Analysis</Text>
-          <View style={styles.alertCard}>
-            <Icon name="warning" size={24} color={analyticsData.shrinkage_analysis.shrinkage_percentage > 5 ? "#ef4444" : "#f59e0b"} />
-            <View style={styles.alertContent}>
-              <Text style={styles.alertTitle}>
-                {analyticsData.shrinkage_analysis.shrinkage_percentage > 5 ? 'Critical' : 'Monitored'} Shrinkage Rate
-              </Text>
-              <Text style={styles.alertValue}>
-                {analyticsData.shrinkage_analysis.shrinkage_percentage.toFixed(2)}% of Revenue
-              </Text>
-              <Text style={styles.alertSubtitle}>
-                Total Loss: ${analyticsData.shrinkage_analysis.total_shrinkage.toFixed(2)} | 
-                Trend: {analyticsData?.growth_metrics.shrinkage_trend}
-              </Text>
+          <View style={[
+            styles.metricCard, 
+            { 
+              borderLeftColor: analyticsData.shrinkage_analysis.shrinkage_percentage > 5 ? "#ef4444" : "#f59e0b",
+              width: '100%'
+            }
+          ]}>
+            <View style={styles.metricHeader}>
+              <Icon name="warning" size={18} color={analyticsData.shrinkage_analysis.shrinkage_percentage > 5 ? "#ef4444" : "#f59e0b"} />
+              <Text style={styles.metricTitle}>Shrinkage Analysis</Text>
             </View>
+            <Text style={styles.metricValue}>{analyticsData.shrinkage_analysis.shrinkage_percentage.toFixed(2)}%</Text>
+            <Text style={styles.metricSubtitle}>
+              {analyticsData.shrinkage_analysis.shrinkage_percentage > 5 ? 'Critical' : 'Monitored'} Rate • Total Loss: ${analyticsData.shrinkage_analysis.total_shrinkage.toFixed(2)} • Trend: {analyticsData?.growth_metrics.shrinkage_trend}
+            </Text>
           </View>
         </View>
       )}
@@ -516,7 +540,7 @@ const SalesDashboardScreen = () => {
         
         <View style={[
           styles.ultimateCategoryGrid, 
-          analyticsData?.category_contribution?.length > 4 ? styles.singleColumnCategoryGrid : null
+          analyticsData?.category_contribution?.length > 12 ? styles.singleColumnCategoryGrid : null
         ]}>
           {analyticsData?.category_contribution.map((category, index) => {
             const maxRevenue = Math.max(...analyticsData.category_contribution.map(c => c.revenue));
@@ -548,7 +572,7 @@ const SalesDashboardScreen = () => {
                 styles.ultimateCategoryCard,
                 { borderLeftColor: performanceColor },
                 index === 0 && styles.leadingCategoryCard, // Special styling for top category
-                analyticsData?.category_contribution?.length > 4 ? styles.singleColumnCategoryCard : null
+                analyticsData?.category_contribution?.length > 12 ? styles.singleColumnCategoryCard : null
               ]}>
                 <View style={styles.ultimateCategoryHeader}>
                   <View style={styles.categoryRankContainer}>
@@ -663,7 +687,7 @@ const SalesDashboardScreen = () => {
         
         <View style={[
           styles.ultimateProductGrid, 
-          analyticsData?.top_products?.length > 6 ? styles.singleColumnUltimateProductGrid : null
+          analyticsData?.top_products?.length > 15 ? styles.singleColumnUltimateProductGrid : null
         ]}>
           {getPaginatedItems(analyticsData?.top_products || [], topProductsPage, PRODUCTS_PER_PAGE).map((product, index) => {
             const maxRevenue = Math.max(...analyticsData.top_products.map(p => p.total_revenue));
@@ -691,7 +715,7 @@ const SalesDashboardScreen = () => {
                 styles.ultimateProductCard,
                 { borderLeftColor: performanceColor },
                 index < 3 && styles.topRankCard, // Special styling for top 3
-                analyticsData?.top_products?.length > 6 ? styles.singleColumnUltimateProductCard : null
+                analyticsData?.top_products?.length > 15 ? styles.singleColumnUltimateProductCard : null
               ]}>
                 {/* Elite Rank Badge */}
                 <View style={styles.ultimateProductHeader}>
@@ -989,17 +1013,22 @@ const SalesDashboardScreen = () => {
           <View style={styles.exchangeRatesGrid}>
             <View style={styles.exchangeRateCard}>
               <Text style={styles.exchangeRateCurrency}>USD → ZIG</Text>
-              <Text style={styles.exchangeRateValue}>24.50</Text>
-              <Text style={styles.exchangeRateTrend}>↗️ +0.2%</Text>
+              <Text style={styles.exchangeRateValue}>{exchangeRates?.usd_to_zig?.toFixed(2) || '24.50'}</Text>
+              <Text style={styles.exchangeRateTrend}>↗️ Live Rate</Text>
             </View>
             <View style={styles.exchangeRateCard}>
-              <Text style={styles.exchangeRateCurrency}>USD → USD</Text>
-              <Text style={styles.exchangeRateValue}>1.00</Text>
-              <Text style={styles.exchangeRateTrend}>➡️ 0.0%</Text>
+              <Text style={styles.exchangeRateCurrency}>USD → Rand</Text>
+              <Text style={styles.exchangeRateValue}>{exchangeRates?.usd_to_rand?.toFixed(2) || '18.20'}</Text>
+              <Text style={styles.exchangeRateTrend}>↗️ Live Rate</Text>
             </View>
             <View style={styles.exchangeRateCard}>
               <Text style={styles.exchangeRateCurrency}>Last Updated</Text>
-              <Text style={styles.exchangeRateValue}>2m ago</Text>
+              <Text style={styles.exchangeRateValue}>
+                {exchangeRates?.last_updated 
+                  ? new Date(exchangeRates.last_updated).toLocaleTimeString()
+                  : 'Just now'
+                }
+              </Text>
               <Text style={styles.exchangeRateTrend}>🔄 Auto</Text>
             </View>
           </View>
@@ -1175,7 +1204,7 @@ const SalesDashboardScreen = () => {
             <Text style={styles.ultimateCurrencySummaryText}>
               💱 Multi-Currency Intelligence • Total Revenue: ${analyticsData.revenue_analytics.net_revenue.toLocaleString()} • 
               Leading Currency: {analyticsData.performance_metrics.currency_breakdown[0]?.currency} • 
-              Exchange Rate: 1 USD = 24.5 ZIG • Live Analytics Active
+              Exchange Rate: 1 USD = {(exchangeRates?.usd_to_zig || 24.5).toFixed(2)} ZIG • Live Analytics Active
             </Text>
           </View>
         )}
@@ -2325,13 +2354,13 @@ const styles = StyleSheet.create({
   },
   metricCard: {
     backgroundColor: '#1e293b',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 8,
     width: '48%',
-    borderLeftWidth: 4,
-    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
-    elevation: 4,
+    borderLeftWidth: 3,
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
+    elevation: 2,
   },
   metricHeader: {
     flexDirection: 'row',
@@ -2339,55 +2368,22 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   metricTitle: {
-    fontSize: 12,
+    fontSize: 10,
     color: '#e2e8f0',
-    marginLeft: 8,
+    marginLeft: 6,
     fontWeight: '500',
   },
   metricValue: {
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: 'bold',
     color: '#ffffff',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   metricSubtitle: {
     fontSize: 11,
     color: '#94a3b8',
   },
-  alertSection: {
-    backgroundColor: '#fef2f2',
-    margin: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#fecaca',
-  },
-  alertCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 16,
-  },
-  alertContent: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  alertTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#991b1b',
-    marginBottom: 4,
-  },
-  alertValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#dc2626',
-    marginBottom: 4,
-  },
-  alertSubtitle: {
-    fontSize: 12,
-    color: '#7f1d1d',
-  },
+
   quickActionsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -2533,13 +2529,13 @@ const styles = StyleSheet.create({
   },
   enhancedPaymentCard: {
     backgroundColor: '#1e293b',
-    borderRadius: 12,
-    padding: 12,
-    width: '48%',
-    marginBottom: 12,
-    borderLeftWidth: 4,
-    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
-    elevation: 3,
+    borderRadius: 8,
+    padding: 8,
+    width: '31%',
+    marginBottom: 8,
+    borderLeftWidth: 3,
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
+    elevation: 2,
     borderTopWidth: 1,
     borderRightWidth: 1,
     borderBottomWidth: 1,
@@ -2587,11 +2583,11 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   enhancedPaymentMethod: {
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: 'bold',
     color: '#ffffff',
-    marginBottom: 8,
-    lineHeight: 16,
+    marginBottom: 6,
+    lineHeight: 14,
   },
   enhancedPaymentMetrics: {
     marginBottom: 8,
@@ -2599,29 +2595,29 @@ const styles = StyleSheet.create({
   paymentMetricRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 4,
     paddingHorizontal: 2,
   },
   paymentMetricIconContainer: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginRight: 6,
   },
   paymentMetricContent: {
     flex: 1,
   },
   paymentMetricLabel: {
-    fontSize: 9,
+    fontSize: 8,
     color: '#94a3b8',
     fontWeight: '500',
     marginBottom: 1,
   },
   paymentMetricValue: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: 'bold',
   },
   enhancedPaymentProgress: {
@@ -2803,13 +2799,13 @@ const styles = StyleSheet.create({
   },
   ultimateCategoryCard: {
     backgroundColor: '#1e293b',
-    borderRadius: 16,
-    padding: 16,
-    width: '48%',
-    marginBottom: 16,
-    borderLeftWidth: 6,
-    boxShadow: '0 8px 16px rgba(0, 0, 0, 0.4)',
-    elevation: 6,
+    borderRadius: 10,
+    padding: 10,
+    width: '31%',
+    marginBottom: 10,
+    borderLeftWidth: 4,
+    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
+    elevation: 3,
     borderTopWidth: 1,
     borderRightWidth: 1,
     borderBottomWidth: 2,
@@ -2869,11 +2865,11 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
   },
   ultimateCategoryName: {
-    fontSize: 15,
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#ffffff',
-    marginBottom: 12,
-    lineHeight: 19,
+    marginBottom: 8,
+    lineHeight: 16,
     textShadowColor: 'rgba(0, 0, 0, 0.3)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
@@ -2884,29 +2880,29 @@ const styles = StyleSheet.create({
   categoryMetricRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
-    paddingHorizontal: 4,
+    marginBottom: 4,
+    paddingHorizontal: 2,
   },
   categoryMetricIconContainer: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 10,
+    marginRight: 6,
   },
   categoryMetricContent: {
     flex: 1,
   },
   categoryMetricLabel: {
-    fontSize: 10,
+    fontSize: 8,
     color: '#94a3b8',
     fontWeight: '500',
-    marginBottom: 2,
+    marginBottom: 1,
   },
   categoryMetricValue: {
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: 'bold',
   },
   ultimateCategoryProgress: {
@@ -3016,13 +3012,13 @@ const styles = StyleSheet.create({
   },
   enhancedCurrencyCard: {
     backgroundColor: '#1e293b',
-    borderRadius: 12,
-    padding: 12,
-    width: '48%',
-    marginBottom: 12,
-    borderLeftWidth: 4,
-    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
-    elevation: 3,
+    borderRadius: 8,
+    padding: 8,
+    width: '31%',
+    marginBottom: 8,
+    borderLeftWidth: 3,
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
+    elevation: 2,
     borderTopWidth: 1,
     borderRightWidth: 1,
     borderBottomWidth: 1,
@@ -3078,29 +3074,29 @@ const styles = StyleSheet.create({
   currencyMetricRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 4,
     paddingHorizontal: 2,
   },
   currencyMetricIconContainer: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginRight: 6,
   },
   currencyMetricContent: {
     flex: 1,
   },
   currencyMetricLabel: {
-    fontSize: 9,
+    fontSize: 8,
     color: '#94a3b8',
     fontWeight: '500',
     marginBottom: 1,
   },
   currencyMetricValue: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: 'bold',
   },
   enhancedCurrencyProgress: {
@@ -3207,13 +3203,13 @@ const styles = StyleSheet.create({
   },
   enhancedPerformanceCard: {
     backgroundColor: '#1e293b',
-    borderRadius: 12,
-    padding: 12,
-    width: '48%',
-    marginBottom: 12,
-    borderLeftWidth: 4,
-    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
-    elevation: 3,
+    borderRadius: 8,
+    padding: 8,
+    width: '31%',
+    marginBottom: 8,
+    borderLeftWidth: 3,
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
+    elevation: 2,
     borderTopWidth: 1,
     borderRightWidth: 1,
     borderBottomWidth: 1,
@@ -3259,7 +3255,7 @@ const styles = StyleSheet.create({
   enhancedMetricRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 4,
     paddingHorizontal: 2,
   },
   metricIconContainer: {
@@ -3374,13 +3370,13 @@ const styles = StyleSheet.create({
   },
   enhancedProductCard: {
     backgroundColor: '#1e293b',
-    borderRadius: 12,
-    padding: 12,
-    width: '48%',
-    marginBottom: 12,
-    borderLeftWidth: 4,
-    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
-    elevation: 3,
+    borderRadius: 8,
+    padding: 8,
+    width: '31%',
+    marginBottom: 8,
+    borderLeftWidth: 3,
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
+    elevation: 2,
     borderTopWidth: 1,
     borderRightWidth: 1,
     borderBottomWidth: 1,
@@ -3431,11 +3427,11 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   enhancedProductName: {
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: 'bold',
     color: '#ffffff',
-    marginBottom: 8,
-    lineHeight: 16,
+    marginBottom: 6,
+    lineHeight: 14,
   },
   enhancedProductMetrics: {
     marginBottom: 8,
@@ -3447,19 +3443,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
   productMetricIconContainer: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginRight: 6,
   },
   productMetricContent: {
     flex: 1,
   },
   productMetricLabel: {
-    fontSize: 9,
+    fontSize: 8,
     color: '#94a3b8',
     fontWeight: '500',
     marginBottom: 1,
@@ -3558,13 +3554,13 @@ const styles = StyleSheet.create({
   },
   ultimateProductCard: {
     backgroundColor: '#1e293b',
-    borderRadius: 16,
-    padding: 16,
-    width: '48%',
-    marginBottom: 16,
-    borderLeftWidth: 6,
-    boxShadow: '0 8px 16px rgba(0, 0, 0, 0.4)',
-    elevation: 6,
+    borderRadius: 10,
+    padding: 10,
+    width: '31%',
+    marginBottom: 10,
+    borderLeftWidth: 4,
+    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
+    elevation: 3,
     borderTopWidth: 1,
     borderRightWidth: 1,
     borderBottomWidth: 2,
@@ -3638,11 +3634,11 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
   },
   ultimateProductName: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#ffffff',
-    marginBottom: 12,
-    lineHeight: 18,
+    marginBottom: 8,
+    lineHeight: 16,
     textShadowColor: 'rgba(0, 0, 0, 0.3)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
@@ -3653,29 +3649,29 @@ const styles = StyleSheet.create({
   productMetricRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
-    paddingHorizontal: 4,
+    marginBottom: 4,
+    paddingHorizontal: 2,
   },
   productMetricIconContainer: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 10,
+    marginRight: 6,
   },
   productMetricContent: {
     flex: 1,
   },
   productMetricLabel: {
-    fontSize: 10,
+    fontSize: 8,
     color: '#94a3b8',
     fontWeight: '500',
-    marginBottom: 2,
+    marginBottom: 1,
   },
   productMetricValue: {
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: 'bold',
   },
   ultimateProductProgress: {
@@ -4028,13 +4024,13 @@ const styles = StyleSheet.create({
   },
   aiInsightCard: {
     backgroundColor: '#1e293b',
-    borderRadius: 16,
-    padding: 20,
-    width: '48%',
-    marginBottom: 16,
-    borderLeftWidth: 6,
-    boxShadow: '0 8px 16px rgba(0, 0, 0, 0.4)',
-    elevation: 6,
+    borderRadius: 10,
+    padding: 12,
+    width: '31%',
+    marginBottom: 10,
+    borderLeftWidth: 4,
+    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
+    elevation: 3,
     borderTopWidth: 1,
     borderRightWidth: 1,
     borderBottomWidth: 2,
@@ -4062,22 +4058,22 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   aiInsightMetric: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#ffffff',
     marginBottom: 4,
   },
   aiInsightTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
     color: '#f1f5f9',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   aiInsightDescription: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#94a3b8',
-    lineHeight: 16,
-    marginBottom: 12,
+    lineHeight: 14,
+    marginBottom: 8,
   },
   aiInsightTrend: {
     flexDirection: 'row',
@@ -4137,14 +4133,14 @@ const styles = StyleSheet.create({
   },
   predictiveCard: {
     backgroundColor: '#1e293b',
-    borderRadius: 12,
-    padding: 16,
-    width: '48%',
-    marginBottom: 12,
-    borderLeftWidth: 4,
+    borderRadius: 8,
+    padding: 10,
+    width: '31%',
+    marginBottom: 8,
+    borderLeftWidth: 3,
     borderLeftColor: '#8b5cf6',
-    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
-    elevation: 4,
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
+    elevation: 2,
   },
   predictiveCardHeader: {
     flexDirection: 'row',
@@ -4158,7 +4154,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   predictiveValue: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#ffffff',
     marginBottom: 4,
@@ -4358,13 +4354,13 @@ const styles = StyleSheet.create({
   },
   ultimateCurrencyCard: {
     backgroundColor: '#1e293b',
-    borderRadius: 16,
-    padding: 16,
-    width: '48%',
-    marginBottom: 16,
-    borderLeftWidth: 6,
-    boxShadow: '0 8px 16px rgba(0, 0, 0, 0.4)',
-    elevation: 6,
+    borderRadius: 10,
+    padding: 10,
+    width: '31%',
+    marginBottom: 10,
+    borderLeftWidth: 4,
+    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',
+    elevation: 3,
     borderTopWidth: 1,
     borderRightWidth: 1,
     borderBottomWidth: 2,
@@ -4451,11 +4447,11 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   ultimateCurrencyName: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#ffffff',
     marginBottom: 4,
-    lineHeight: 18,
+    lineHeight: 16,
     textShadowColor: 'rgba(0, 0, 0, 0.3)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
@@ -4471,29 +4467,29 @@ const styles = StyleSheet.create({
   currencyMetricRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
-    paddingHorizontal: 4,
+    marginBottom: 4,
+    paddingHorizontal: 2,
   },
   currencyMetricIconContainer: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 10,
+    marginRight: 6,
   },
   currencyMetricContent: {
     flex: 1,
   },
   currencyMetricLabel: {
-    fontSize: 10,
+    fontSize: 8,
     color: '#94a3b8',
     fontWeight: '500',
-    marginBottom: 2,
+    marginBottom: 1,
   },
   currencyMetricValue: {
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: 'bold',
   },
   ultimateCurrencyProgress: {

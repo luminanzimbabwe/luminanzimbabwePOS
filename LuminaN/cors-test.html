@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CORS Test - LuminaN</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 30px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .success {
+            background: rgba(34, 197, 94, 0.2);
+            border: 1px solid rgba(34, 197, 94, 0.4);
+            border-radius: 10px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        .error {
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            border-radius: 10px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        button {
+            background: rgba(59, 130, 246, 0.3);
+            border: 1px solid rgba(59, 130, 246, 0.5);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 10px 5px;
+            font-size: 16px;
+        }
+        button:hover {
+            background: rgba(59, 130, 246, 0.4);
+        }
+        pre {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+        .info {
+            background: rgba(59, 130, 246, 0.2);
+            border: 1px solid rgba(59, 130, 246, 0.4);
+            border-radius: 10px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 LuminaN CORS Test</h1>
+        
+        <div class="info">
+            <h3>📍 Test Information</h3>
+            <p><strong>Frontend URL:</strong> <span id="frontend-url"></span></p>
+            <p><strong>Backend URL:</strong> http://localhost:8000</p>
+            <p><strong>Current Time:</strong> <span id="current-time"></span></p>
+        </div>
+
+        <button onclick="testBasicConnection()">🔗 Test Basic Connection</button>
+        <button onclick="testWithCORS()">🌐 Test with CORS Headers</button>
+        <button onclick="testShopStatus()">🏪 Test Shop Status API</button>
+        <button onclick="clearResults()">🗑️ Clear Results</button>
+
+        <div id="results"></div>
+    </div>
+
+    <script>
+        // Display current info
+        document.getElementById('frontend-url').textContent = window.location.href;
+        document.getElementById('current-time').textContent = new Date().toLocaleString();
+
+        function addResult(title, content, isError = false) {
+            const resultsDiv = document.getElementById('results');
+            const resultClass = isError ? 'error' : 'success';
+            const resultDiv = document.createElement('div');
+            resultDiv.className = resultClass;
+            resultDiv.innerHTML = `
+                <h4>${title}</h4>
+                <pre>${typeof content === 'string' ? content : JSON.stringify(content, null, 2)}</pre>
+            `;
+            resultsDiv.appendChild(resultDiv);
+        }
+
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+
+        async function testBasicConnection() {
+            try {
+                addResult('Basic Connection Test', 'Testing connection to http://localhost:8000...');
+                
+                const response = await fetch('http://localhost:8000/api/v1/shop/status/');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                addResult('✅ Basic Connection - SUCCESS', {
+                    status: response.status,
+                    statusText: response.statusText,
+                    headers: Object.fromEntries(response.headers.entries()),
+                    data: data
+                });
+                
+            } catch (error) {
+                addResult('❌ Basic Connection - FAILED', error.message, true);
+            }
+        }
+
+        async function testWithCORS() {
+            try {
+                addResult('CORS Test', 'Testing with proper CORS headers...');
+                
+                const response = await fetch('http://localhost:8000/api/v1/shop/status/', {
+                    method: 'GET',
+                    headers: {
+                        'Origin': window.location.origin,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                addResult('✅ CORS Test - SUCCESS', {
+                    status: response.status,
+                    statusText: response.statusText,
+                    headers: Object.fromEntries(response.headers.entries()),
+                    data: data
+                });
+                
+                // Check if CORS headers are present
+                const corsHeaders = {
+                    'access-control-allow-origin': response.headers.get('access-control-allow-origin'),
+                    'access-control-allow-credentials': response.headers.get('access-control-allow-credentials'),
+                    'access-control-allow-headers': response.headers.get('access-control-allow-headers')
+                };
+                
+                addResult('🔍 CORS Headers Check', corsHeaders);
+                
+            } catch (error) {
+                addResult('❌ CORS Test - FAILED', error.message, true);
+            }
+        }
+
+        async function testShopStatus() {
+            try {
+                addResult('Shop Status API Test', 'Testing the exact API call your React app makes...');
+                
+                const response = await fetch('http://localhost:8000/api/v1/shop/status/', {
+                    method: 'GET',
+                    headers: {
+                        'Origin': window.location.origin,
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                addResult('✅ Shop Status API - SUCCESS', data);
+                
+                // Check if shop is registered
+                if (data.is_registered) {
+                    addResult('🏪 Shop Status', `Shop "${data.shop.name}" is registered!`);
+                } else {
+                    addResult('🏪 Shop shop registered yet Status', 'No.');
+                }
+                
+            } catch (error) {
+                addResult('❌ Shop Status API - FAILED', error.message, true);
+                
+                // Additional CORS diagnostics
+                if (error.message.includes('CORS') || error.message.includes('blocked')) {
+                    addResult('🔍 CORS Diagnosis', {
+                        issue: 'CORS Policy Blocked Request',
+                        frontend_origin: window.location.origin,
+                        backend_url: 'http://localhost:8000',
+                        solution: 'Check if backend CORS settings include this origin'
+                    }, true);
+                }
+            }
+        }
+
+        // Auto-run tests on page load
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                testBasicConnection();
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

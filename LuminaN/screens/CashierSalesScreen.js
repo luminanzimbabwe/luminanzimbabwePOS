@@ -35,7 +35,7 @@ const CashierSalesScreen = () => {
   const [dateFilter, setDateFilter] = useState('today'); // today, yesterday, week, month, custom
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
-  const [paymentFilter, setPaymentFilter] = useState('all'); // all, cash, card, ecocash, transfer
+  const [paymentFilter, setPaymentFilter] = useState('all'); // all, cash, card, transfer
   const [showAllSales, setShowAllSales] = useState(false);
   const ITEMS_PER_PAGE = 10;
 
@@ -232,21 +232,34 @@ const CashierSalesScreen = () => {
       setFilteredSales(cashierSales);
       setDisplayedSales(cashierSales.slice(0, ITEMS_PER_PAGE));
 
+      // Calculate sales summary
+      const calculateSalesSummary = (sales) => {
+        return {
+          sales: sales.length,
+          revenue: sales.reduce((sum, sale) => sum + parseFloat(sale.total_amount || 0), 0)
+        };
+      };
+
       // Calculate summary for current cashier
       const totalSales = cashierSales.length;
       const totalRevenue = cashierSales.reduce((sum, sale) => sum + parseFloat(sale.total_amount || 0), 0);
       const cashSales = cashierSales.filter(sale => sale.payment_method === 'cash');
       const cardSales = cashierSales.filter(sale => sale.payment_method === 'card');
+
+      const transferSales = cashierSales.filter(sale => sale.payment_method === 'transfer');
       const cashRevenue = cashSales.reduce((sum, sale) => sum + parseFloat(sale.total_amount || 0), 0);
       const cardRevenue = cardSales.reduce((sum, sale) => sum + parseFloat(sale.total_amount || 0), 0);
+      const transferRevenue = transferSales.reduce((sum, sale) => sum + parseFloat(sale.total_amount || 0), 0);
 
       const summaryData = {
         totalSales,
         totalRevenue,
         cashSales: cashSales.length,
         cardSales: cardSales.length,
+        transferSales: transferSales.length,
         cashRevenue,
         cardRevenue,
+        transferRevenue,
         averageSale: totalSales > 0 ? totalRevenue / totalSales : 0
       };
       
@@ -334,12 +347,19 @@ const CashierSalesScreen = () => {
     }
   };
 
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-    }).format(amount || 0);
+  const formatCurrency = (amount, currency = 'USD') => {
+    const numAmount = parseFloat(amount) || 0;
+    if (currency === 'ZIG') {
+      return `${numAmount.toFixed(2)} ZIG`;
+    } else if (currency === 'RAND') {
+      return `${numAmount.toFixed(2)} RAND`;
+    } else {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+      }).format(numAmount);
+    }
   };
 
   const formatDate = (dateString) => {
@@ -361,7 +381,7 @@ const CashierSalesScreen = () => {
     switch (method?.toLowerCase()) {
       case 'cash': return '💵';
       case 'card': return '💳';
-      case 'ecocash': return '📱';
+  
       case 'transfer': return '🏦';
       default: return '💰';
     }
@@ -499,13 +519,13 @@ const CashierSalesScreen = () => {
                 
                 <View style={styles.summaryCard}>
                   <Text style={styles.summaryIcon}>💵</Text>
-                  <Text style={styles.summaryValue}>{formatCurrency(summary.totalRevenue)}</Text>
+                  <Text style={styles.summaryValue}>{formatCurrency(summary.totalRevenue, 'USD')}</Text>
                   <Text style={styles.summaryLabel}>Total Revenue</Text>
                 </View>
                 
                 <View style={styles.summaryCard}>
                   <Text style={styles.summaryIcon}>📊</Text>
-                  <Text style={styles.summaryValue}>{formatCurrency(summary.averageSale)}</Text>
+                  <Text style={styles.summaryValue}>{formatCurrency(summary.averageSale, 'USD')}</Text>
                   <Text style={styles.summaryLabel}>Average Sale</Text>
                 </View>
                 
@@ -516,18 +536,26 @@ const CashierSalesScreen = () => {
                 </View>
               </View>
 
+
+
               {/* Payment Method Breakdown */}
               <View style={styles.paymentBreakdown}>
                 <Text style={styles.breakdownTitle}>💳 PAYMENT METHODS</Text>
                 <View style={styles.breakdownRow}>
                   <Text style={styles.breakdownLabel}>💵 Cash Sales:</Text>
                   <Text style={styles.breakdownValue}>{summary.cashSales} sales</Text>
-                  <Text style={styles.breakdownAmount}>{formatCurrency(summary.cashRevenue)}</Text>
+                  <Text style={styles.breakdownAmount}>{formatCurrency(summary.cashRevenue, 'USD')}</Text>
                 </View>
                 <View style={styles.breakdownRow}>
                   <Text style={styles.breakdownLabel}>💳 Card Sales:</Text>
                   <Text style={styles.breakdownValue}>{summary.cardSales} sales</Text>
-                  <Text style={styles.breakdownAmount}>{formatCurrency(summary.cardRevenue)}</Text>
+                  <Text style={styles.breakdownAmount}>{formatCurrency(summary.cardRevenue, 'USD')}</Text>
+                </View>
+
+                <View style={styles.breakdownRow}>
+                  <Text style={styles.breakdownLabel}>🏦 Transfer Sales:</Text>
+                  <Text style={styles.breakdownValue}>{summary.transferSales} sales</Text>
+                  <Text style={styles.breakdownAmount}>{formatCurrency(summary.transferRevenue, 'USD')}</Text>
                 </View>
               </View>
             </View>
@@ -602,7 +630,6 @@ const CashierSalesScreen = () => {
                     { value: 'all', label: 'All Methods' },
                     { value: 'cash', label: 'Cash Only' },
                     { value: 'card', label: 'Card Only' },
-                    { value: 'ecocash', label: 'EcoCash Only' },
                     { value: 'transfer', label: 'Transfer Only' }
                   ].map(option => (
                     <TouchableOpacity
@@ -667,7 +694,7 @@ const CashierSalesScreen = () => {
                     </View>
                     <View style={styles.saleAmount}>
                       <Text style={styles.saleTotal}>
-                        {formatCurrency(sale.total_amount)}
+                        {formatCurrency(sale.total_amount, sale.currency || 'USD')}
                       </Text>
                       <Text style={styles.paymentMethod}>
                         {getPaymentIcon(sale.payment_method)} {sale.payment_method?.toUpperCase()}
@@ -686,7 +713,7 @@ const CashierSalesScreen = () => {
                       <Text style={styles.itemsTitle}>Items:</Text>
                       {sale.items.slice(0, 3).map((item, itemIndex) => (
                         <Text key={itemIndex} style={styles.itemText}>
-                          • {item.product_name || item.name} x {item.quantity} @ {formatCurrency(item.unit_price)}
+                          • {item.product_name || item.name} x {item.quantity} @ {formatCurrency(item.unit_price, sale.currency || 'USD')}
                         </Text>
                       ))}
                       {sale.items.length > 3 && (
@@ -771,11 +798,11 @@ const CashierSalesScreen = () => {
                                 {item.product_name || item.name}
                               </Text>
                               <Text style={styles.receiptItemTotal}>
-                                {formatCurrency(item.unit_price * item.quantity)}
+                                {formatCurrency(item.unit_price * item.quantity, selectedSale.currency || 'USD')}
                               </Text>
                             </View>
                             <Text style={styles.receiptItemDetails}>
-                              {item.quantity} × {formatCurrency(item.unit_price)}
+                              {item.quantity} × {formatCurrency(item.unit_price, selectedSale.currency || 'USD')}
                             </Text>
                           </View>
                         ))
@@ -790,7 +817,7 @@ const CashierSalesScreen = () => {
                       <View style={styles.receiptTotalRow}>
                         <Text style={styles.receiptTotalLabel}>TOTAL AMOUNT:</Text>
                         <Text style={styles.receiptTotalAmount}>
-                          {formatCurrency(selectedSale.total_amount)}
+                          {formatCurrency(selectedSale.total_amount, selectedSale.currency || 'USD')}
                         </Text>
                       </View>
                       <View style={styles.receiptPaymentRow}>
@@ -1109,6 +1136,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: 'center',
     textTransform: 'uppercase',
+  },
+  currencyBreakdown: {
+    backgroundColor: '#111827',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: '#10b981',
   },
   paymentBreakdown: {
     backgroundColor: '#111827',

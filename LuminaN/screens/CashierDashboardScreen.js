@@ -22,6 +22,8 @@ import BarcodeScanner from '../components/BarcodeScanner';
 import presenceService from '../services/presenceService';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import WeightInputModal from '../components/WeightInputModal';
+// import ecocashService from '../services/ecocashService'; // REMOVED - USD only
+import exchangeRateService from '../services/exchangeRateService';
 
 const { width, height } = Dimensions.get('window');
 const SIDEBAR_WIDTH = Math.min(width * 0.75, 350); // Cover up to 75% of screen, max 350px
@@ -34,10 +36,15 @@ const CashierDashboardScreen = () => {
   const [shopData, setShopData] = useState(null);
   const [shopStatus, setShopStatus] = useState(null);
   
-  // POS State
+  // POS State - Multi-Currency Support
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
-  const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [paymentMethod, setPaymentMethod] = useState('cash'); // Cash payment method
+  const [selectedCurrency, setSelectedCurrency] = useState('USD'); // Selected currency for payment
+  
+  // Payment Details State - Multi-Currency Support
+  const [cardLast4, setCardLast4] = useState('');
+  const [transferReference, setTransferReference] = useState('');
   
   // Handle selected products from CashierProductsScreen
   useEffect(() => {
@@ -106,6 +113,7 @@ const CashierDashboardScreen = () => {
   const [drawerStatus, setDrawerStatus] = useState(null);
   const [showDrawerStatus, setShowDrawerStatus] = useState(false);
   const [refreshingDrawer, setRefreshingDrawer] = useState(false);
+  const [drawerWasResetAtEOD, setDrawerWasResetAtEOD] = useState(false);
   
   // Sidebar State
   const [showSidebar, setShowSidebar] = useState(false);
@@ -129,10 +137,30 @@ const CashierDashboardScreen = () => {
   const [calculatorWaitingForNewValue, setCalculatorWaitingForNewValue] = useState(false);
   const [showCalculator, setShowCalculator] = useState(false);
   const [calculatorMemory, setCalculatorMemory] = useState(0);
+  const [quantityMultiplier, setQuantityMultiplier] = useState('1');
+
+  // Exchange Rates State
+  const [exchangeRates, setExchangeRates] = useState(null);
+  const [ratesLoading, setRatesLoading] = useState(true);
+
+  // Discount and Tax State
+  const [cartDiscount, setCartDiscount] = useState(0);
+  const [taxIncluded, setTaxIncluded] = useState(true);
+
+  // Real-time Dashboard Functions
+  const [realTimeStats, setRealTimeStats] = useState({
+    todaySales: 0,
+    totalTransactions: 0,
+    averageTransaction: 0,
+    itemsPerTransaction: 0,
+    peakHour: '14:00-15:00',
+    lastUpdated: new Date()
+  });
 
 
   useEffect(() => {
     loadCashierData();
+    fetchExchangeRates();
     
     // Set up presence tracking
     if (typeof window !== 'undefined') {
@@ -173,12 +201,32 @@ const CashierDashboardScreen = () => {
 
   // Auto-refresh drawer status when cashierData is available
   useEffect(() => {
-    if (!cashierData) return;
+    if (!cashierData || drawerWasResetAtEOD) return;
     const interval = setInterval(() => {
       loadDrawerStatus(cashierData);
     }, 5000);
     return () => clearInterval(interval);
-  }, [cashierData]);
+  }, [cashierData, drawerWasResetAtEOD]);
+
+  // Fetch exchange rates for payment processing context
+  const fetchExchangeRates = async () => {
+    try {
+      setRatesLoading(true);
+      const rates = await exchangeRateService.getCurrentRates();
+      setExchangeRates(rates);
+      console.log('💱 Exchange rates loaded for cashier:', rates);
+    } catch (error) {
+      console.error('❌ Failed to load exchange rates:', error);
+      // Use default rates if API fails
+      setExchangeRates({
+        usd_to_zig: 24.50,
+        usd_to_rand: 18.20,
+        last_updated: new Date().toISOString()
+      });
+    } finally {
+      setRatesLoading(false);
+    }
+  };
 
   // Sidebar animation effect
   useEffect(() => {
@@ -441,11 +489,12 @@ const CashierDashboardScreen = () => {
       setRefreshingDrawer(true);
       const response = await shopAPI.getCashFloat();
       // Debug log to inspect backend shape during runtime
-      console.log('[/cash-float/] response:', response?.data);
+      console.log('[/cash-float/] response:', JSON.stringify(response?.data, null, 2));
 
       if (response.data && response.data.success) {
         // Prefer explicit `drawer` field (single-drawer payload), else use shop_status
         const payload = response.data.drawer || response.data.shop_status || response.data;
+        console.log('🔍 PAYLOAD DEBUG:', JSON.stringify(payload, null, 2));
 
         // If shop is closed (from previously loaded shopStatus) or payload is for a previous date,
         // present zeroed drawer to start fresh for the new day.
@@ -461,17 +510,32 @@ const CashierDashboardScreen = () => {
           setDrawerStatus({
             cashier: cashier?.name || 'Unknown',
             float_amount: 0,
-            current_breakdown: { cash: 0, card: 0, ecocash: 0, transfer: 0, total: 0 },
-            session_sales: { cash: 0, card: 0, ecocash: 0, transfer: 0, total: 0 },
+            current_breakdown: { usd_cash: 0, zig_cash: 0, rand_cash: 0, card: 0, transfer: 0, total: 0 },
+            // Explicitly clear ALL transaction counts for all currencies
+            session_sales: { usd_cash: 0, zig_cash: 0, rand_cash: 0, card: 0, transfer: 0, total: 0, usd_count: 0, zig_count: 0, rand_count: 0 },
+            // Also clear currency-specific session sales with counts
+            session_sales_by_currency: {
+              usd: { cash: 0, card: 0, ecocash: 0, transfer: 0, total: 0, count: 0 },
+              zig: { cash: 0, card: 0, ecocash: 0, transfer: 0, total: 0, count: 0 },
+              rand: { cash: 0, card: 0, ecocash: 0, transfer: 0, total: 0, count: 0 }
+            },
+            // Clear direct transaction count fields
+            usd_transaction_count: 0,
+            zig_transaction_count: 0,
+            rand_transaction_count: 0,
+            total_transaction_count: 0,
             eod_expectations: { expected_cash: 0, variance: 0, efficiency: 100 },
             status: 'INACTIVE',
             last_activity: null
           });
+          setDrawerWasResetAtEOD(true); // Stop auto-refresh after EOD reset
           return;
         }
 
         const payloadShopStatus = payload;
         if (payloadShopStatus && Array.isArray(payloadShopStatus.drawers)) {
+          console.log('🔍 MULTIPLE DRAWERS FOUND:', payloadShopStatus.drawers.length);
+          
           // Create comprehensive cashier identifier for matching
           const cashierIdentifiers = [
             cashier?.name,
@@ -533,14 +597,16 @@ const CashierDashboardScreen = () => {
 
           if (matched) {
             console.log('✅ DRAWER MATCHED TO CASHIER:', { drawer: matched.cashier, cashier: cashier?.name });
+            console.log('📊 MATCHED DRAWER DATA:', JSON.stringify(matched, null, 2));
             setDrawerStatus(matched);
             return;
           }
 
           // If there is only one drawer for the shop, use it as fallback
-          if (shopStatus.drawers.length === 1) {
-            console.log('⚠️ SINGLE DRAWER FALLBACK - Using shop drawer for:', shopStatus.drawers[0].cashier);
-            setDrawerStatus(shopStatus.drawers[0]);
+          if (payloadShopStatus.drawers.length === 1) {
+            console.log('⚠️ SINGLE DRAWER FALLBACK - Using shop drawer for:', payloadShopStatus.drawers[0].cashier);
+            console.log('📊 SINGLE DRAWER DATA:', JSON.stringify(payloadShopStatus.drawers[0], null, 2));
+            setDrawerStatus(payloadShopStatus.drawers[0]);
             return;
           }
 
@@ -551,8 +617,19 @@ const CashierDashboardScreen = () => {
               cashier: cashier?.name || 'Unknown Cashier',
               cashier_id: cashier?.id || cashier?.cashier_id,
               float_amount: 0,
-              current_breakdown: { cash: 0, card: 0, ecocash: 0, transfer: 0, total: 0 },
-              session_sales: { cash: 0, card: 0, ecocash: 0, transfer: 0, total: 0 },
+              current_breakdown: { usd_cash: 0, zig_cash: 0, rand_cash: 0, card: 0, transfer: 0, total: 0 },
+              // Clear ALL transaction counts for new day
+              session_sales: { usd_cash: 0, zig_cash: 0, rand_cash: 0, card: 0, transfer: 0, total: 0, usd_count: 0, zig_count: 0, rand_count: 0 },
+              session_sales_by_currency: {
+                usd: { cash: 0, card: 0, ecocash: 0, transfer: 0, total: 0, count: 0 },
+                zig: { cash: 0, card: 0, ecocash: 0, transfer: 0, total: 0, count: 0 },
+                rand: { cash: 0, card: 0, ecocash: 0, transfer: 0, total: 0, count: 0 }
+              },
+              // Clear direct transaction count fields
+              usd_transaction_count: 0,
+              zig_transaction_count: 0,
+              rand_transaction_count: 0,
+              total_transaction_count: 0,
               eod_expectations: { expected_cash: 0, variance: 0, efficiency: 100 },
               status: 'ACTIVE',
               last_activity: new Date().toISOString()
@@ -566,12 +643,22 @@ const CashierDashboardScreen = () => {
             console.log('⚠️ NO MATCH & NO CASHIER DATA - Keeping existing drawer status');
             return;
           }
+        } else if (payload && !Array.isArray(payload.drawers)) {
+          // Single drawer case - direct assignment
+          console.log('📊 SINGLE DRAWER DIRECT ASSIGNMENT:', JSON.stringify(payload, null, 2));
+          setDrawerStatus(payload);
+          return;
         }
 
         // Fallback: if response provided a single drawer object, use it
         if (response.data.drawer) {
+          console.log('📊 FALLBACK DRAWER DATA:', JSON.stringify(response.data.drawer, null, 2));
           setDrawerStatus(response.data.drawer);
+        } else {
+          console.log('⚠️ NO VALID DRAWER DATA FOUND IN RESPONSE');
         }
+      } else {
+        console.log('⚠️ API RESPONSE NOT SUCCESSFUL:', response);
       }
     } catch (error) {
       console.error('Failed to load drawer status:', error);
@@ -582,6 +669,91 @@ const CashierDashboardScreen = () => {
 
   const refreshDrawerStatus = async () => {
     await loadDrawerStatus();
+  };
+
+  // Get payment method breakdown - Multi-Currency Support with exact same pattern as working CashierDrawerScreen
+  const getPaymentMethodBreakdown = (drawerStatus) => {
+    if (!drawerStatus) return null;
+
+    return {
+      usd_cash: {
+        total: drawerStatus.current_breakdown_by_currency?.usd?.cash ||
+               drawerStatus.session_sales_by_currency?.usd?.cash ||
+               drawerStatus.current_cash_usd ||
+               drawerStatus.session_cash_sales_usd || 0,
+        count: drawerStatus.session_sales?.usd_count || 0
+      },
+      zig_cash: {
+        total: drawerStatus.current_breakdown_by_currency?.zig?.cash ||
+               drawerStatus.session_sales_by_currency?.zig?.cash ||
+               drawerStatus.current_cash_zig ||
+               drawerStatus.session_cash_sales_zig || 0,
+        count: drawerStatus.session_sales?.zig_count || 0
+      },
+      rand_cash: {
+        total: drawerStatus.current_breakdown_by_currency?.rand?.cash ||
+               drawerStatus.session_sales_by_currency?.rand?.cash ||
+               drawerStatus.current_cash_rand ||
+               drawerStatus.session_cash_sales_rand || 0,
+        count: drawerStatus.session_sales?.rand_count || 0
+      },
+      card: {
+        total: drawerStatus.session_sales?.card || drawerStatus.current_breakdown?.card || 0
+      },
+      transfer: {
+        total: drawerStatus.session_sales?.transfer || drawerStatus.current_breakdown?.transfer || 0
+      },
+      total: {
+        overall: (drawerStatus.current_breakdown_by_currency?.usd?.cash || drawerStatus.current_cash_usd || drawerStatus.session_cash_sales_usd || 0) +
+                 (drawerStatus.current_breakdown_by_currency?.zig?.cash || drawerStatus.current_cash_zig || drawerStatus.session_cash_sales_zig || 0) +
+                 (drawerStatus.current_breakdown_by_currency?.rand?.cash || drawerStatus.current_cash_rand || drawerStatus.session_cash_sales_rand || 0) +
+                 (drawerStatus.session_sales?.card || drawerStatus.current_breakdown?.card || 0) +
+                 (drawerStatus.session_sales?.transfer || drawerStatus.current_breakdown?.transfer || 0)
+      }
+    };
+  };
+
+  const formatCurrency = (amount, currency = 'USD') => {
+    if (currency === 'ZIG') {
+      return `${amount.toFixed(2)} ZIG`;
+    } else if (currency === 'RAND') {
+      return `${amount.toFixed(2)} RAND`;
+    } else {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+      }).format(amount || 0);
+    }
+  };
+
+  const formatCurrencyWithSymbol = (amount, currency = 'usd') => {
+    if (currency === 'zig' || currency === 'ZIG') {
+      return `${amount.toFixed(2)} ZIG`;
+    } else if (currency === 'rand' || currency === 'RAND') {
+      return `${amount.toFixed(2)} RAND`;
+    } else {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+      }).format(amount || 0);
+    }
+  };
+
+  // USD Only - No currency conversion needed
+  const convertToCurrency = (amount, targetCurrency) => {
+    if (!exchangeRates) return amount;
+    
+    // Convert from USD to target currency
+    if (targetCurrency === 'USD') {
+      return amount;
+    } else if (targetCurrency === 'ZIG') {
+      return amount * (exchangeRates.usd_to_zig || 24.50);
+    } else if (targetCurrency === 'RAND') {
+      return amount * (exchangeRates.usd_to_rand || 18.20);
+    }
+    return amount;
   };
 
   // Sidebar features for cashiers
@@ -676,6 +848,15 @@ const CashierDashboardScreen = () => {
       color: '#f59e0b',
       section: 'cashier-tools'
     },
+    {
+      id: 'staff-lunch',
+      title: '🍽️ Staff Lunch',
+      description: 'Take stock items or money for staff meals',
+      icon: '🍽️',
+      screen: ROUTES.STAFF_LUNCH,
+      color: '#8b5cf6',
+      section: 'cashier-tools'
+    },
   ];
 
   const handleSidebarFeaturePress = (feature) => {
@@ -710,6 +891,10 @@ const CashierDashboardScreen = () => {
       case 'CashierStockTake':
         navigation.navigate('CashierStockTake');
         break;
+      case 'StaffLunch':
+      case ROUTES.STAFF_LUNCH:
+        navigation.navigate(ROUTES.STAFF_LUNCH);
+        break;
       default:
         console.log(`Feature "${feature.title}" pressed`);
         break;
@@ -734,6 +919,58 @@ const CashierDashboardScreen = () => {
     </TouchableOpacity>
   );
 
+  // Parse quantity multiplier - supports expressions like "100*23"
+  const parseMultiplier = (multiplierStr) => {
+    if (!multiplierStr || multiplierStr.trim() === '') return 1;
+    
+    const trimmed = multiplierStr.trim();
+    
+    // If it's a simple number, return it directly
+    if (/^\d+$/.test(trimmed)) {
+      return parseInt(trimmed, 10);
+    }
+    
+    // If it contains multiplication or addition, evaluate it safely
+    if (trimmed.includes('*') || trimmed.includes('+')) {
+      try {
+        // Only allow numbers, *, +, -, (, ) and spaces
+        if (!/^[\d\s\*\+\-\(\)]+$/.test(trimmed)) {
+          Alert.alert(
+            '⚠️ Invalid Expression',
+            'Only numbers and basic operations (+, *, -, parentheses) are allowed.',
+            [{ text: 'OK' }]
+          );
+          return 1;
+        }
+        
+        // Evaluate the expression safely
+        // Replace common patterns and evaluate
+        const result = Function('"use strict"; return (' + trimmed + ')')();
+        
+        if (isNaN(result) || result <= 0 || result > 999999) {
+          Alert.alert(
+            '⚠️ Invalid Result',
+            'Please enter a valid positive number (max: 999,999)',
+            [{ text: 'OK' }]
+          );
+          return 1;
+        }
+        
+        return Math.floor(result);
+      } catch (error) {
+        Alert.alert(
+          '⚠️ Invalid Expression',
+          'Please enter a valid mathematical expression (e.g., 100*23, 50+25)',
+          [{ text: 'OK' }]
+        );
+        return 1;
+      }
+    }
+    
+    // Default fallback
+    return 1;
+  };
+
   const addToCart = (product) => {
     // For weighable products, show weight input modal
     if (product.price_type !== 'unit') {
@@ -743,20 +980,20 @@ const CashierDashboardScreen = () => {
       return;
     }
 
-    // For unit products, add directly to cart
+    // For unit products, add directly to cart with quantity 1
     const existingItem = cart.find(item => item.id === product.id);
     
     // Allow negative stock sales - no stock validation
     
     if (existingItem) {
-      // For unit products, increment quantity
+      // For unit products, increment quantity by 1
       setCart(cart.map(item => 
         item.id === product.id 
           ? { ...item, quantity: item.quantity + 1 }
           : item
       ));
     } else {
-      // Add new product
+      // Add new product with quantity 1
       setCart([...cart, { ...product, quantity: 1 }]);
     }
   };
@@ -804,6 +1041,50 @@ const CashierDashboardScreen = () => {
   // Cart management functions
   const removeFromCart = (itemId) => {
     setCart(cart.filter(item => item.id !== itemId));
+  };
+
+  // Apply multiplier to all cart items
+  const applyMultiplierToCart = () => {
+    if (cart.length === 0) {
+      Alert.alert(
+        '⚠️ No Items in Cart',
+        'Add products to cart first, then use the multiplier to increase quantities.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    const multiplier = parseMultiplier(quantityMultiplier);
+    
+    if (multiplier <= 1) {
+      Alert.alert(
+        '⚠️ Invalid Multiplier',
+        'Please enter a number greater than 1 to multiply quantities.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    setCart(prevCart => 
+      prevCart.map(item => {
+        if (item.price_type === 'unit') {
+          // For unit products, multiply quantity
+          return { ...item, quantity: item.quantity * multiplier };
+        } else {
+          // For weighable products, multiply weight
+          return { ...item, weight: (item.weight || 0) * multiplier };
+        }
+      })
+    );
+
+    Alert.alert(
+      '✅ Multiplier Applied',
+      `All quantities multiplied by ${multiplier}!`,
+      [{ text: 'OK' }]
+    );
+
+    // Reset multiplier
+    setQuantityMultiplier('1');
   };
 
   const updateQuantity = (itemId, newQuantity) => {
@@ -1039,23 +1320,32 @@ const CashierDashboardScreen = () => {
   };
 
   const clearCartWithConfirmation = () => {
-    Alert.alert(
-      '🗑️ Clear Cart',
-      'Are you sure you want to clear all items from the cart?\n\nThis action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Clear Cart',
-          style: 'destructive',
-          onPress: () => {
-            setCart([]);
-            setCartDiscount(0);
-            setCartNotes('');
-            setAmountReceived('');
-          }
-        }
-      ]
-    );
+    console.log('🗑️ Clear Cart button clicked!');
+    console.log('Current cart length:', cart.length);
+    setShowClearCartModal(true);
+  };
+
+  // Custom modal state for Clear Cart confirmation
+  const [showClearCartModal, setShowClearCartModal] = useState(false);
+  
+  // Backup clear function without alerts for testing
+  const clearCartSimple = () => {
+    console.log('🗑️ Simple Clear Cart called!');
+    setCart([]);
+    setAmountReceived('');
+    setPaymentMethod('cash');
+    setCardLast4('');
+    setTransferReference('');
+    console.log('✅ Cart cleared without alert!');
+  };
+  
+  // Handle clear cart with custom modal
+  const handleClearCartConfirm = () => {
+    console.log('🗑️ Clearing cart now...');
+    setCart([]);
+    setAmountReceived('');
+    setShowClearCartModal(false);
+    console.log('✅ Cart cleared successfully!');
   };
 
   // Real-time Dashboard Functions
@@ -1090,7 +1380,8 @@ const CashierDashboardScreen = () => {
   };
 
   const getTotalAmount = () => {
-    return cart.reduce((total, item) => {
+    // Calculate total in USD first, then convert to selected currency
+    const usdTotal = cart.reduce((total, item) => {
       if (item.price_type === 'unit') {
         // For unit products, use quantity
         return total + (item.price * item.quantity);
@@ -1099,9 +1390,16 @@ const CashierDashboardScreen = () => {
         return total + (item.price * (item.weight || 0));
       }
     }, 0);
+    
+    // Convert to selected currency
+    return convertToCurrency(usdTotal, selectedCurrency);
   };
 
   const getChange = () => {
+    if (paymentMethod !== 'cash') {
+      return 0; // No change for non-cash payments
+    }
+    
     const total = getTotalAmount();
     const received = parseFloat(amountReceived) || 0;
     return Math.max(0, received - total);
@@ -1136,6 +1434,8 @@ const CashierDashboardScreen = () => {
       setBarcodeValidation(null);
     }
   };
+
+  // USD Only - No currency conversion needed
 
   // Validate barcode and auto-add to cart
   const validateAndAddBarcode = () => {
@@ -1194,47 +1494,70 @@ const CashierDashboardScreen = () => {
     setBarcodeInput('');
   };
 
+  // USD Only - No EcoCash payment verification needed
+
   // Background barcode scanner setup (like supermarket scanners)
   let barcodeBuffer = '';
   let lastKeystrokeTime = 0;
-  const SCANNER_TIMEOUT = 50; // Barcode scanners type very fast (50ms between chars)
-  const MIN_BARCODE_LENGTH = 6;
+  let scannerActive = false;
+  const SCANNER_TIMEOUT = 100; // Increased timeout for better reliability
+  const MIN_BARCODE_LENGTH = 4; // Reduced minimum length for more flexibility
+  const MAX_BARCODE_LENGTH = 50; // Maximum barcode length
   
   const setupBackgroundScanner = () => {
     if (typeof window === 'undefined') return;
     
     setBackgroundScannerActive(true);
+    scannerActive = true;
+    
+    console.log('🔧 Background barcode scanner activated');
     
     // Global keydown listener for background scanning
     const handleGlobalKeydown = (event) => {
-      // Only process if not typing in an input field
-      if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+      // Only process if scanner is active and not typing in input fields
+      if (!scannerActive || event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
         return;
       }
       
       const currentTime = Date.now();
       const timeDiff = currentTime - lastKeystrokeTime;
       
-      // If it's been too long since last keystroke, this might be a new barcode
-      if (timeDiff > SCANNER_TIMEOUT) {
+      // If it's been too long since last keystroke, start a new barcode
+      if (timeDiff > SCANNER_TIMEOUT && barcodeBuffer.length > 0) {
+        console.log('🕒 Scanner timeout - clearing buffer');
         barcodeBuffer = '';
       }
       
-      // Only accept printable characters
+      // Only accept printable characters and control keys
       if (event.key.length === 1) {
-        barcodeBuffer += event.key;
-        lastKeystrokeTime = currentTime;
-        
-        // Check if we have a complete barcode
-        if (barcodeBuffer.length >= MIN_BARCODE_LENGTH) {
-          processBackgroundBarcode(barcodeBuffer);
-          barcodeBuffer = '';
+        // Add character to buffer if it's valid
+        const char = event.key;
+        if (/[a-zA-Z0-9]/.test(char)) { // Only alphanumeric characters
+          barcodeBuffer += char;
+          lastKeystrokeTime = currentTime;
+          
+          // Check if we have a complete barcode
+          if (barcodeBuffer.length >= MIN_BARCODE_LENGTH && barcodeBuffer.length <= MAX_BARCODE_LENGTH) {
+            console.log('📝 Barcode buffer ready:', barcodeBuffer);
+            // Auto-process if buffer is getting long
+            if (barcodeBuffer.length >= 12) {
+              processBackgroundBarcode(barcodeBuffer);
+              barcodeBuffer = '';
+            }
+          }
         }
       }
       
       // Handle Enter key (some scanners end with Enter)
       if (event.key === 'Enter' && barcodeBuffer.length >= MIN_BARCODE_LENGTH) {
+        console.log('⏎ Enter pressed - processing barcode');
         processBackgroundBarcode(barcodeBuffer);
+        barcodeBuffer = '';
+      }
+      
+      // Handle Escape key to clear buffer
+      if (event.key === 'Escape') {
+        console.log('🛑 Escape pressed - clearing buffer');
         barcodeBuffer = '';
       }
     };
@@ -1243,7 +1566,9 @@ const CashierDashboardScreen = () => {
     
     // Store cleanup function
     window.cleanupBackgroundScanner = () => {
+      scannerActive = false;
       window.removeEventListener('keydown', handleGlobalKeydown);
+      console.log('🔧 Background barcode scanner deactivated');
     };
   };
   
@@ -1254,25 +1579,65 @@ const CashierDashboardScreen = () => {
     setBackgroundScannerActive(false);
   };
   
+  // Enhanced product matching with better barcode support
+  const findProductByBarcode = (barcode) => {
+    console.log('🔍 Searching for product with barcode:', barcode);
+    
+    const normalizedBarcode = barcode.toString().trim().toLowerCase();
+    
+    const product = products.find(p => {
+      // Check primary barcode (case insensitive)
+      if (p.barcode && p.barcode.toString().toLowerCase() === normalizedBarcode) {
+        console.log('✅ Found product by primary barcode:', p.name);
+        return true;
+      }
+      
+      // Check line code (case insensitive)
+      if (p.line_code && p.line_code.toString().toLowerCase() === normalizedBarcode) {
+        console.log('✅ Found product by line code:', p.name);
+        return true;
+      }
+      
+      // Check additional barcodes (case insensitive)
+      if (p.additional_barcodes) {
+        if (Array.isArray(p.additional_barcodes)) {
+          const found = p.additional_barcodes.some(ab => 
+            ab && ab.toString().toLowerCase() === normalizedBarcode
+          );
+          if (found) {
+            console.log('✅ Found product by additional barcode:', p.name);
+            return true;
+          }
+        } else if (typeof p.additional_barcodes === 'string') {
+          const barcodes = p.additional_barcodes.split(',').map(b => b.trim().toLowerCase());
+          if (barcodes.includes(normalizedBarcode)) {
+            console.log('✅ Found product by additional barcodes:', p.name);
+            return true;
+          }
+        }
+      }
+      
+      // Also check if barcode contains or is contained in product codes
+      if (p.barcode && p.barcode.toString().includes(normalizedBarcode)) {
+        console.log('✅ Found product by barcode contains:', p.name);
+        return true;
+      }
+      
+      if (p.line_code && p.line_code.toString().includes(normalizedBarcode)) {
+        console.log('✅ Found product by line code contains:', p.name);
+        return true;
+      }
+      
+      return false;
+    });
+    
+    return product;
+  };
+  
   const processBackgroundBarcode = (barcode) => {
     console.log('🔍 Background scanner detected barcode:', barcode);
     
-    const product = products.find(p => {
-      // Check primary barcode
-      if (p.barcode === barcode) return true;
-      // Check line code
-      if (p.line_code === barcode) return true;
-      // Check additional barcodes
-      if (p.additional_barcodes) {
-        if (Array.isArray(p.additional_barcodes)) {
-          return p.additional_barcodes.includes(barcode);
-        } else if (typeof p.additional_barcodes === 'string') {
-          const barcodes = p.additional_barcodes.split(',').map(b => b.trim());
-          return barcodes.includes(barcode);
-        }
-      }
-      return false;
-    });
+    const product = findProductByBarcode(barcode);
     
     if (product) {
       addToCart(product);
@@ -1284,7 +1649,7 @@ const CashierDashboardScreen = () => {
     } else {
       Alert.alert(
         '❌ PRODUCT NOT FOUND', 
-        `No product found with barcode: ${barcode}`,
+        `No product found with barcode: ${barcode}\n\nAvailable products: ${products.length}\n\nPlease check the barcode or add the product manually.`,
         [{ text: 'OK' }]
       );
     }
@@ -1322,13 +1687,24 @@ const CashierDashboardScreen = () => {
   };
 
   // Print vintage receipt function
-  const printVintageReceipt = (saleData, total, received) => {
+  const printVintageReceipt = (saleData, total, received, currency = 'USD') => {
     const now = new Date();
     const receiptNumber = saleData.id || 'N/A';
     const cashierName = cashierData?.name || 'Cashier';
     
     // Calculate change properly
     const change = Math.max(0, (parseFloat(received) || 0) - total);
+    
+    // Get payment method and currency for receipt - Multi-Currency Support
+    const receiptPaymentMethod = `${currency} CASH`;
+    const receiptCurrency = currency.toLowerCase();
+    
+    // Convert amounts to receipt currency for display
+    // Note: received amount is NOT converted because cashier types it in the selected currency
+    // Note: total is already converted by getTotalAmount(), so no conversion needed
+    const totalInReceiptCurrency = total; // Already in the correct currency
+    const receivedInReceiptCurrency = received; // Already in the correct currency as typed by cashier
+    const changeInReceiptCurrency = change; // Already calculated correctly
     
     // Get REAL company details from loaded shop data (not fake values!)
     const companyName = shopData?.name || shopData?.business_name || shopData?.shop_name || 'Business Name';
@@ -1772,7 +2148,7 @@ const CashierDashboardScreen = () => {
               <strong>🔧 SYSTEM INFORMATION:</strong><br>
               Device: ${deviceId} | Shop: ${shopId}<br>
               Register: ${registerId} | Terminal: ${terminalId}<br>
-              Sale ID: ${receiptNumber} | Items: ${cart.length} | Total: ${formatCurrency(total)}
+              Sale ID: ${receiptNumber} | Items: ${cart.length} | Total: ${formatCurrencyWithSymbol(totalInReceiptCurrency, receiptCurrency)}
             </div>
             
             <div class="verification-barcode">
@@ -1816,15 +2192,17 @@ const CashierDashboardScreen = () => {
                 const itemTotal = item.price_type === 'unit' 
                   ? item.price * item.quantity 
                   : item.price * (item.weight || 0);
+                const itemPriceInReceiptCurrency = receiptCurrency === 'usd' ? item.price : convertToCurrency(item.price, receiptCurrency.toUpperCase());
+                const itemTotalInReceiptCurrency = receiptCurrency === 'usd' ? itemTotal : convertToCurrency(itemTotal, receiptCurrency.toUpperCase());
                 const itemDetail = item.price_type === 'unit'
-                  ? `${item.quantity} units @ ${formatCurrency(item.price)} each`
-                  : `${item.weight || 0} ${item.price_type} @ ${formatCurrency(item.price)}/${item.price_type}`;
+                  ? `${item.quantity} units @ ${formatCurrencyWithSymbol(itemPriceInReceiptCurrency, receiptCurrency)} each`
+                  : `${item.weight || 0} ${item.price_type} @ ${formatCurrencyWithSymbol(itemPriceInReceiptCurrency, receiptCurrency)}/${item.price_type}`;
                 
                 return `
                   <div class="item-line">
                     <div class="item-name">${item.name}</div>
                     <div class="item-qty">${item.price_type === 'unit' ? item.quantity : (item.weight || 0) + ' ' + item.price_type}</div>
-                    <div class="item-price">${formatCurrency(itemTotal)}</div>
+                    <div class="item-price">${formatCurrencyWithSymbol(itemTotalInReceiptCurrency, receiptCurrency)}</div>
                   </div>
                   <div class="item-subtotal">${itemDetail}</div>
                 `;
@@ -1836,24 +2214,20 @@ const CashierDashboardScreen = () => {
             <div class="totals-section">
               <div class="total-line">
                 <span>Subtotal:</span>
-                <span>${formatCurrency(total)}</span>
+                <span>${formatCurrencyWithSymbol(totalInReceiptCurrency, receiptCurrency)}</span>
               </div>
-              ${paymentMethod === 'cash' ? `
-                <div class="payment-method">💵 CASH PAYMENT</div>
-                <div class="total-line">
-                  <span>Cash Received:</span>
-                  <span>${formatCurrency(received)}</span>
-                </div>
-                <div class="total-line">
-                  <span>Change Due:</span>
-                  <span style="color: #059669;">${formatCurrency(change)}</span>
-                </div>
-              ` : `
-                <div class="payment-method">💳 ${paymentMethod.toUpperCase()} PAYMENT</div>
-              `}
+              <div class="payment-method">💵 ${receiptPaymentMethod} PAYMENT</div>
+              <div class="total-line">
+                <span>Cash Received:</span>
+                <span>${formatCurrencyWithSymbol(receivedInReceiptCurrency, receiptCurrency)}</span>
+              </div>
+              <div class="total-line">
+                <span>Change Due:</span>
+                <span style="color: #059669;">${formatCurrencyWithSymbol(changeInReceiptCurrency, receiptCurrency)}</span>
+              </div>
               <div class="total-line grand-total">
                 <span>TOTAL:</span>
-                <span>${formatCurrency(total)}</span>
+                <span>${formatCurrencyWithSymbol(totalInReceiptCurrency, receiptCurrency)}</span>
               </div>
             </div>
             
@@ -1987,90 +2361,56 @@ const CashierDashboardScreen = () => {
     const total = getTotalAmount();
     const received = parseFloat(amountReceived) || 0;
 
-    // Enhanced Payment Validation
-    if (paymentMethod === 'cash') {
-      // For cash payments, require amount received
-      if (received <= 0) {
-        Alert.alert(
-          '⚠️ PAYMENT REQUIRED', 
-          'Please enter the amount received from customer before processing the sale.',
-          [{ text: 'OK', style: 'default' }]
-        );
-        // Focus on the amount input field
-        setTimeout(() => {
-          const amountInput = document.querySelector('input[placeholder="0.00"]');
-          if (amountInput) amountInput.focus();
-        }, 100);
-        return;
-      }
-      
-      // Check if sufficient amount received
-      if (received < total) {
-        Alert.alert(
-          '⚠️ INSUFFICIENT PAYMENT', 
-          `Insufficient amount received for cash payment.\n\nTotal Amount: ${formatCurrency(total)}\nAmount Received: ${formatCurrency(received)}\nShort Amount: ${formatCurrency(total - received)}\n\nPlease collect the remaining amount from customer.`, 
-          [{ text: 'OK', style: 'default' }]
-        );
-        // Focus on the amount input field
-        setTimeout(() => {
-          const amountInput = document.querySelector('input[placeholder="0.00"]');
-          if (amountInput) amountInput.focus();
-        }, 100);
-        return;
-      }
-      
-      // Check for overpayment (customer error)
-      if (received > total) {
-        console.log('OVERPAYMENT DETECTED - ALLOWING WITH WARNING');
-        Alert.alert(
-          'Overpayment Detected',
-          `Overpayment detected!\n\nTotal: ${formatCurrency(total)}\nReceived: ${formatCurrency(received)}\nChange: ${formatCurrency(received - total)}\n\nPlease verify the amount with customer before proceeding.`,
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { 
-              text: 'Proceed Anyway', 
-              onPress: () => {
-                // Allow overpayment with confirmation
-                console.log('Overpayment confirmed by cashier');
-              }
+    // Payment Validation - Multi-Currency Cash Support
+    if (received <= 0) {
+      Alert.alert(
+        '⚠️ PAYMENT REQUIRED',
+        `Please enter the amount received from customer before processing the sale.\n\nTotal Amount: ${formatCurrency(getTotalAmount())}`,
+        [{ text: 'OK', style: 'default' }]
+      );
+      // Focus on the amount input field
+      setTimeout(() => {
+        const amountInput = document.querySelector('input[placeholder="0.00"]');
+        if (amountInput) amountInput.focus();
+      }, 100);
+      return;
+    }
+
+    // Check if sufficient amount received
+    if (received < getTotalAmount()) {
+      const shortage = getTotalAmount() - received;
+      Alert.alert(
+        '⚠️ INSUFFICIENT PAYMENT',
+        `Insufficient amount received for ${selectedCurrency} cash payment.\n\nTotal Amount: ${formatCurrency(getTotalAmount())}\nAmount Received: ${formatCurrency(received, selectedCurrency)}\nShort Amount: ${formatCurrency(shortage, selectedCurrency)}\n\nPlease collect the remaining amount from customer.`,
+        [{ text: 'OK', style: 'default' }]
+      );
+      // Focus on the amount input field
+      setTimeout(() => {
+        const amountInput = document.querySelector('input[placeholder="0.00"]');
+        if (amountInput) amountInput.focus();
+      }, 100);
+      return;
+    }
+
+    // Check for overpayment (customer error)
+    if (received > getTotalAmount()) {
+      const overpayment = received - getTotalAmount();
+      console.log('OVERPAYMENT DETECTED - ALLOWING WITH WARNING');
+      Alert.alert(
+        'Overpayment Detected',
+        `Overpayment detected!\n\nTotal: ${formatCurrency(getTotalAmount())}\nReceived: ${formatCurrency(received, selectedCurrency)}\nChange: ${formatCurrency(overpayment, selectedCurrency)}\n\nPlease verify the amount with customer before proceeding.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Proceed Anyway',
+            onPress: () => {
+              // Allow overpayment with confirmation
+              console.log('Overpayment confirmed by cashier');
             }
-          ]
-        );
-        // Don't return - allow processing to continue
-      }
-    } else if (paymentMethod === 'card') {
-      // For card payments, require amount validation (RECEIVED button sets this automatically)
-      if (received <= 0) {
-        Alert.alert(
-          '⚠️ CARD PAYMENT REQUIRED', 
-          'Please click the "RECEIVED - PROCESS SALE" button to confirm card payment.',
-          [{ text: 'OK', style: 'default' }]
-        );
-        return;
-      }
-      
-      if (received < total) {
-        Alert.alert('Insufficient Card Payment', `Insufficient card payment amount.\n\nTotal: ${formatCurrency(total)}\nReceived: ${formatCurrency(received)}\nShort: ${formatCurrency(total - received)}`);
-        return;
-      }
-      
-      if (received > total) {
-        console.log('CARD OVERPAYMENT DETECTED - ALLOWING WITH WARNING');
-        Alert.alert(
-          'Overpayment on Card',
-          `Card payment exceeds total amount.\n\nTotal: ${formatCurrency(total)}\nReceived: ${formatCurrency(received)}\nExcess: ${formatCurrency(received - total)}\n\nPlease verify the card amount with customer.`,
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { 
-              text: 'Proceed', 
-              onPress: () => {
-                console.log('Card overpayment confirmed by cashier');
-              }
-            }
-          ]
-        );
-        // Don't return - allow processing to continue
-      }
+          }
+        ]
+      );
+      // Don't return - allow processing to continue
     }
 
     console.log('Starting sale processing...');
@@ -2084,17 +2424,24 @@ const CashierDashboardScreen = () => {
       paymentMethod: paymentMethod.toUpperCase()
     };
     
-    // Prepare sale data outside try block for error handling
+    // Prepare sale data outside try block for error handling - Multi-Currency Support
     const saleData = {
       cashier_id: cashierId,
       items: cart.map(item => ({
         product_id: item.id.toString(),
         quantity: item.price_type === 'unit' ? item.quantity.toString() : (item.weight || 0).toString(),
-        unit_price: item.price.toString()
+        // FIX: Convert unit price to selected currency before sending
+        unit_price: convertToCurrency(item.price, selectedCurrency).toString()
       })),
-      payment_method: paymentMethod,
+      payment_method: 'cash', // Multi-Currency Cash
+      // CRITICAL FIX: product_price_currency is always USD (where products are priced)
+      // payment_currency is what the customer actually paid in
+      product_price_currency: 'USD',  
+      payment_currency: selectedCurrency, // What customer paid with
       customer_name: '',
-      customer_phone: ''
+      customer_phone: '',
+      // FIX: Send total amount in the selected payment currency (NOT in USD)
+      total_amount: total.toString()
     };
     
     console.log('🔍 SALE ATTRIBUTION DEBUG:', {
@@ -2110,11 +2457,11 @@ const CashierDashboardScreen = () => {
       const response = await shopAPI.createSale(saleData);
       
       if (response?.data) {
-        // Process automatic receipt generation
+        // Process automatic receipt generation - Multi-Currency Support
         const receivedAmount = parseFloat(amountReceived) || 0;
-        printVintageReceipt(response.data, total, receivedAmount);
+        printVintageReceipt(response.data, total, receivedAmount, selectedCurrency);
         
-        // Show success notification with stock update info
+        // Calculate change first
         const calculatedChange = Math.max(0, receivedAmount - total);
         const updatedItems = cart.map(item => `${item.name}: ${item.stock_quantity - item.quantity} remaining`).join('\n');
         // Note: Drawer updates are now handled automatically by the backend during sale creation
@@ -2122,17 +2469,17 @@ const CashierDashboardScreen = () => {
         Alert.alert(
           'SALE COMPLETED!',
           `Sale #${response.data.id} completed successfully!\n\n` +
-          `Total: ${formatCurrency(total)}\n` +
-          `Received: ${formatCurrency(receivedAmount)}\n` +
-          `Change: ${formatCurrency(calculatedChange)}\n\n` +
+          `Currency: ${selectedCurrency}\n` +
+          `Total: ${formatCurrency(total, selectedCurrency)}\n` +
+          `Cash Received: ${formatCurrency(receivedAmount, selectedCurrency)}\n` +
+          `Change: ${formatCurrency(calculatedChange, selectedCurrency)}\n\n` +
           `Stock Updated:\n${updatedItems}`,
           [
-            { 
-              text: 'OK', 
+            {
+              text: 'OK',
               onPress: () => {
                 setCart([]);
                 setAmountReceived('');
-                setPaymentMethod('cash');
                 // Refresh products to show updated stock
                 loadProducts();
                 setProcessingSale(false);
@@ -2173,7 +2520,6 @@ const CashierDashboardScreen = () => {
           onPress: () => {
             setCart([]);
             setAmountReceived('');
-            setPaymentMethod('cash');
           }
         }
       ]
@@ -2181,14 +2527,6 @@ const CashierDashboardScreen = () => {
   };
 
 
-
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-    }).format(amount || 0);
-  };
 
   const handleLogout = async () => {
     Alert.alert(
@@ -2328,7 +2666,57 @@ const CashierDashboardScreen = () => {
                 </Text>
                 <View style={[styles.neuralPulse, shopStatus?.is_open ? styles.neuralPulseOnline : styles.neuralPulseOffline]}></View>
               </View>
-              <TouchableOpacity onPress={() => loadDrawerStatus(cashierData)} style={styles.neuralRefreshButton}>
+              {/* Multi-Currency Status Cards */}
+              <View style={styles.currencyStatusContainer}>
+                <Text style={styles.currencyStatusTitle}>💱 CURRENCY SALES & TRANSACTIONS</Text>
+                <View style={styles.currencyStatusGrid}>
+                  <View style={styles.currencyStatusCard}>
+                    <Text style={styles.currencyStatusLabel}>💵 USD</Text>
+                    <Text style={styles.currencyStatusValue}>{formatCurrency(
+                      drawerStatus?.current_breakdown_by_currency?.usd?.cash ||
+                      drawerStatus?.session_sales_by_currency?.usd?.cash ||
+                      drawerStatus?.current_cash_usd ||
+                      drawerStatus?.session_cash_sales_usd || 0, 'USD')}</Text>
+                    <Text style={styles.currencyStatusSubtext}>
+                      {drawerStatus?.session_sales?.usd_count || 
+                       drawerStatus?.session_sales_by_currency?.usd?.count ||
+                       drawerStatus?.usd_transaction_count ||
+                       0} transactions
+                    </Text>
+                  </View>
+                  <View style={styles.currencyStatusCard}>
+                    <Text style={styles.currencyStatusLabel}>💰 ZIG</Text>
+                    <Text style={styles.currencyStatusValue}>{formatCurrency(
+                      drawerStatus?.current_breakdown_by_currency?.zig?.cash ||
+                      drawerStatus?.session_sales_by_currency?.zig?.cash ||
+                      drawerStatus?.current_cash_zig ||
+                      drawerStatus?.session_cash_sales_zig || 0, 'ZIG')}</Text>
+                    <Text style={styles.currencyStatusSubtext}>
+                      {drawerStatus?.session_sales?.zig_count || 
+                       drawerStatus?.session_sales_by_currency?.zig?.count ||
+                       drawerStatus?.zig_transaction_count ||
+                       0} transactions
+                    </Text>
+                  </View>
+                  <View style={styles.currencyStatusCard}>
+                    <Text style={styles.currencyStatusLabel}>💸 RAND</Text>
+                    <Text style={styles.currencyStatusValue}>{formatCurrency(
+                      drawerStatus?.current_breakdown_by_currency?.rand?.cash ||
+                      drawerStatus?.session_sales_by_currency?.rand?.cash ||
+                      drawerStatus?.current_cash_rand ||
+                      drawerStatus?.session_cash_sales_rand || 0, 'RAND')}</Text>
+                    <Text style={styles.currencyStatusSubtext}>
+                      {drawerStatus?.session_sales?.rand_count || 
+                       drawerStatus?.session_sales_by_currency?.rand?.count ||
+                       drawerStatus?.rand_transaction_count ||
+                       0} transactions
+                    </Text>
+                  </View>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => {
+                loadDrawerStatus(cashierData);
+              }} style={styles.neuralRefreshButton}>
                 <View style={styles.neuralButtonGlow}></View>
                 <Icon name="refresh" size={18} color="#00ffff" />
                 <Text style={styles.neuralRefreshText}>SYNC</Text>
@@ -2342,6 +2730,15 @@ const CashierDashboardScreen = () => {
       <View style={styles.vintageBorder}>
         <Text style={styles.borderText}>✨ MODERN POS SYSTEM ✨</Text>
         <Text style={styles.borderText}>Professional Point of Sale Solution</Text>
+      </View>
+
+      {/* Inspirational Quote Section */}
+      <View style={styles.inspirationalQuoteSection}>
+        <Text style={styles.inspirationalQuoteText}>"For its like magic but powered by code logic and networks"</Text>
+        <Text style={styles.inspirationalQuoteAuthor}>- LuminaN Technology</Text>
+        <View style={styles.quoteDecoration}>
+          <Text style={styles.quoteDecoText}>⚡ ✨ 💫</Text>
+        </View>
       </View>
 
       {/* POS Interface */}
@@ -2733,6 +3130,41 @@ const CashierDashboardScreen = () => {
         <View style={styles.summarySection}>
           <Text style={styles.sectionTitle}>🛒 PURCHASE SUMMARY</Text>
           
+          {/* Apply Multiplier to Cart Section */}
+          <View style={styles.multiplierContainer}>
+            <View style={styles.multiplierWrapper}>
+              <View style={styles.multiplierHeader}>
+                <Text style={styles.multiplierLabel}>APPLY MULTIPLIER TO CART:</Text>
+                <Text style={styles.multiplierHint}>Enter expressions like 100*23 to multiply all items</Text>
+              </View>
+              <View style={styles.multiplierInputGroup}>
+                <TextInput
+                  style={[
+                    styles.multiplierInput,
+                    quantityMultiplier !== '1' && styles.multiplierInputActive
+                  ]}
+                  value={quantityMultiplier}
+                  onChangeText={setQuantityMultiplier}
+                  keyboardType="default"
+                  placeholder="1 or 100*23"
+                  placeholderTextColor="#6b7280"
+                  selectTextOnFocus
+                />
+                <Text style={styles.multiplierX}>×</Text>
+              </View>
+              <View style={styles.multiplierExamples}>
+                <Text style={styles.multiplierExamplesText}>Examples: 100, 50*2, 25+75, (10*10)+5</Text>
+              </View>
+            </View>
+            <TouchableOpacity 
+              style={[styles.applyMultiplierButton, cart.length === 0 && styles.applyMultiplierButtonDisabled]}
+              onPress={applyMultiplierToCart}
+              disabled={cart.length === 0}
+            >
+              <Text style={styles.applyMultiplierText}>APPLY TO CART</Text>
+            </TouchableOpacity>
+          </View>
+          
           {/* Cart Items */}
           <View style={styles.cartItems}>
             {cart.length === 0 ? (
@@ -2750,19 +3182,25 @@ const CashierDashboardScreen = () => {
                   </TouchableOpacity>
                 </View>
                 <View style={styles.compactCartItems}>
-                  {cart.slice(0, 3).map((item) => (
-                    <View key={item.id} style={styles.compactCartItem}>
-                      <Text style={styles.compactCartItemName}>
-                        {item.name.length > 20 ? item.name.substring(0, 20) + '...' : item.name}
-                      </Text>
-                      <Text style={styles.compactCartItemDetail}>
-                        {item.price_type === 'unit' 
-                          ? `×${item.quantity}`
-                          : `${item.weight || 0}${item.price_type}`
-                        } @ {formatCurrency(item.price)}
-                      </Text>
-                    </View>
-                  ))}
+                  {cart.slice(0, 3).map((item) => {
+                    const itemTotal = item.price_type === 'unit' 
+                      ? item.price * item.quantity 
+                      : item.price * (item.weight || 0);
+                    
+                    return (
+                      <View key={item.id} style={styles.compactCartItem}>
+                        <Text style={styles.compactCartItemName}>
+                          {item.name.length > 20 ? item.name.substring(0, 20) + '...' : item.name}
+                        </Text>
+                        <Text style={styles.compactCartItemDetail}>
+                          {item.price_type === 'unit' 
+                            ? `×${item.quantity}`
+                            : `${item.weight || 0}${item.price_type}`
+                          } @ {formatCurrency(itemTotal)}
+                        </Text>
+                      </View>
+                    );
+                  })}
                   {cart.length > 3 && (
                     <Text style={styles.compactCartMoreItems}>+ {cart.length - 3} more items...</Text>
                   )}
@@ -2788,57 +3226,63 @@ const CashierDashboardScreen = () => {
                   showsVerticalScrollIndicator={true}
                   maximumHeight={cart.length > 5 ? 200 : undefined}
                 >
-                  {cart.map((item) => (
-                    <View key={item.id} style={styles.cartItem}>
-                      <View style={styles.cartItemInfo}>
-                        <Text style={styles.cartItemName}>{item.name}</Text>
-                        <Text style={styles.cartItemPrice}>
-                          {item.price_type === 'unit' 
-                            ? `${formatCurrency(item.price)} x ${item.quantity}`
-                            : `${formatCurrency(item.price)}/${item.price_type} x ${item.weight || 0} ${item.price_type} = ${formatCurrency(item.price * (item.weight || 0))}`
-                          }
-                        </Text>
+                  {cart.map((item) => {
+                    const itemTotal = item.price_type === 'unit' 
+                      ? item.price * item.quantity 
+                      : item.price * (item.weight || 0);
+                    
+                    return (
+                      <View key={item.id} style={styles.cartItem}>
+                        <View style={styles.cartItemInfo}>
+                          <Text style={styles.cartItemName}>{item.name}</Text>
+                          <Text style={styles.cartItemPrice}>
+                            {item.price_type === 'unit' 
+                              ? `${formatCurrency(itemTotal)} x ${item.quantity}`
+                              : `${formatCurrency(item.price)}/${item.price_type} x ${item.weight || 0} ${item.price_type} = ${formatCurrency(itemTotal)}`
+                            }
+                          </Text>
+                        </View>
+                        <View style={styles.cartItemControls}>
+                          {item.price_type === 'unit' ? (
+                            /* Unit product controls */
+                            <>
+                              <TouchableOpacity
+                                style={styles.qtyButton}
+                                onPress={() => updateQuantity(item.id, item.quantity - 1)}
+                              >
+                                <Text style={styles.qtyButtonText}>-</Text>
+                              </TouchableOpacity>
+                              <Text style={styles.qtyText}>{item.quantity}</Text>
+                              <TouchableOpacity
+                                style={styles.qtyButton}
+                                onPress={() => updateQuantity(item.id, item.quantity + 1)}
+                              >
+                                <Text style={styles.qtyButtonText}>+</Text>
+                              </TouchableOpacity>
+                            </>
+                          ) : (
+                            /* Weighable product controls */
+                            <>
+                              <TextInput
+                                style={styles.weightInput}
+                                value={item.weight?.toString() || ''}
+                                onChangeText={(text) => updateWeight(item.id, text)}
+                                placeholder={`0.0`}
+                                keyboardType="numeric"
+                              />
+                              <Text style={styles.unitLabel}>{item.price_type}</Text>
+                            </>
+                          )}
+                          <TouchableOpacity
+                            style={styles.removeButton}
+                            onPress={() => removeFromCart(item.id)}
+                          >
+                            <Text style={styles.removeButtonText}>X</Text>
+                          </TouchableOpacity>
+                        </View>
                       </View>
-                      <View style={styles.cartItemControls}>
-                        {item.price_type === 'unit' ? (
-                          /* Unit product controls */
-                          <>
-                            <TouchableOpacity
-                              style={styles.qtyButton}
-                              onPress={() => updateQuantity(item.id, item.quantity - 1)}
-                            >
-                              <Text style={styles.qtyButtonText}>-</Text>
-                            </TouchableOpacity>
-                            <Text style={styles.qtyText}>{item.quantity}</Text>
-                            <TouchableOpacity
-                              style={styles.qtyButton}
-                              onPress={() => updateQuantity(item.id, item.quantity + 1)}
-                            >
-                              <Text style={styles.qtyButtonText}>+</Text>
-                            </TouchableOpacity>
-                          </>
-                        ) : (
-                          /* Weighable product controls */
-                          <>
-                            <TextInput
-                              style={styles.weightInput}
-                              value={item.weight?.toString() || ''}
-                              onChangeText={(text) => updateWeight(item.id, text)}
-                              placeholder={`0.0`}
-                              keyboardType="numeric"
-                            />
-                            <Text style={styles.unitLabel}>{item.price_type}</Text>
-                          </>
-                        )}
-                        <TouchableOpacity
-                          style={styles.removeButton}
-                          onPress={() => removeFromCart(item.id)}
-                        >
-                          <Text style={styles.removeButtonText}>X</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  ))}
+                    );
+                  })}
                 </ScrollView>
               </>
             )}
@@ -2847,90 +3291,116 @@ const CashierDashboardScreen = () => {
           {/* Total */}
           <View style={styles.totalSection}>
             <Text style={styles.totalLabel}>TOTAL:</Text>
-            <Text style={styles.totalAmount}>{formatCurrency(getTotalAmount())}</Text>
+            <Text style={styles.totalAmount}>
+              {formatCurrency(getTotalAmount())}
+            </Text>
           </View>
 
-          {/* Payment Method */}
+          {/* Payment Method - Multi-Currency Support */}
           <View style={styles.paymentSection}>
             <Text style={styles.paymentLabel}>💳 PAYMENT METHOD:</Text>
-            <View style={styles.paymentButtons}>
-              <TouchableOpacity
-                style={[styles.paymentButton, paymentMethod === 'cash' && styles.paymentButtonActive]}
-                onPress={() => setPaymentMethod('cash')}
-              >
-                <Text style={styles.paymentButtonText}>CASH</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.paymentButton, paymentMethod === 'card' && styles.paymentButtonActive]}
-                onPress={() => setPaymentMethod('card')}
-              >
-                <Text style={styles.paymentButtonText}>CARD</Text>
-              </TouchableOpacity>
+            
+            {/* Currency Selection */}
+            <View style={styles.currencySelection}>
+              <Text style={styles.currencyLabel}>Select Currency:</Text>
+              <View style={styles.currencyButtons}>
+                <TouchableOpacity
+                  style={[
+                    styles.currencyButton,
+                    selectedCurrency === 'USD' && styles.currencyButtonActive
+                  ]}
+                  onPress={() => setSelectedCurrency('USD')}
+                >
+                  <Text style={[
+                    styles.currencyButtonText,
+                    selectedCurrency === 'USD' && styles.currencyButtonTextActive
+                  ]}>💵 USD</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.currencyButton,
+                    selectedCurrency === 'ZIG' && styles.currencyButtonActive
+                  ]}
+                  onPress={() => setSelectedCurrency('ZIG')}
+                >
+                  <Text style={[
+                    styles.currencyButtonText,
+                    selectedCurrency === 'ZIG' && styles.currencyButtonTextActive
+                  ]}>💰 ZIG</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.currencyButton,
+                    selectedCurrency === 'RAND' && styles.currencyButtonActive
+                  ]}
+                  onPress={() => setSelectedCurrency('RAND')}
+                >
+                  <Text style={[
+                    styles.currencyButtonText,
+                    selectedCurrency === 'RAND' && styles.currencyButtonTextActive
+                  ]}>💸 RAND</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            
+            {/* Payment Method Selection */}
+            <View style={styles.paymentMethodSection}>
+              <Text style={styles.paymentMethodLabel}>Payment Type:</Text>
+              <View style={styles.paymentButtons}>
+                <TouchableOpacity
+                  style={[styles.paymentButton, styles.paymentButtonActive]}
+                  onPress={() => setPaymentMethod('cash')}
+                >
+                  <Text style={styles.paymentButtonText}>💵 CASH</Text>
+                  <Text style={styles.paymentButtonSubtext}>Pay with {selectedCurrency} cash</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
 
-          {/* Amount Received */}
-          {paymentMethod === 'cash' ? (
-            <View style={styles.amountSection}>
-              <Text style={styles.amountLabel}>💵 AMOUNT RECEIVED:</Text>
-              <TextInput
-                style={styles.amountInput}
-                value={amountReceived}
-                onChangeText={setAmountReceived}
-                keyboardType="numeric"
-                placeholder="0.00"
-                placeholderTextColor="#8B4513"
-              />
-              {amountReceived && (
-                <Text style={styles.changeText}>CHANGE: {formatCurrency(getChange())}</Text>
-              )}
-            </View>
-          ) : paymentMethod === 'card' ? (
-            <View style={styles.amountSection}>
-              <Text style={styles.amountLabel}>💳 CARD PAYMENT CONFIRMED:</Text>
-              <Text style={styles.cardTotalText}>Total: {formatCurrency(getTotalAmount())}</Text>
-              <TouchableOpacity
-                style={styles.receivedButton}
-                onPress={() => {
-                  const total = getTotalAmount();
-                  setAmountReceived(total.toString());
-                  Alert.alert(
-                    '💳 CARD PAYMENT CONFIRMED', 
-                    `Card payment of ${formatCurrency(total)} has been received.\n\nProcessing sale...`,
-                    [
-                      { 
-                        text: 'PROCESS SALE', 
-                        onPress: () => {
-                          // Small delay to ensure state is updated
-                          setTimeout(() => {
-                            processSale();
-                          }, 100);
-                        }
-                      },
-                      { text: 'CANCEL', style: 'cancel' }
-                    ]
-                  );
-                }}
-              >
-                <Text style={styles.receivedButtonText}>💳 RECEIVED & PROCESS SALE</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
+          {/* Amount Received - Multi-Currency Support */}
+          <View style={styles.amountSection}>
+            <Text style={styles.amountLabel}>💵 {selectedCurrency} CASH PAYMENT:</Text>
+            <TextInput
+              style={styles.amountInput}
+              value={amountReceived}
+              onChangeText={setAmountReceived}
+              keyboardType="numeric"
+              placeholder="0.00"
+              placeholderTextColor="#8B4513"
+            />
+
+            {/* Show change */}
+            {amountReceived && (
+              <Text style={styles.changeText}>
+                CHANGE: {formatCurrency(getChange())}
+              </Text>
+            )}
+          </View>
 
           {/* Action Buttons */}
           <View>
-            {/* System Status Indicator */}
+            {/* System Status Indicator - Multi-Currency Support */}
             <View style={styles.automaticPrintIndicator}>
               <Text style={styles.automaticPrintText}>✨ SYSTEM READY</Text>
               <Text style={styles.automaticPrintSubtext}>
-                {paymentMethod === 'card' ? 
-                  '💳 Card payments: Use "RECEIVED" button for quick processing' :
-                  '🚀 Modern POS system operational'
-                }
+                💰 {selectedCurrency} Cash payments: Select currency, enter amount, process sale
               </Text>
             </View>
             
             <View style={styles.actionButtons}>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.clearCartButton]}
+                onPress={clearCartWithConfirmation}
+                disabled={cart.length === 0}
+              >
+                <Text style={[
+                  styles.actionButtonText,
+                  cart.length === 0 && styles.actionButtonTextDisabled
+                ]}>
+                  🗑️ CLEAR CART
+                </Text>
+              </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.actionButton, styles.refreshButton]}
                 onPress={() => {
@@ -2962,9 +3432,10 @@ const CashierDashboardScreen = () => {
                   styles.actionButtonText,
                   (processingSale || cart.length === 0) && styles.actionButtonTextDisabled
                 ]}>
-                  {processingSale ? 'PROCESSING...' : 
-                   cart.length === 0 ? 'ADD ITEMS FIRST' : 
-                   paymentMethod === 'card' ? 'USE RECEIVED BUTTON' : 'COMPLETE SALE'}
+                  {processingSale ? 'PROCESSING...' :
+                   cart.length === 0 ? 'ADD ITEMS FIRST' :
+                   !amountReceived ? 'ENTER CASH AMOUNT' :
+                   'COMPLETE SALE'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -2977,6 +3448,40 @@ const CashierDashboardScreen = () => {
         height: Platform.OS === 'web' ? 50 : 20,
         backgroundColor: '#0a0a0a'
       }} />
+
+      {/* Clear Cart Confirmation Modal */}
+      {showClearCartModal && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.clearCartModalContainer}>
+            <View style={styles.clearCartModalHeader}>
+              <Text style={styles.clearCartModalIcon}>🗑️</Text>
+              <Text style={styles.clearCartModalTitle}>Clear Cart</Text>
+            </View>
+            <View style={styles.clearCartModalBody}>
+              <Text style={styles.clearCartModalMessage}>
+                Are you sure you want to clear all items from the cart?
+              </Text>
+              <Text style={styles.clearCartModalWarning}>
+                This action cannot be undone.
+              </Text>
+            </View>
+            <View style={styles.clearCartModalButtons}>
+              <TouchableOpacity
+                style={styles.clearCartCancelButton}
+                onPress={() => setShowClearCartModal(false)}
+              >
+                <Text style={styles.clearCartCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.clearCartConfirmButton}
+                onPress={handleClearCartConfirm}
+              >
+                <Text style={styles.clearCartConfirmButtonText}>Clear Cart</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
 
       {/* Error Modal */}
       {showErrorModal && (
@@ -3021,6 +3526,8 @@ const CashierDashboardScreen = () => {
           </View>
         </View>
       )}
+
+      {/* Currency Modals Removed - USD Only */}
 
       {/* Barcode Scanner Modal */}
       <BarcodeScanner
@@ -3312,53 +3819,212 @@ const CashierDashboardScreen = () => {
                 <View style={styles.sidebarDrawerMetrics}>
                   <View style={styles.sidebarMetricCard}>
                     <Text style={styles.sidebarMetricLabel}>FLOAT</Text>
-                    <Text style={styles.sidebarMetricValue}>${drawerStatus.float_amount?.toFixed(2) || '0.00'}</Text>
+                    <Text style={styles.sidebarMetricValue}>{formatCurrency(drawerStatus.float_amount || 0)}</Text>
                   </View>
                   <View style={styles.sidebarMetricCard}>
                     <Text style={styles.sidebarMetricLabel}>CASH</Text>
-                    <Text style={[styles.sidebarMetricValue, { color: '#22c55e' }]}>${drawerStatus.current_breakdown?.cash?.toFixed(2) || '0.00'}</Text>
+                    <Text style={[styles.sidebarMetricValue, { color: '#22c55e' }]}>
+                      {(() => {
+                        // Show the dominant currency or total breakdown
+                        const usdAmount = drawerStatus.current_breakdown_by_currency?.usd?.cash || drawerStatus.current_cash_usd || drawerStatus.session_cash_sales_usd || 0;
+                        const zigAmount = drawerStatus.current_breakdown_by_currency?.zig?.cash || drawerStatus.current_cash_zig || drawerStatus.session_cash_sales_zig || 0;
+                        const randAmount = drawerStatus.current_breakdown_by_currency?.rand?.cash || drawerStatus.current_cash_rand || drawerStatus.session_cash_sales_rand || 0;
+                        
+                        // If only one currency has amount, show it with proper currency
+                        if (zigAmount > 0 && usdAmount === 0 && randAmount === 0) {
+                          return formatCurrency(zigAmount, 'ZIG');
+                        }
+                        if (usdAmount > 0 && zigAmount === 0 && randAmount === 0) {
+                          return formatCurrency(usdAmount, 'USD');
+                        }
+                        if (randAmount > 0 && usdAmount === 0 && zigAmount === 0) {
+                          return formatCurrency(randAmount, 'RAND');
+                        }
+                        
+                        // If multiple currencies, show the total in USD equivalent or use fallback
+                        const totalCash = usdAmount + zigAmount + randAmount;
+                        if (totalCash > 0) {
+                          return formatCurrency(totalCash);
+                        }
+                        
+                        return formatCurrency(0);
+                      })()}
+                    </Text>
                   </View>
                   <View style={styles.sidebarMetricCard}>
                     <Text style={styles.sidebarMetricLabel}>SALES</Text>
-                    <Text style={[styles.sidebarMetricValue, { color: '#f59e0b' }]}>${drawerStatus.session_sales?.total?.toFixed(2) || '0.00'}</Text>
+                    <Text style={[styles.sidebarMetricValue, { color: '#f59e0b' }]}>
+                      {formatCurrency(
+                        (drawerStatus.session_sales_by_currency?.usd?.cash || drawerStatus.session_cash_sales_usd || 0) +
+                        (drawerStatus.session_sales_by_currency?.zig?.cash || drawerStatus.session_cash_sales_zig || 0) +
+                        (drawerStatus.session_sales_by_currency?.rand?.cash || drawerStatus.session_cash_sales_rand || 0)
+                      )}
+                    </Text>
                   </View>
                   <View style={styles.sidebarMetricCard}>
                     <Text style={styles.sidebarMetricLabel}>EOD</Text>
-                    <Text style={[styles.sidebarMetricValue, { color: '#3b82f6' }]}>${drawerStatus.eod_expectations?.expected_cash?.toFixed(2) || '0.00'}</Text>
+                    <Text style={[styles.sidebarMetricValue, { color: '#3b82f6' }]}>
+                      {formatCurrency(
+                        (drawerStatus.float_amount || 0) +
+                        ((drawerStatus.session_sales_by_currency?.usd?.cash || drawerStatus.session_cash_sales_usd || 0) +
+                         (drawerStatus.session_sales_by_currency?.zig?.cash || drawerStatus.session_cash_sales_zig || 0) +
+                         (drawerStatus.session_sales_by_currency?.rand?.cash || drawerStatus.session_cash_sales_rand || 0))
+                      )}
+                    </Text>
                   </View>
                 </View>
 
-                {/* Variance Alert */}
-                {drawerStatus.eod_expectations?.variance !== undefined && (
-                  <View style={[
-                    styles.sidebarVarianceAlert, 
-                    { backgroundColor: drawerStatus.eod_expectations.variance >= 0 ? '#22c55e' : '#ef4444' }
-                  ]}>
-                    <Text style={styles.sidebarVarianceAlertText}>
-                      {drawerStatus.eod_expectations.variance >= 0 ? '✅' : '⚠️'} 
-                      {drawerStatus.eod_expectations.variance >= 0 ? 'OVER' : 'SHORT'}: ${Math.abs(drawerStatus.eod_expectations.variance).toFixed(2)}
-                    </Text>
-                  </View>
-                )}
+                {/* Variance Alert - Calculated locally */}
+                {(() => {
+                  // Calculate EOD expected locally: Float + Sales
+                  const floatAmount = drawerStatus.float_amount || 0;
+                  const usdSales = drawerStatus.session_sales_by_currency?.usd?.cash || drawerStatus.session_cash_sales_usd || 0;
+                  const zigSales = drawerStatus.session_sales_by_currency?.zig?.cash || drawerStatus.session_cash_sales_zig || 0;
+                  const randSales = drawerStatus.session_sales_by_currency?.rand?.cash || drawerStatus.session_cash_sales_rand || 0;
+                  const totalSales = usdSales + zigSales + randSales;
+                  const eodExpected = floatAmount + totalSales;
+                  
+                  // Current cash in drawer
+                  const usdCash = drawerStatus.current_breakdown_by_currency?.usd?.cash || drawerStatus.current_cash_usd || drawerStatus.session_cash_sales_usd || 0;
+                  const zigCash = drawerStatus.current_breakdown_by_currency?.zig?.cash || drawerStatus.current_cash_zig || drawerStatus.session_cash_sales_zig || 0;
+                  const randCash = drawerStatus.current_breakdown_by_currency?.rand?.cash || drawerStatus.current_cash_rand || drawerStatus.session_cash_sales_rand || 0;
+                  const currentCash = usdCash + zigCash + randCash;
+                  
+                  // Variance = Current Cash - EOD Expected
+                  const variance = currentCash - eodExpected;
+                  
+                  return (
+                    <View style={[
+                      styles.sidebarVarianceAlert, 
+                      { backgroundColor: variance >= 0 ? '#22c55e' : '#ef4444' }
+                    ]}>
+                      <Text style={styles.sidebarVarianceAlertText}>
+                        {variance >= 0 ? '✅' : '⚠️'} 
+                        {variance >= 0 ? 'OVER' : 'SHORT'}: {formatCurrency(Math.abs(variance))}
+                      </Text>
+                    </View>
+                  );
+                })()}
 
-                {/* Payment Breakdown */}
-                <View style={styles.sidebarPaymentBreakdown}>
-                  <Text style={styles.sidebarPaymentTitle}>PAYMENT METHODS</Text>
-                  <View style={styles.sidebarPaymentRow}>
-                    <Text style={styles.sidebarPaymentLabel}>💵 Cash:</Text>
-                    <Text style={styles.sidebarPaymentValue}>${drawerStatus.current_breakdown?.cash?.toFixed(2) || '0.00'}</Text>
+
+
+
+
+                {/* Multi-Currency Payment Breakdown */}
+                <View style={styles.sidebarCurrencyBreakdown}>
+                  <Text style={styles.sidebarPaymentTitle}>💱 CURRENCY BREAKDOWN</Text>
+                  
+                  {/* USD Section */}
+                  <View style={styles.sidebarCurrencySection}>
+                    <Text style={styles.sidebarCurrencyTitle}>💵 USD CASH</Text>
+                    <View style={styles.sidebarCurrencyRow}>
+                      <Text style={styles.sidebarCurrencyLabel}>Sales:</Text>
+                      <Text style={styles.sidebarCurrencyValue}>{formatCurrency(
+                        drawerStatus.session_sales_by_currency?.usd?.cash ||
+                        drawerStatus.current_breakdown_by_currency?.usd?.cash ||
+                        drawerStatus.session_cash_sales_usd ||
+                        drawerStatus.current_cash_usd || 0, 'USD')}</Text>
+                    </View>
+                    <View style={styles.sidebarCurrencyRow}>
+                      <Text style={styles.sidebarCurrencyLabel}>Transactions:</Text>
+                      <Text style={styles.sidebarCurrencyValue}>
+                        {drawerStatus.session_sales?.usd_count || 
+                         drawerStatus.session_sales_by_currency?.usd?.count ||
+                         drawerStatus.usd_transaction_count ||
+                         0}
+                      </Text>
+                    </View>
+                    <View style={styles.sidebarCurrencyRow}>
+                      <Text style={styles.sidebarCurrencyLabel}>In Drawer:</Text>
+                      <Text style={styles.sidebarCurrencyValue}>{formatCurrency(
+                        drawerStatus.current_breakdown_by_currency?.usd?.cash ||
+                        drawerStatus.session_sales_by_currency?.usd?.cash ||
+                        drawerStatus.current_cash_usd ||
+                        drawerStatus.session_cash_sales_usd || 0, 'USD')}</Text>
+                    </View>
                   </View>
-                  <View style={styles.sidebarPaymentRow}>
-                    <Text style={styles.sidebarPaymentLabel}>💳 Card:</Text>
-                    <Text style={styles.sidebarPaymentValue}>${drawerStatus.current_breakdown?.card?.toFixed(2) || '0.00'}</Text>
+                  
+                  {/* ZIG Section */}
+                  <View style={styles.sidebarCurrencySection}>
+                    <Text style={styles.sidebarCurrencyTitle}>💰 ZIG CASH</Text>
+                    <View style={styles.sidebarCurrencyRow}>
+                      <Text style={styles.sidebarCurrencyLabel}>Sales:</Text>
+                      <Text style={styles.sidebarCurrencyValue}>{formatCurrency(
+                        drawerStatus.session_sales_by_currency?.zig?.cash ||
+                        drawerStatus.current_breakdown_by_currency?.zig?.cash ||
+                        drawerStatus.session_cash_sales_zig ||
+                        drawerStatus.current_cash_zig || 0, 'ZIG')}</Text>
+                    </View>
+                    <View style={styles.sidebarCurrencyRow}>
+                      <Text style={styles.sidebarCurrencyLabel}>Transactions:</Text>
+                      <Text style={styles.sidebarCurrencyValue}>
+                        {drawerStatus.session_sales?.zig_count || 
+                         drawerStatus.session_sales_by_currency?.zig?.count ||
+                         drawerStatus.zig_transaction_count ||
+                         0}
+                      </Text>
+                    </View>
+                    <View style={styles.sidebarCurrencyRow}>
+                      <Text style={styles.sidebarCurrencyLabel}>In Drawer:</Text>
+                      <Text style={styles.sidebarCurrencyValue}>{formatCurrency(
+                        drawerStatus.current_breakdown_by_currency?.zig?.cash ||
+                        drawerStatus.session_sales_by_currency?.zig?.cash ||
+                        drawerStatus.current_cash_zig ||
+                        drawerStatus.session_cash_sales_zig || 0, 'ZIG')}</Text>
+                    </View>
                   </View>
-                  <View style={styles.sidebarPaymentRow}>
-                    <Text style={styles.sidebarPaymentLabel}>📱 Other:</Text>
-                    <Text style={styles.sidebarPaymentValue}>${((drawerStatus.current_breakdown?.ecocash || 0) + (drawerStatus.current_breakdown?.transfer || 0)).toFixed(2)}</Text>
+                  
+                  {/* RAND Section */}
+                  <View style={styles.sidebarCurrencySection}>
+                    <Text style={styles.sidebarCurrencyTitle}>💸 RAND CASH</Text>
+                    <View style={styles.sidebarCurrencyRow}>
+                      <Text style={styles.sidebarCurrencyLabel}>Sales:</Text>
+                      <Text style={styles.sidebarCurrencyValue}>{formatCurrency(
+                        drawerStatus.session_sales_by_currency?.rand?.cash ||
+                        drawerStatus.current_breakdown_by_currency?.rand?.cash ||
+                        drawerStatus.session_cash_sales_rand ||
+                        drawerStatus.current_cash_rand || 0, 'RAND')}</Text>
+                    </View>
+                    <View style={styles.sidebarCurrencyRow}>
+                      <Text style={styles.sidebarCurrencyLabel}>Transactions:</Text>
+                      <Text style={styles.sidebarCurrencyValue}>
+                        {drawerStatus.session_sales?.rand_count || 
+                         drawerStatus.session_sales_by_currency?.rand?.count ||
+                         drawerStatus.rand_transaction_count ||
+                         0}
+                      </Text>
+                    </View>
+                    <View style={styles.sidebarCurrencyRow}>
+                      <Text style={styles.sidebarCurrencyLabel}>In Drawer:</Text>
+                      <Text style={styles.sidebarCurrencyValue}>{formatCurrency(
+                        drawerStatus.current_breakdown_by_currency?.rand?.cash ||
+                        drawerStatus.session_sales_by_currency?.rand?.cash ||
+                        drawerStatus.current_cash_rand ||
+                        drawerStatus.session_cash_sales_rand || 0, 'RAND')}</Text>
+                    </View>
                   </View>
-                  <View style={styles.sidebarPaymentRowTotal}>
-                    <Text style={styles.sidebarPaymentLabelTotal}>💰 Total:</Text>
-                    <Text style={styles.sidebarPaymentValueTotal}>${drawerStatus.current_breakdown?.total?.toFixed(2) || '0.00'}</Text>
+                  
+                  {/* Card and Transfer (Currency Neutral) */}
+                  <View style={styles.sidebarPaymentBreakdown}>
+                    <Text style={styles.sidebarPaymentTitle}>💳 OTHER PAYMENTS</Text>
+                    <View style={styles.sidebarPaymentRow}>
+                      <Text style={styles.sidebarPaymentLabel}>💳 Card:</Text>
+                      <Text style={styles.sidebarPaymentValue}>{formatCurrency(drawerStatus.current_breakdown?.card || 0)}</Text>
+                    </View>
+                    <View style={styles.sidebarPaymentRow}>
+                      <Text style={styles.sidebarPaymentLabel}>🏦 Transfer:</Text>
+                      <Text style={styles.sidebarPaymentValue}>{formatCurrency(drawerStatus.current_breakdown?.transfer || 0)}</Text>
+                    </View>
+                    <View style={styles.sidebarPaymentRowTotal}>
+                      <Text style={styles.sidebarPaymentLabelTotal}>💰 Total Cash:</Text>
+                      <Text style={styles.sidebarPaymentValueTotal}>
+                        {formatCurrency(
+                          (drawerStatus.current_breakdown_by_currency?.usd?.cash || drawerStatus.current_cash_usd || drawerStatus.session_cash_sales_usd || 0) +
+                          (drawerStatus.current_breakdown_by_currency?.zig?.cash || drawerStatus.current_cash_zig || drawerStatus.session_cash_sales_zig || 0) +
+                          (drawerStatus.current_breakdown_by_currency?.rand?.cash || drawerStatus.current_cash_rand || drawerStatus.session_cash_sales_rand || 0)
+                        )}
+                      </Text>
+                    </View>
                   </View>
                 </View>
 
@@ -4284,6 +4950,51 @@ const styles = StyleSheet.create({
     marginVertical: 2,
   },
 
+  // Inspirational Quote Styles
+  inspirationalQuoteSection: {
+    backgroundColor: 'linear-gradient(135deg, #1e3a8a 0%, #3b82f6 50%, #06b6d4 100%)',
+    paddingVertical: 24,
+    paddingHorizontal: 20,
+    marginHorizontal: 20,
+    marginVertical: 12,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#60a5fa',
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 6,
+    alignItems: 'center',
+  },
+  inspirationalQuoteText: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textAlign: 'center',
+    marginBottom: 8,
+    fontStyle: 'italic',
+    textShadowColor: '#000000',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
+  },
+  inspirationalQuoteAuthor: {
+    color: '#bfdbfe',
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  quoteDecoration: {
+    marginTop: 4,
+  },
+  quoteDecoText: {
+    fontSize: 16,
+    textAlign: 'center',
+  },
+
   // POS Interface Styles - Dark Theme
   posContainer: {
     flex: 1,
@@ -4778,6 +5489,59 @@ const styles = StyleSheet.create({
   paymentSection: {
     marginBottom: 8,
   },
+  currencySelection: {
+    marginBottom: 16,
+    padding: 12,
+    backgroundColor: '#374151',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  currencyLabel: {
+    color: '#e5e7eb',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  currencyButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  currencyButton: {
+    flex: 1,
+    backgroundColor: '#4b5563',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#6b7280',
+    alignItems: 'center',
+  },
+  currencyButtonActive: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#2563eb',
+  },
+  currencyButtonText: {
+    color: '#9ca3af',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  currencyButtonTextActive: {
+    color: '#ffffff',
+    fontWeight: '700',
+  },
+  paymentMethodSection: {
+    marginBottom: 16,
+  },
+  paymentMethodLabel: {
+    color: '#e5e7eb',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
   paymentLabel: {
     color: '#e5e7eb',
     fontSize: 14,
@@ -4787,16 +5551,19 @@ const styles = StyleSheet.create({
   },
   paymentButtons: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
   },
   paymentButton: {
     backgroundColor: '#374151',
     paddingVertical: 12,
-    paddingHorizontal: 20,
-    marginRight: 10,
+    paddingHorizontal: 8,
+    marginBottom: 8,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#4b5563',
-    flex: 1,
+    width: '48%',
+    alignItems: 'center',
   },
   paymentButtonActive: {
     backgroundColor: '#3b82f6',
@@ -4805,6 +5572,66 @@ const styles = StyleSheet.create({
   paymentButtonText: {
     color: '#9ca3af',
     fontSize: 14,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textAlign: 'center',
+  },
+  paymentButtonSubtext: {
+    color: '#6b7280',
+    fontSize: 10,
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  exchangeRateDisplay: {
+    backgroundColor: '#1f2937',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#10b981',
+    alignItems: 'center',
+  },
+  exchangeRateText: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textAlign: 'center',
+  },
+  exchangeRateSubtext: {
+    color: '#9ca3af',
+    fontSize: 12,
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  currentPaymentMethod: {
+    backgroundColor: '#1f2937',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#10b981',
+    alignItems: 'center',
+  },
+  currentPaymentText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  changeCurrencyButton: {
+    backgroundColor: '#3b82f6',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+  },
+  changeCurrencyText: {
+    color: '#ffffff',
+    fontSize: 12,
     fontWeight: '600',
     fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
     textAlign: 'center',
@@ -4844,6 +5671,26 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     textAlign: 'center',
   },
+  paymentDetailsContainer: {
+    marginBottom: 16,
+  },
+  paymentDetailsLabel: {
+    color: '#e5e7eb',
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    marginBottom: 8,
+  },
+  paymentDetailsInput: {
+    backgroundColor: '#374151',
+    borderWidth: 1,
+    borderColor: '#4b5563',
+    padding: 12,
+    fontSize: 16,
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    color: '#ffffff',
+    borderRadius: 8,
+  },
   receivedButton: {
     backgroundColor: '#3b82f6',
     paddingVertical: 16,
@@ -4858,12 +5705,100 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
+  receivedButtonSuccess: {
+    backgroundColor: '#22c55e',
+    shadowColor: '#22c55e',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+  },
+  receivedButtonDisabled: {
+    backgroundColor: '#6b7280',
+    opacity: 0.7,
+    shadowOpacity: 0,
+  },
   receivedButtonText: {
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
     fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
     textAlign: 'center',
+  },
+
+  // EcoCash Payment Verification Styles
+  paymentStatusContainer: {
+    backgroundColor: '#374151',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#6b7280',
+  },
+  paymentStatusSuccess: {
+    backgroundColor: '#22c55e',
+    borderColor: '#16a34a',
+  },
+  paymentStatusError: {
+    backgroundColor: '#ef4444',
+    borderColor: '#dc2626',
+  },
+  paymentStatusTimeout: {
+    backgroundColor: '#f59e0b',
+    borderColor: '#d97706',
+  },
+  paymentStatusText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  paymentIdText: {
+    color: '#e5e7eb',
+    fontSize: 12,
+    textAlign: 'center',
+    fontFamily: Platform.OS === 'web' ? 'Courier New, monospace' : 'Courier New',
+  },
+  timeoutButtonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 12,
+  },
+  timeoutButton: {
+    backgroundColor: '#6b7280',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    flex: 1,
+    marginHorizontal: 4,
+    alignItems: 'center',
+  },
+  timeoutButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  ussdInstructions: {
+    backgroundColor: '#1f2937',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  ussdInstructionsTitle: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  ussdInstructionsText: {
+    color: '#e5e7eb',
+    fontSize: 12,
+    marginBottom: 2,
+    fontFamily: Platform.OS === 'web' ? 'Courier New, monospace' : 'Courier New',
   },
   actionButtons: {
     flexDirection: 'row',
@@ -4883,6 +5818,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 3,
     elevation: 1,
+  },
+  clearCartButton: {
+    backgroundColor: '#f97316',
   },
   refreshButton: {
     backgroundColor: '#3b82f6',
@@ -4929,6 +5867,103 @@ const styles = StyleSheet.create({
     fontSize: 8,
     fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
     marginTop: 1,
+    textAlign: 'center',
+  },
+
+  // Clear Cart Modal Styles
+  clearCartModalContainer: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 16,
+    padding: 24,
+    maxWidth: 400,
+    width: '100%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 12,
+    borderWidth: 3,
+    borderColor: '#f97316',
+    alignSelf: 'center',
+  },
+  clearCartModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#4b5563',
+  },
+  clearCartModalIcon: {
+    fontSize: 28,
+    marginRight: 12,
+  },
+  clearCartModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#f97316',
+    flex: 1,
+    textAlign: 'left',
+  },
+  clearCartModalBody: {
+    marginBottom: 24,
+  },
+  clearCartModalMessage: {
+    fontSize: 16,
+    color: '#ffffff',
+    lineHeight: 24,
+    textAlign: 'left',
+    marginBottom: 8,
+  },
+  clearCartModalWarning: {
+    fontSize: 14,
+    color: '#f97316',
+    fontWeight: '600',
+    fontStyle: 'italic',
+  },
+  clearCartModalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  clearCartCancelButton: {
+    backgroundColor: '#6b7280',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 120,
+    flex: 1,
+    marginRight: 8,
+  },
+  clearCartConfirmButton: {
+    backgroundColor: '#f97316',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 120,
+    shadowColor: '#f97316',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 4,
+    flex: 1,
+    marginLeft: 8,
+  },
+  clearCartCancelButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textAlign: 'center',
+  },
+  clearCartConfirmButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
     textAlign: 'center',
   },
 
@@ -5194,19 +6229,60 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
+
+  // Currency breakdown styles for sidebar
+  sidebarCurrencyBreakdown: {
+    backgroundColor: '#1f2937',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: '#10b981',
+  },
+  sidebarPaymentTitle: {
+    color: '#10b981',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 8,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+  },
+  sidebarCurrencySection: {
+    backgroundColor: '#111827',
+    borderRadius: 6,
+    padding: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  sidebarCurrencyTitle: {
+    color: '#3b82f6',
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+  },
+  sidebarCurrencyRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  sidebarCurrencyLabel: {
+    color: '#9ca3af',
+    fontSize: 10,
+    fontWeight: '500',
+  },
+  sidebarCurrencyValue: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
   sidebarPaymentBreakdown: {
     backgroundColor: '#111827',
     borderRadius: 8,
     padding: 12,
     marginBottom: 12,
-  },
-  sidebarPaymentTitle: {
-    color: '#e5e7eb',
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 8,
-    textAlign: 'center',
-    textTransform: 'uppercase',
   },
   sidebarPaymentRow: {
     flexDirection: 'row',
@@ -5239,6 +6315,58 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   sidebarPaymentValueTotal: {
+    color: '#10b981',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  // Currency sales breakdown styles for sidebar
+  sidebarCurrencySalesBreakdown: {
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: '#10b981',
+  },
+  sidebarCurrencySalesTitle: {
+    color: '#10b981',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 8,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+  },
+  sidebarCurrencySalesRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 3,
+  },
+  sidebarCurrencySalesLabel: {
+    color: '#e5e7eb',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  sidebarCurrencySalesValue: {
+    color: '#10b981',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  sidebarCurrencySalesRowTotal: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#374151',
+    marginTop: 6,
+  },
+  sidebarCurrencySalesLabelTotal: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  sidebarCurrencySalesValueTotal: {
     color: '#10b981',
     fontSize: 12,
     fontWeight: '700',
@@ -5892,6 +7020,157 @@ const styles = StyleSheet.create({
     color: '#00ff00',
     textShadowColor: '#00ff00',
     textShadowOffset: { width: 0, height: 0 },
+  },
+  neuralOffline: {
+    color: '#ff4444',
+    textShadowColor: '#ff4444',
+    textShadowOffset: { width: 0, height: 0 },
+  },
+  neuralPulse: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#00ffff',
+    marginTop: 4,
+  },
+  neuralPulseOnline: {
+    backgroundColor: '#00ff00',
+  },
+  neuralPulseOffline: {
+    backgroundColor: '#ff4444',
+  },
+  neuralRefreshButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 255, 255, 0.1)',
+    borderWidth: 2,
+    borderColor: '#00ffff',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    position: 'relative',
+    overflow: 'hidden',
+    marginLeft: 8,
+  },
+  neuralRefreshText: {
+    color: '#00ffff',
+    fontSize: 10,
+    fontWeight: '600',
+    marginLeft: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+
+  // Exchange Rates Display Styles
+  exchangeRatesContainer: {
+    backgroundColor: 'rgba(0, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: '#00ffff',
+    borderRadius: 8,
+    padding: 12,
+    margin: 8,
+    alignItems: 'center',
+  },
+  exchangeRatesTitle: {
+    color: '#00ffff',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  exchangeRateItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginBottom: 4,
+  },
+  exchangeRateLabel: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  exchangeRateValue: {
+    color: '#00ff88',
+    fontSize: 11,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Courier New, monospace' : 'Courier New',
+  },
+  exchangeRatesLoading: {
+    color: '#ffaa00',
+    fontSize: 10,
+    fontStyle: 'italic',
+    textAlign: 'center',
+  },
+  exchangeRatesError: {
+    color: '#ff4444',
+    fontSize: 10,
+    fontStyle: 'italic',
+    textAlign: 'center',
+  },
+  exchangeRateRefreshButton: {
+    backgroundColor: 'rgba(0, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: '#00ffff',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    marginTop: 8,
+    alignItems: 'center',
+  },
+  exchangeRateRefreshText: {
+    color: '#00ffff',
+    fontSize: 9,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+
+  // Additional Neural Interface Styles
+  neuralStatusGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderWidth: 1,
+    borderColor: '#00ffff',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 16,
+  },
+  neuralStatusCard: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: '#00ffff',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+    marginHorizontal: 4,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  neuralStatusLabel: {
+    color: '#00ffff',
+    fontSize: 10,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  neuralStatusValue: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  neuralOnline: {
+    color: '#00ff00',
+    textShadowColor: '#00ff00',
+    textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 5,
   },
   neuralOffline: {
@@ -5935,6 +7214,256 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     textTransform: 'uppercase',
     letterSpacing: 1,
+  },
+
+  // Currency Status Display Styles
+  currencyStatusContainer: {
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    borderWidth: 1,
+    borderColor: '#10b981',
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 12,
+  },
+  currencyStatusTitle: {
+    color: '#10b981',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  currencyStatusGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  currencyStatusCard: {
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderWidth: 1,
+    borderColor: '#10b981',
+    borderRadius: 8,
+    padding: 8,
+    alignItems: 'center',
+    flex: 1,
+    marginHorizontal: 2,
+  },
+  currencyStatusLabel: {
+    color: '#00ffff',
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
+  currencyStatusValue: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  currencyStatusSubtext: {
+    color: '#9ca3af',
+    fontSize: 8,
+    fontWeight: '500',
+    textAlign: 'center',
+    marginTop: 1,
+  },
+  
+  // Multiplier Styles
+  multiplierContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#374151',
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  multiplierWrapper: {
+    flexDirection: 'column',
+    flex: 1,
+  },
+  multiplierHeader: {
+    flexDirection: 'column',
+    marginBottom: 6,
+  },
+  multiplierLabel: {
+    color: '#9ca3af',
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  multiplierHint: {
+    color: '#10b981',
+    fontSize: 9,
+    fontWeight: '500',
+    fontStyle: 'italic',
+  },
+  multiplierInputGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  multiplierInput: {
+    backgroundColor: '#1f2937',
+    color: '#ffffff',
+    fontWeight: 'bold',
+    fontSize: 16,
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+    width: 100,
+    textAlign: 'center',
+  },
+  multiplierInputActive: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#2563eb',
+  },
+  multiplierX: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginLeft: 6,
+  },
+  multiplierExamples: {
+    marginTop: 4,
+    paddingTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: '#4b5563',
+  },
+  multiplierExamplesText: {
+    color: '#6b7280',
+    fontSize: 8,
+    fontStyle: 'italic',
+    textAlign: 'center',
+  },
+  applyMultiplierButton: {
+    backgroundColor: '#10b981',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 80,
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  applyMultiplierButtonDisabled: {
+    backgroundColor: '#6b7280',
+    opacity: 0.6,
+    shadowOpacity: 0,
+  },
+  applyMultiplierText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+
+  // Currency Modal Styles
+  currencyModalContainer: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 16,
+    padding: 24,
+    maxWidth: 400,
+    width: '100%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 12,
+    borderWidth: 3,
+    borderColor: '#10b981',
+    alignSelf: 'center',
+  },
+  currencyModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#4b5563',
+  },
+  currencyModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#10b981',
+    flex: 1,
+    textAlign: 'left',
+  },
+  currencyModalCloseButton: {
+    backgroundColor: '#ef4444',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  currencyModalCloseButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  currencyModalBody: {
+    marginBottom: 24,
+  },
+  currencyModalSubtitle: {
+    fontSize: 16,
+    color: '#ffffff',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  currencyOptions: {
+    marginBottom: 20,
+  },
+  currencyOption: {
+    backgroundColor: '#374151',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: '#4b5563',
+    alignItems: 'center',
+  },
+  currencyOptionIcon: {
+    fontSize: 32,
+    marginBottom: 8,
+  },
+  currencyOptionName: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  currencyOptionDesc: {
+    color: '#9ca3af',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  currencyModalRates: {
+    backgroundColor: '#1f2937',
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  currencyModalRatesTitle: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  currencyModalRate: {
+    color: '#e5e7eb',
+    fontSize: 12,
+    marginBottom: 4,
+    textAlign: 'center',
   },
 });
 

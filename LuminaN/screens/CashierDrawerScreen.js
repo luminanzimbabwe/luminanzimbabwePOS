@@ -11,65 +11,33 @@ import {
   RefreshControl,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import Icon from 'react-native-vector-icons/MaterialIcons';
 import { shopStorage } from '../services/storage';
 import { shopAPI } from '../services/api';
-import refundService from '../services/refundService';
 
 const CashierDrawerScreen = () => {
   const navigation = useNavigation();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [cashierData, setCashierData] = useState(null);
   const [drawerStatus, setDrawerStatus] = useState(null);
-  const [refundData, setRefundData] = useState({
-    totalRefunds: 0,
-    refundCount: 0,
-    cashRefunds: 0,
-    netCashImpact: 0
-  });
+  const [shopData, setShopData] = useState(null);
 
   useEffect(() => {
     loadDrawerData();
+    loadShopData();
   }, []);
 
-  // Auto-reset invalid refund data and drawer when detected
-  useEffect(() => {
-    const checkAndResetDrawer = async () => {
-      const refundStats = await refundService.getRefundStats();
-      const cashRefunds = Object.values(refundStats.refundsByDate || {}).reduce((sum, amount) => sum + amount, 0);
-      
-      // If we have refunds but no cash sales, reset everything
-      if (cashRefunds > 0 && (!drawerStatus?.session_sales?.cash || drawerStatus.session_sales.cash === 0)) {
-        console.log('🚨 Auto-resetting invalid refund data');
-        await refundService.emergencyReset();
-        // Reload data after reset
-        setTimeout(() => loadDrawerData(), 500);
+  const loadShopData = async () => {
+    try {
+      const credentials = await shopStorage.getCredentials();
+      if (credentials) {
+        const shopInfo = credentials.shop_info || credentials;
+        setShopData(shopInfo);
       }
-      
-      // If expected cash is much higher than actual with no sales, reset drawer
-      if (drawerStatus?.eod_expectations?.expected_cash && drawerStatus.session_sales?.total === 0) {
-        const expected = drawerStatus.eod_expectations.expected_cash;
-        const actual = drawerStatus.current_breakdown?.cash || 0;
-        if (expected > actual + 50) { // If expected is more than $50 higher than actual with no sales
-          console.log('🚨 Resetting drawer with unrealistic variance');
-          // Force reload with zeroed expectations
-          setDrawerStatus({
-            cashier: 'Current Cashier',
-            float_amount: 0,
-            current_breakdown: { cash: 0, card: 0, ecocash: 0, transfer: 0, total: 0 },
-            session_sales: { cash: 0, card: 0, ecocash: 0, transfer: 0, total: 0 },
-            eod_expectations: { expected_cash: 0, variance: 0, efficiency: 100 },
-            status: 'ACTIVE',
-            last_activity: new Date().toISOString()
-          });
-        }
-      }
-    };
-    
-    if (drawerStatus) {
-      checkAndResetDrawer();
+    } catch (error) {
+      console.error('Error loading shop data:', error);
     }
-  }, [drawerStatus]);
+  };
 
   const loadDrawerData = async () => {
     try {
@@ -79,47 +47,27 @@ const CashierDrawerScreen = () => {
         return;
       }
 
-      setCashierData(credentials);
-
-      // Load refund data for cash impact calculations (async)
-      const refundStats = await refundService.getRefundStats();
-      const cashRefunds = Object.values(refundStats.refundsByDate || {}).reduce((sum, amount) => sum + amount, 0);
-      
-      setRefundData({
-        totalRefunds: refundStats.totalRefunded,
-        refundCount: refundStats.refundCount,
-        cashRefunds: cashRefunds, // Assuming all refunds are cash for simplicity
-        netCashImpact: -cashRefunds // Negative because refunds reduce cash
-      });
-
       // Load drawer status specifically for this cashier
       const response = await shopAPI.getCashFloat();
       
       if (response.data && response.data.success) {
-        const payload = response.data.drawer || response.data.shop_status || response.data;
-        const today = new Date().toISOString().slice(0,10);
-        const payloadDate = payload?.date || payload?.current_shop_day?.date || null;
+        // Handle two possible response formats:
+        // 1. Cashier request: { success: true, drawer: {...} }
+        // 2. Owner request: { success: true, shop_status: { drawers: [...] } }
         
-        // If shop is closed or payload is stale, show zeroed drawer
-        if (payloadDate && payloadDate !== today) {
-          setDrawerStatus({
-            cashier: credentials.name || 'Unknown',
-            float_amount: 0,
-            current_breakdown: { cash: 0, card: 0, ecocash: 0, transfer: 0, total: 0 },
-            session_sales: { cash: 0, card: 0, ecocash: 0, transfer: 0, total: 0 },
-            eod_expectations: { expected_cash: 0, variance: 0, efficiency: 100 },
-            status: 'INACTIVE',
-            last_activity: null
-          });
-          return;
-        }
-
-        if (payload && Array.isArray(payload.drawers)) {
+        // Check if drawer is directly in response (cashier case)
+        if (response.data.drawer) {
+          setDrawerStatus(response.data.drawer);
+        } 
+        // Check if shop_status has drawers (owner case)
+        else if (response.data.shop_status && response.data.shop_status.drawers) {
+          const drawers = response.data.shop_status.drawers;
+          
+          // Match drawer by cashier name/id/email
           const cashierId = credentials.name || credentials.username || credentials.id || 
                           credentials.cashier_id || credentials.user_id || credentials.email;
           
-          // Match by cashier name or id/email
-          const matched = payload.drawers.find(d => {
+          const matched = drawers.find(d => {
             if (!d) return false;
             if (typeof d.cashier === 'string' && cashierId && d.cashier.toLowerCase() === String(cashierId).toLowerCase()) return true;
             if (d.cashier_id && credentials?.id && String(d.cashier_id) === String(credentials.id)) return true;
@@ -128,12 +76,29 @@ const CashierDrawerScreen = () => {
 
           if (matched) {
             setDrawerStatus(matched);
-          } else if (payload.drawers.length === 1) {
-            // Use single drawer if only one exists
-            setDrawerStatus(payload.drawers[0]);
+          } else if (drawers.length === 1) {
+            setDrawerStatus(drawers[0]);
           }
-        } else if (response.data.drawer) {
-          setDrawerStatus(response.data.drawer);
+        }
+        
+        // Also handle case where response has drawers array directly
+        if (response.data.drawers && Array.isArray(response.data.drawers)) {
+          const drawers = response.data.drawers;
+          const cashierId = credentials.name || credentials.username || credentials.id || 
+                          credentials.cashier_id || credentials.user_id || credentials.email;
+          
+          const matched = drawers.find(d => {
+            if (!d) return false;
+            if (typeof d.cashier === 'string' && cashierId && d.cashier.toLowerCase() === String(cashierId).toLowerCase()) return true;
+            if (d.cashier_id && credentials?.id && String(d.cashier_id) === String(credentials.id)) return true;
+            return false;
+          });
+
+          if (matched) {
+            setDrawerStatus(matched);
+          } else if (drawers.length === 1) {
+            setDrawerStatus(drawers[0]);
+          }
         }
       }
     } catch (error) {
@@ -150,33 +115,141 @@ const CashierDrawerScreen = () => {
     loadDrawerData();
   };
 
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-    }).format(amount || 0);
+  const formatCurrency = (amount, currency = 'USD') => {
+    if (currency === 'ZIG') {
+      return `${amount.toFixed(2)} ZIG`;
+    } else if (currency === 'RAND') {
+      return `${amount.toFixed(2)} RAND`;
+    } else {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+      }).format(amount || 0);
+    }
   };
 
-  const getCashBreakdown = () => {
-    if (!drawerStatus?.current_breakdown?.cash) return { bills: {}, coins: {} };
+  // Get EOD expected (float + sales)
+  const getEODExpected = () => {
+    if (!drawerStatus) return { usd: 0, zig: 0, rand: 0 };
     
-    const cash = drawerStatus.current_breakdown.cash;
-    // Simple breakdown - you can enhance this with actual bill/coin tracking
-    const bills = {
-      '100': Math.floor(cash / 100) * 100,
-      '50': Math.floor((cash % 100) / 50) * 50,
-      '20': Math.floor((cash % 50) / 20) * 20,
-      '10': Math.floor((cash % 20) / 10) * 10,
-      '5': Math.floor((cash % 10) / 5) * 5,
+    return {
+      usd: (drawerStatus.float_amount || 0) + (drawerStatus.session_sales_by_currency?.usd?.total || drawerStatus.session_cash_sales_usd || drawerStatus.session_sales_usd || 0),
+      zig: (drawerStatus.float_amount_zig || 0) + (drawerStatus.session_sales_by_currency?.zig?.total || drawerStatus.session_cash_sales_zig || drawerStatus.session_sales_zig || 0),
+      rand: (drawerStatus.float_amount_rand || 0) + (drawerStatus.session_sales_by_currency?.rand?.total || drawerStatus.session_cash_sales_rand || drawerStatus.session_sales_rand || 0)
     };
-    
-    const coins = {
-      '2': Math.floor((cash % 5) / 2) * 2,
-      '1': Math.floor((cash % 2) / 1) * 1,
-    };
+  };
 
-    return { bills, coins };
+  // Get formatted cash display string with proper spacing
+  const getFormattedCashDisplay = () => {
+    const { usd, zig, rand } = getCashAmounts();
+    const parts = [];
+    if (usd > 0) parts.push(formatCurrency(usd, 'USD'));
+    if (zig > 0) parts.push(formatCurrency(zig, 'ZIG'));
+    if (rand > 0) parts.push(formatCurrency(rand, 'RAND'));
+    return parts.length > 0 ? parts.join(' + ') : '$0.00';
+  };
+
+  // Get formatted EOD display string
+  const getFormattedEODDisplay = () => {
+    const eod = getEODExpected();
+    const parts = [];
+    if (eod.usd > 0) parts.push(formatCurrency(eod.usd, 'USD'));
+    if (eod.zig > 0) parts.push(formatCurrency(eod.zig, 'ZIG'));
+    if (eod.rand > 0) parts.push(formatCurrency(eod.rand, 'RAND'));
+    return parts.length > 0 ? parts.join(' + ') : '$0.00';
+  };
+
+  // Get variance (actual - expected) for each currency
+  const getVariance = () => {
+    if (!drawerStatus) return { usd: 0, zig: 0, rand: 0 };
+    const eod = getEODExpected();
+    return {
+      usd: usd - eod.usd,
+      zig: zig - eod.zig,
+      rand: rand - eod.rand
+    };
+  };
+
+  // Get formatted variance display
+  const getFormattedVarianceDisplay = () => {
+    const variance = getVariance();
+    const parts = [];
+    if (variance.usd !== 0) parts.push(`${variance.usd >= 0 ? '+' : ''}${formatCurrency(variance.usd, 'USD')}`);
+    if (variance.zig !== 0) parts.push(`${variance.zig >= 0 ? '+' : ''}${formatCurrency(variance.zig, 'ZIG')}`);
+    if (variance.rand !== 0) parts.push(`${variance.rand >= 0 ? '+' : ''}${formatCurrency(variance.rand, 'RAND')}`);
+    return parts.length > 0 ? parts.join(' / ') : 'BALANCED';
+  };
+
+  // Get variance status
+  const getVarianceStatus = () => {
+    const variance = getVariance();
+    const isOver = variance.usd > 0 || variance.zig > 0 || variance.rand > 0;
+    const isShort = variance.usd < 0 || variance.zig < 0 || variance.rand < 0;
+    
+    if (!isOver && !isShort) return { title: '✅ BALANCED', color: '#10b981', value: '0.00' };
+    if (isOver) return { title: '📈 OVER BY', color: '#22c55e', value: '+' + getFormattedVarianceDisplay() };
+    if (isShort) return { title: '📉 SHORT BY', color: '#ef4444', value: getFormattedVarianceDisplay() };
+    return { title: '✅ BALANCED', color: '#10b981', value: '0.00' };
+  };
+
+  // Get cash amounts for each currency (TODAY'S money only)
+  const getCashAmounts = () => {
+    if (!drawerStatus) return { usd: 0, zig: 0, rand: 0 };
+    
+    // Use session sales by currency as the source for today's money
+    // This ensures we only show money from today's sales
+    const usd = drawerStatus.session_sales_by_currency?.usd?.total || 
+               drawerStatus.session_cash_sales_usd ||
+               drawerStatus.current_cash_usd ||
+               0;
+    const zig = drawerStatus.session_sales_by_currency?.zig?.total || 
+                drawerStatus.session_cash_sales_zig ||
+                drawerStatus.current_cash_zig || 0;
+    const rand = drawerStatus.session_sales_by_currency?.rand?.total || 
+                 drawerStatus.session_cash_sales_rand ||
+                 drawerStatus.current_cash_rand || 0;
+    
+    return { usd, zig, rand };
+  };
+
+  // Get float amounts for each currency
+  const getFloatAmounts = () => {
+    if (!drawerStatus) return { usd: 0, zig: 0, rand: 0 };
+    
+    return {
+      usd: drawerStatus.float_amount || 0,
+      zig: drawerStatus.float_amount_zig || 0,
+      rand: drawerStatus.float_amount_rand || 0
+    };
+  };
+
+  // Get session sales by currency
+  const getSessionSales = () => {
+    if (!drawerStatus) return { usd: 0, zig: 0, rand: 0 };
+    
+    return {
+      usd: drawerStatus.session_sales_by_currency?.usd?.total || drawerStatus.session_sales_usd || 0,
+      zig: drawerStatus.session_sales_by_currency?.zig?.total || drawerStatus.session_sales_zig || 0,
+      rand: drawerStatus.session_sales_by_currency?.rand?.total || drawerStatus.session_sales_rand || 0
+    };
+  };
+
+  // Get transaction counts
+  const getTransactionCounts = () => {
+    if (!drawerStatus) return { usd: 0, zig: 0, rand: 0 };
+    
+    return {
+      usd: drawerStatus.transaction_counts_by_currency?.usd || 
+           drawerStatus.session_sales_by_currency?.usd?.count ||
+           drawerStatus.usd_transaction_count || 0,
+      zig: drawerStatus.transaction_counts_by_currency?.zig || 
+           drawerStatus.session_sales_by_currency?.zig?.count ||
+           drawerStatus.zig_transaction_count || 0,
+      rand: drawerStatus.transaction_counts_by_currency?.rand || 
+            drawerStatus.session_sales_by_currency?.rand?.count ||
+            drawerStatus.rand_transaction_count || 0
+    };
   };
 
   if (loading) {
@@ -196,7 +269,10 @@ const CashierDrawerScreen = () => {
     );
   }
 
-  const { bills, coins } = getCashBreakdown();
+  const { usd, zig, rand } = getCashAmounts();
+  const { usd: usdFloat, zig: zigFloat, rand: randFloat } = getFloatAmounts();
+  const sessionSales = getSessionSales();
+  const transactionCounts = getTransactionCounts();
 
   return (
     <ScrollView 
@@ -219,49 +295,12 @@ const CashierDrawerScreen = () => {
         <TouchableOpacity onPress={onRefresh} disabled={refreshing}>
           <Text style={styles.refreshButton}>{refreshing ? '⟳' : '↻'}</Text>
         </TouchableOpacity>
-        <TouchableOpacity 
-          onPress={() => {
-            Alert.alert(
-              'Reset Refunds',
-              'Clear all refund data to fix incorrect amounts?',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Reset',
-                  style: 'destructive',
-                  onPress: async () => {
-                    await refundService.emergencyReset();
-                    setTimeout(() => loadDrawerData(), 500);
-                  }
-                }
-              ]
-            );
-          }}
-        >
-          <Text style={[styles.refreshButton, { color: '#ef4444' }]}>🔄</Text>
-        </TouchableOpacity>
       </View>
 
       <View style={styles.content}>
-        {/* Simple Status Message */}
+        {/* Status */}
         <View style={styles.statusSection}>
-          <Text style={styles.statusText}>
-            ✅ Drawer is active and working correctly
-          </Text>
-          <Text style={styles.statusSubtext}>
-            Last updated: {new Date().toLocaleTimeString()}
-          </Text>
-        </View>
-
-        {/* Quick Refund Button */}
-        <View style={styles.quickActionSection}>
-          <TouchableOpacity 
-            style={styles.quickRefundButton}
-            onPress={() => navigation.navigate('SalesAndRefunds')}
-          >
-            <Text style={styles.quickRefundButtonText}>💰 DO REFUNDS</Text>
-            <Text style={styles.quickRefundButtonSubtext}>Process customer refunds here</Text>
-          </TouchableOpacity>
+          <Text style={styles.statusText}>✅ Drawer is active and working correctly</Text>
         </View>
 
         {!drawerStatus ? (
@@ -272,203 +311,379 @@ const CashierDrawerScreen = () => {
           </View>
         ) : (
           <>
-            {/* Drawer Status Overview */}
-            <View style={styles.overviewSection}>
-              <Text style={styles.sectionTitle}>💰 DRAWER OVERVIEW</Text>
+            {/* Today's Sales Summary */}
+            <View style={styles.sectionCard}>
+              <View style={styles.sectionHeader}>
+                <Icon name="analytics" size={20} color="#f59e0b" />
+                <Text style={styles.sectionTitle}>📊 TODAY'S SALES SUMMARY</Text>
+              </View>
+              <Text style={styles.salesSummaryText}>
+                Today you sold: {getFormattedCashDisplay()}
+              </Text>
+            </View>
+
+            {/* Today's Transactions */}
+            <View style={styles.sectionCard}>
+              <View style={styles.sectionHeader}>
+                <Icon name="receipt" size={20} color="#8b5cf6" />
+                <Text style={styles.sectionTitle}>📋 TODAY'S TRANSACTIONS</Text>
+              </View>
+              <View style={styles.transactionGrid}>
+                <View style={styles.transactionItem}>
+                  <Text style={styles.transactionIcon}>💵</Text>
+                  <Text style={styles.transactionCount}>{transactionCounts.usd}</Text>
+                  <Text style={styles.transactionLabel}>USD Transactions</Text>
+                </View>
+                <View style={styles.transactionItem}>
+                  <Text style={styles.transactionIcon}>💰</Text>
+                  <Text style={styles.transactionCount}>{transactionCounts.zig}</Text>
+                  <Text style={styles.transactionLabel}>ZIG Transactions</Text>
+                </View>
+                <View style={styles.transactionItem}>
+                  <Text style={styles.transactionIcon}>💸</Text>
+                  <Text style={styles.transactionCount}>{transactionCounts.rand}</Text>
+                  <Text style={styles.transactionLabel}>RAND Transactions</Text>
+                </View>
+              </View>
+              <View style={styles.totalTransactionsRow}>
+                <Icon name="summarize" size={18} color="#f59e0b" />
+                <Text style={styles.totalTransactionsText}>
+                  TOTAL TRANSACTIONS TODAY: {transactionCounts.usd + transactionCounts.zig + transactionCounts.rand}
+                </Text>
+              </View>
+            </View>
+
+            {/* Drawer Overview */}
+            <View style={styles.sectionCard}>
+              <View style={styles.sectionHeader}>
+                <Icon name="account-balance-wallet" size={20} color="#10b981" />
+                <Text style={styles.sectionTitle}>💰 DRAWER OVERVIEW</Text>
+              </View>
               
-              <View style={styles.overviewCards}>
-                <View style={styles.overviewCard}>
+              <View style={styles.overviewRow}>
+                <View style={styles.overviewItem}>
                   <Text style={styles.overviewIcon}>💵</Text>
-                  <Text style={styles.overviewValue}>{formatCurrency(drawerStatus.float_amount || 0)}</Text>
-                  <Text style={styles.overviewLabel}>Float Amount</Text>
+                  <Text style={styles.overviewLabel}>USD Float</Text>
+                  <Text style={styles.overviewValue}>{formatCurrency(usdFloat, 'USD')}</Text>
                 </View>
-                
-                <View style={styles.overviewCard}>
+              </View>
+
+              <View style={styles.overviewRow}>
+                <View style={styles.overviewItem}>
                   <Text style={styles.overviewIcon}>💰</Text>
-                  <Text style={[styles.overviewValue, { color: '#22c55e' }]}>
-                    {formatCurrency(drawerStatus.current_breakdown?.cash || 0)}
-                  </Text>
+                  <Text style={styles.overviewLabel}>ZIG Float</Text>
+                  <Text style={styles.overviewValue}>{formatCurrency(zigFloat, 'ZIG')}</Text>
+                </View>
+              </View>
+
+              <View style={styles.overviewRow}>
+                <View style={styles.overviewItem}>
+                  <Text style={styles.overviewIcon}>💸</Text>
+                  <Text style={styles.overviewLabel}>RAND Float</Text>
+                  <Text style={styles.overviewValue}>{formatCurrency(randFloat, 'RAND')}</Text>
+                </View>
+              </View>
+
+              <View style={styles.overviewRow}>
+                <View style={styles.overviewItem}>
+                  <Text style={styles.overviewIcon}>💰</Text>
                   <Text style={styles.overviewLabel}>Current Cash</Text>
+                  <Text style={styles.overviewValue}>{getFormattedCashDisplay()}</Text>
                 </View>
-                
-                <View style={styles.overviewCard}>
+              </View>
+
+              <View style={styles.overviewRow}>
+                <View style={styles.overviewItem}>
                   <Text style={styles.overviewIcon}>💳</Text>
-                  <Text style={[styles.overviewValue, { color: '#f59e0b' }]}>
-                    {formatCurrency(drawerStatus.session_sales?.total || 0)}
-                  </Text>
                   <Text style={styles.overviewLabel}>Session Sales</Text>
+                  <Text style={styles.overviewValue}>{getFormattedCashDisplay()}</Text>
                 </View>
-                
-                <View style={styles.overviewCard}>
+              </View>
+
+              <View style={styles.overviewRow}>
+                <View style={styles.overviewItem}>
                   <Text style={styles.overviewIcon}>⚡</Text>
-                  <Text style={[styles.overviewValue, { color: '#3b82f6' }]}>
-                    {formatCurrency(drawerStatus.eod_expectations?.expected_cash || 0)}
-                  </Text>
                   <Text style={styles.overviewLabel}>EOD Expected</Text>
+                  <Text style={styles.overviewValue}>{getFormattedEODDisplay()}</Text>
                 </View>
               </View>
             </View>
 
-            {/* Simple Refund Summary - Only show if there are actual sales */}
-            {refundData.totalRefunds > 0 && drawerStatus.session_sales?.cash > 0 && (
-              <View style={styles.refundSection}>
-                <Text style={styles.refundTitle}>🔄 REFUND SUMMARY</Text>
-                <View style={styles.refundGrid}>
-                  <View style={styles.refundItem}>
-                    <Text style={styles.refundIcon}>💸</Text>
-                    <Text style={styles.refundLabel}>Cash Refunds</Text>
-                    <Text style={[styles.refundValue, { color: '#ef4444' }]}>
-                      {formatCurrency(refundData.cashRefunds)}
-                    </Text>
+            {/* Payment Methods Breakdown */}
+            <View style={styles.sectionCard}>
+              <View style={styles.sectionHeader}>
+                <Icon name="payment" size={20} color="#3b82f6" />
+                <Text style={styles.sectionTitle}>💳 PAYMENT METHODS BREAKDOWN</Text>
+              </View>
+              
+              <View style={styles.paymentMethodRow}>
+                <Text style={styles.paymentIcon}>💵</Text>
+                <View style={styles.paymentInfo}>
+                  <Text style={styles.paymentLabel}>CASH PAYMENTS</Text>
+                  <Text style={styles.paymentValue}>{getFormattedCashDisplay()}</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Cash by Currency */}
+            <View style={styles.sectionCard}>
+              <View style={styles.sectionHeader}>
+                <Icon name="attach-money" size={20} color="#22c55e" />
+                <Text style={styles.sectionTitle}>💱 CASH BY CURRENCY</Text>
+              </View>
+              
+              <View style={styles.currencyCashRow}>
+                <View style={styles.currencyCashItem}>
+                  <Text style={styles.currencyCashIcon}>💵</Text>
+                  <Text style={[styles.currencyCashLabel, { color: '#22c55e' }]}>USD CASH</Text>
+                  <Text style={[styles.currencyCashValue, { color: '#22c55e' }]}>{formatCurrency(usd, 'USD')}</Text>
+                  <View style={[styles.statusBadge, { backgroundColor: '#22c55e20' }]}>
+                    <Text style={[styles.statusBadgeText, { color: '#22c55e' }]}>Active</Text>
                   </View>
-                  <View style={styles.refundItem}>
-                    <Text style={styles.refundIcon}>🔢</Text>
-                    <Text style={styles.refundLabel}>Refund Count</Text>
-                    <Text style={styles.refundValue}>{refundData.refundCount}</Text>
+                </View>
+                
+                <View style={styles.currencyCashItem}>
+                  <Text style={styles.currencyCashIcon}>💰</Text>
+                  <Text style={[styles.currencyCashLabel, { color: '#f59e0b' }]}>ZIG CASH</Text>
+                  <Text style={[styles.currencyCashValue, { color: '#f59e0b' }]}>{formatCurrency(zig, 'ZIG')}</Text>
+                  <View style={[styles.statusBadge, { backgroundColor: '#f59e0b20' }]}>
+                    <Text style={[styles.statusBadgeText, { color: '#f59e0b' }]}>Active</Text>
                   </View>
-                  <View style={styles.refundItem}>
-                    <Text style={styles.refundIcon}>💰</Text>
-                    <Text style={styles.refundLabel}>Net Cash</Text>
-                    <Text style={[styles.refundValue, { color: '#22c55e' }]}>
-                      {formatCurrency((drawerStatus.session_sales?.cash || 0) - refundData.cashRefunds)}
-                    </Text>
+                </View>
+                
+                <View style={styles.currencyCashItem}>
+                  <Text style={styles.currencyCashIcon}>💸</Text>
+                  <Text style={[styles.currencyCashLabel, { color: '#3b82f6' }]}>RAND CASH</Text>
+                  <Text style={[styles.currencyCashValue, { color: '#3b82f6' }]}>{formatCurrency(rand, 'RAND')}</Text>
+                  <View style={[styles.statusBadge, { backgroundColor: '#3b82f620' }]}>
+                    <Text style={[styles.statusBadgeText, { color: '#3b82f6' }]}>Active</Text>
                   </View>
                 </View>
               </View>
-            )}
 
-            {/* Only show variance when there are actual sales */}
-            {drawerStatus.session_sales?.total > 0 && drawerStatus.eod_expectations?.variance !== undefined && (
-              <View style={[
-                styles.varianceSection,
-                { backgroundColor: drawerStatus.eod_expectations.variance >= 0 ? '#22c55e' : '#ef4444' }
-              ]}>
-                <Text style={styles.varianceTitle}>
-                  {drawerStatus.eod_expectations.variance >= 0 ? '✅' : '⚠️'} 
-                  {drawerStatus.eod_expectations.variance >= 0 ? 'OVER' : 'SHORT'} BY
-                </Text>
-                <Text style={styles.varianceAmount}>
-                  {formatCurrency(Math.abs(drawerStatus.eod_expectations.variance))}
-                </Text>
-                <Text style={styles.varianceNote}>
-                  Expected: {formatCurrency(drawerStatus.eod_expectations.expected_cash)} | 
-                  Actual: {formatCurrency(drawerStatus.current_breakdown?.cash)}
-                </Text>
+              <View style={styles.totalCashSalesRow}>
+                <Icon name="savings" size={18} color="#f59e0b" />
+                <Text style={styles.totalCashSalesLabel}>TOTAL CASH SALES</Text>
+                <Text style={styles.totalCashSalesValue}>{getFormattedCashDisplay()}</Text>
+                <Text style={styles.totalCashSalesSubtext}>Across all currencies</Text>
               </View>
-            )}
+            </View>
+
+            {/* Over/Short */}
+            {(() => {
+              const status = getVarianceStatus();
+              const eod = getEODExpected();
+              return (
+                <View style={styles.sectionCard}>
+                  <View style={styles.sectionHeader}>
+                    <Icon name="check-circle" size={20} color={status.color} />
+                    <Text style={[styles.sectionTitle, { color: status.color }]}>{status.title}</Text>
+                  </View>
+                  <Text style={[styles.overByValue, { color: status.color }]}>{status.value}</Text>
+                  <Text style={styles.overBySubtext}>
+                    Expected: {getFormattedEODDisplay()} | Actual: {getFormattedCashDisplay()}
+                  </Text>
+                </View>
+              );
+            })()}
 
             {/* Cash Breakdown */}
-            <View style={styles.cashBreakdownSection}>
-              <Text style={styles.sectionTitle}>💵 CASH BREAKDOWN</Text>
-              
-              <View style={styles.cashSummary}>
-                <Text style={styles.cashTotal}>
-                  💰 Total Cash: {formatCurrency(drawerStatus.current_breakdown?.cash || 0)}
-                </Text>
+            <View style={styles.sectionCard}>
+              <View style={styles.sectionHeader}>
+                <Icon name="account-balance" size={20} color="#f59e0b" />
+                <Text style={styles.sectionTitle}>💵 CASH BREAKDOWN</Text>
               </View>
-
-              {/* Bills */}
-              <View style={styles.denominationSection}>
-                <Text style={styles.denominationTitle}>💵 BILLS</Text>
-                {Object.entries(bills).map(([denomination, amount]) => (
-                  amount > 0 && (
-                    <View key={denomination} style={styles.denominationRow}>
-                      <Text style={styles.denominationLabel}>${denomination} bills:</Text>
-                      <Text style={styles.denominationAmount}>{formatCurrency(amount)}</Text>
-                    </View>
-                  )
-                ))}
-              </View>
-
-              {/* Coins */}
-              <View style={styles.denominationSection}>
-                <Text style={styles.denominationTitle}>🪙 COINS</Text>
-                {Object.entries(coins).map(([denomination, amount]) => (
-                  amount > 0 && (
-                    <View key={denomination} style={styles.denominationRow}>
-                      <Text style={styles.denominationLabel}>${denomination} coins:</Text>
-                      <Text style={styles.denominationAmount}>{formatCurrency(amount)}</Text>
-                    </View>
-                  )
-                ))}
+              <Text style={styles.cashBreakdownTotal}>
+                Total Cash: {getFormattedCashDisplay()}
+              </Text>
+              <View style={styles.cashBreakdownRow}>
+                <View style={styles.cashBreakdownItem}>
+                  <Icon name="receipt" size={24} color="#f59e0b" />
+                  <Text style={styles.cashBreakdownLabel}>💵 BILLS</Text>
+                </View>
+                <View style={styles.cashBreakdownItem}>
+                  <Icon name="monetization-on" size={24} color="#22c55e" />
+                  <Text style={styles.cashBreakdownLabel}>🪙 COINS</Text>
+                </View>
               </View>
             </View>
 
-            {/* Payment Methods */}
-            <View style={styles.paymentSection}>
-              <Text style={styles.sectionTitle}>💳 ALL PAYMENT METHODS</Text>
+            {/* All Payment Methods */}
+            <View style={styles.sectionCard}>
+              <View style={styles.sectionHeader}>
+                <Icon name="credit-card" size={20} color="#8b5cf6" />
+                <Text style={styles.sectionTitle}>💳 ALL PAYMENT METHODS</Text>
+              </View>
               
-              <View style={styles.paymentGrid}>
-                <View style={styles.paymentCard}>
-                  <Text style={styles.paymentIcon}>💵</Text>
-                  <Text style={styles.paymentLabel}>CASH</Text>
-                  <Text style={styles.paymentAmount}>{formatCurrency(drawerStatus.current_breakdown?.cash || 0)}</Text>
+              <View style={styles.allPaymentMethodsGrid}>
+                <View style={styles.allPaymentMethodItem}>
+                  <Text style={styles.allPaymentIcon}>💵</Text>
+                  <Text style={styles.allPaymentLabel}>CASH</Text>
+                  <Text style={styles.allPaymentValue}>{getFormattedCashDisplay()}</Text>
                 </View>
                 
-                <View style={styles.paymentCard}>
-                  <Text style={styles.paymentIcon}>💳</Text>
-                  <Text style={styles.paymentLabel}>CARD</Text>
-                  <Text style={styles.paymentAmount}>{formatCurrency(drawerStatus.current_breakdown?.card || 0)}</Text>
+                <View style={styles.allPaymentMethodItem}>
+                  <Text style={styles.allPaymentIcon}>💳</Text>
+                  <Text style={styles.allPaymentLabel}>CARD</Text>
+                  <Text style={styles.allPaymentValue}>$0.00</Text>
                 </View>
                 
-                <View style={styles.paymentCard}>
-                  <Text style={styles.paymentIcon}>📱</Text>
-                  <Text style={styles.paymentLabel}>ECOCASH</Text>
-                  <Text style={styles.paymentAmount}>{formatCurrency(drawerStatus.current_breakdown?.ecocash || 0)}</Text>
-                </View>
-                
-                <View style={styles.paymentCard}>
-                  <Text style={styles.paymentIcon}>🏦</Text>
-                  <Text style={styles.paymentLabel}>TRANSFER</Text>
-                  <Text style={styles.paymentAmount}>{formatCurrency(drawerStatus.current_breakdown?.transfer || 0)}</Text>
+                <View style={styles.allPaymentMethodItem}>
+                  <Text style={styles.allPaymentIcon}>🏦</Text>
+                  <Text style={styles.allPaymentLabel}>TRANSFER</Text>
+                  <Text style={styles.allPaymentValue}>$0.00</Text>
                 </View>
               </View>
-
-              <View style={styles.totalPaymentCard}>
-                <Text style={styles.totalPaymentIcon}>💰</Text>
-                <Text style={styles.totalPaymentLabel}>TOTAL</Text>
-                <Text style={styles.totalPaymentAmount}>{formatCurrency(drawerStatus.current_breakdown?.total || 0)}</Text>
+              
+              <View style={styles.allPaymentTotalRow}>
+                <Icon name="account-balance" size={18} />
+                <Text style={styles.allPaymentTotalLabel}>TOTAL</Text>
+                <Text style={styles.allPaymentTotalValue}>{getFormattedCashDisplay()}</Text>
               </View>
             </View>
 
             {/* Session Performance */}
-            <View style={styles.performanceSection}>
-              <Text style={styles.sectionTitle}>📊 SESSION PERFORMANCE</Text>
+            <View style={styles.sectionCard}>
+              <View style={styles.sectionHeader}>
+                <Icon name="speed" size={20} color="#10b981" />
+                <Text style={styles.sectionTitle}>📊 SESSION PERFORMANCE</Text>
+              </View>
               
-              <View style={styles.performanceGrid}>
+              <View style={styles.performanceRow}>
                 <View style={styles.performanceItem}>
+                  <Text style={styles.performanceIcon}>💵</Text>
                   <Text style={styles.performanceLabel}>Cash Sales</Text>
-                  <Text style={styles.performanceValue}>{formatCurrency(drawerStatus.session_sales?.cash || 0)}</Text>
+                  <Text style={styles.performanceValue}>{getFormattedCashDisplay()}</Text>
                 </View>
                 
                 <View style={styles.performanceItem}>
+                  <Text style={styles.performanceIcon}>💳</Text>
                   <Text style={styles.performanceLabel}>Card Sales</Text>
-                  <Text style={styles.performanceValue}>{formatCurrency(drawerStatus.session_sales?.card || 0)}</Text>
-                </View>
-                
-                <View style={styles.performanceItem}>
-                  <Text style={styles.performanceLabel}>Total Sales</Text>
-                  <Text style={styles.performanceValue}>{formatCurrency(drawerStatus.session_sales?.total || 0)}</Text>
-                </View>
-                
-                <View style={styles.performanceItem}>
-                  <Text style={styles.performanceLabel}>Efficiency</Text>
-                  <Text style={[styles.performanceValue, { color: '#3b82f6' }]}>
-                    {(drawerStatus.eod_expectations?.efficiency || 0).toFixed(1)}%
-                  </Text>
+                  <Text style={styles.performanceValue}>$0.00</Text>
                 </View>
               </View>
+              
+              <View style={styles.performanceRow}>
+                <View style={styles.performanceItem}>
+                  <Text style={styles.performanceIcon}>📈</Text>
+                  <Text style={styles.performanceLabel}>Total Sales</Text>
+                  <Text style={styles.performanceValue}>{getFormattedCashDisplay()}</Text>
+                </View>
+                
+                <View style={styles.performanceItem}>
+                  <Text style={styles.performanceIcon}>⚡</Text>
+                  <Text style={styles.performanceLabel}>Efficiency</Text>
+                  <Text style={[styles.performanceValue, { color: '#10b981' }]}>100.0%</Text>
+                </View>
+              </View>
+              
+              <View style={styles.lastUpdatedRow}>
+                <Icon name="schedule" size={14} color="#6b7280" />
+                <Text style={styles.lastUpdatedText}>
+                  Last updated: {new Date().toLocaleString()}
+                </Text>
+              </View>
+            </View>
+
+            {/* Currency Wallet Accounts */}
+            <View style={styles.sectionCard}>
+              <View style={styles.sectionHeader}>
+                <Icon name="account-balance" size={20} color="#8b5cf6" />
+                <Text style={styles.sectionTitle}>🏦 CURRENCY WALLET ACCOUNTS</Text>
+              </View>
+              
+              <View style={styles.walletRow}>
+                <View style={styles.walletItem}>
+                  <Text style={styles.walletIcon}>💵</Text>
+                  <Text style={styles.walletLabel}>USD WALLET</Text>
+                  <Text style={styles.walletValue}>{formatCurrency(usd, 'USD')}</Text>
+                  <Text style={styles.walletTransactions}>{transactionCounts.usd} transactions</Text>
+                </View>
+                
+                <View style={styles.walletItem}>
+                  <Text style={styles.walletIcon}>💰</Text>
+                  <Text style={styles.walletLabel}>ZIG WALLET</Text>
+                  <Text style={styles.walletValue}>{formatCurrency(zig, 'ZIG')}</Text>
+                  <Text style={styles.walletTransactions}>{transactionCounts.zig} transactions</Text>
+                </View>
+                
+                <View style={styles.walletItem}>
+                  <Text style={styles.walletIcon}>💸</Text>
+                  <Text style={styles.walletLabel}>RAND WALLET</Text>
+                  <Text style={styles.walletValue}>{formatCurrency(rand, 'RAND')}</Text>
+                  <Text style={styles.walletTransactions}>{transactionCounts.rand} transactions</Text>
+                </View>
+              </View>
+              
+              <View style={styles.totalWalletRow}>
+                <Icon name="account-balance-wallet" size={18} />
+                <Text style={styles.totalWalletLabel}>TOTAL WALLET VALUE</Text>
+                <Text style={styles.totalWalletValue}>{formatCurrency(usd, 'USD')}</Text>
+                <Text style={styles.totalWalletSubtext}>Sales are automatically routed to the correct currency wallet based on payment method</Text>
+              </View>
+            </View>
+
+            {/* Main Currency Display - 3 Cards */}
+            <View style={styles.currencyContainer}>
+              {/* USD Card */}
+              <View style={[styles.currencyCard, { borderColor: '#22c55e' }]}>
+                <Text style={styles.currencyIcon}>💵</Text>
+                <Text style={[styles.currencyLabel, { color: '#22c55e' }]}>USD CASH</Text>
+                <Text style={[styles.currencyAmount, { color: '#22c55e' }]}>
+                  {formatCurrency(usd, 'USD')}
+                </Text>
+              </View>
+
+              {/* ZIG Card */}
+              <View style={[styles.currencyCard, { borderColor: '#f59e0b' }]}>
+                <Text style={styles.currencyIcon}>💰</Text>
+                <Text style={[styles.currencyLabel, { color: '#f59e0b' }]}>ZIG CASH</Text>
+                <Text style={[styles.currencyAmount, { color: '#f59e0b' }]}>
+                  {formatCurrency(zig, 'ZIG')}
+                </Text>
+              </View>
+
+              {/* RAND Card */}
+              <View style={[styles.currencyCard, { borderColor: '#3b82f6' }]}>
+                <Text style={styles.currencyIcon}>💸</Text>
+                <Text style={[styles.currencyLabel, { color: '#3b82f6' }]}>RAND CASH</Text>
+                <Text style={[styles.currencyAmount, { color: '#3b82f6' }]}>
+                  {formatCurrency(rand, 'RAND')}
+                </Text>
+              </View>
+            </View>
+
+            {/* Total */}
+            <View style={styles.totalSection}>
+              <Text style={styles.totalLabel}>💰 TOTAL CASH</Text>
+              <Text style={styles.totalAmount}>{getFormattedCashDisplay()}</Text>
             </View>
 
             {/* Last Updated */}
             <View style={styles.updateSection}>
               <Text style={styles.updateText}>
-                🕐 Last updated: {drawerStatus.last_activity ? 
-                  new Date(drawerStatus.last_activity).toLocaleString() : 'N/A'}
+                Last updated: {new Date().toLocaleTimeString()}
               </Text>
             </View>
           </>
         )}
+
+        {/* Quick Actions */}
+        <View style={styles.quickActions}>
+          <TouchableOpacity 
+            style={styles.actionButton}
+            onPress={() => navigation.navigate('SalesAndRefunds')}
+          >
+            <Text style={styles.actionButtonText}>💰 Do Refunds</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.actionButton}
+            onPress={() => navigation.navigate('CashierDashboard')}
+          >
+            <Text style={styles.actionButtonText}>📊 Dashboard</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Bottom padding for web scrolling */}
@@ -567,42 +782,6 @@ const styles = StyleSheet.create({
     color: '#22c55e',
     fontSize: 14,
     fontWeight: '600',
-    marginBottom: 4,
-  },
-  statusSubtext: {
-    color: '#9ca3af',
-    fontSize: 12,
-    textAlign: 'center',
-  },
-  quickActionSection: {
-    marginBottom: 20,
-  },
-  quickRefundButton: {
-    backgroundColor: '#ef4444',
-    borderRadius: 16,
-    padding: 24,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#ffffff',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 4.65,
-    elevation: 8,
-  },
-  quickRefundButtonText: {
-    color: '#ffffff',
-    fontSize: 20,
-    fontWeight: '800',
-    marginBottom: 4,
-  },
-  quickRefundButtonSubtext: {
-    color: '#ffffff',
-    fontSize: 12,
-    opacity: 0.9,
   },
   noDrawerContainer: {
     backgroundColor: '#1f2937',
@@ -628,284 +807,443 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
-  sectionTitle: {
-    color: '#10b981',
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 16,
-    textAlign: 'center',
-    textTransform: 'uppercase',
-  },
-  overviewSection: {
-    backgroundColor: '#1f2937',
+  
+  // Section Card Styles
+  sectionCard: {
+    backgroundColor: '#111827',
     borderRadius: 16,
     padding: 20,
-    marginBottom: 20,
-    borderWidth: 2,
-    borderColor: '#10b981',
-  },
-  overviewCards: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  overviewCard: {
-    backgroundColor: '#111827',
-    borderRadius: 12,
-    padding: 16,
-    width: '48%',
-    marginBottom: 12,
-    alignItems: 'center',
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: '#374151',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+    marginLeft: 10,
+  },
+  salesSummaryText: {
+    color: '#9ca3af',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  
+  // Transaction Grid
+  transactionGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  transactionItem: {
+    alignItems: 'center',
+    flex: 1,
+    padding: 12,
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    marginHorizontal: 4,
+  },
+  transactionIcon: {
+    fontSize: 28,
+    marginBottom: 8,
+  },
+  transactionCount: {
+    color: '#ffffff',
+    fontSize: 24,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  transactionLabel: {
+    color: '#9ca3af',
+    fontSize: 10,
+    textAlign: 'center',
+  },
+  totalTransactionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    backgroundColor: '#1f2937',
+    borderRadius: 8,
+  },
+  totalTransactionsText: {
+    color: '#f59e0b',
+    fontSize: 14,
+    fontWeight: '700',
+    marginLeft: 8,
+  },
+  
+  // Overview Row
+  overviewRow: {
+    marginBottom: 12,
+  },
+  overviewItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: '#1f2937',
+    borderRadius: 8,
   },
   overviewIcon: {
     fontSize: 24,
-    marginBottom: 8,
-  },
-  overviewValue: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 4,
-    textAlign: 'center',
+    marginRight: 12,
   },
   overviewLabel: {
     color: '#9ca3af',
-    fontSize: 11,
-    textAlign: 'center',
-    textTransform: 'uppercase',
-  },
-  varianceSection: {
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-    alignItems: 'center',
-  },
-  varianceTitle: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  varianceAmount: {
-    color: '#ffffff',
-    fontSize: 24,
-    fontWeight: '800',
-    marginBottom: 8,
-  },
-  varianceNote: {
-    color: '#ffffff',
     fontSize: 12,
-    textAlign: 'center',
-    opacity: 0.9,
+    flex: 1,
   },
-  refundSection: {
-    backgroundColor: '#1f2937',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    borderWidth: 2,
-    borderColor: '#ef4444',
-  },
-  refundTitle: {
-    color: '#ef4444',
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 16,
-    textAlign: 'center',
-    textTransform: 'uppercase',
-  },
-  refundGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  refundItem: {
-    backgroundColor: '#111827',
-    borderRadius: 12,
-    padding: 16,
-    width: '31%',
-    marginBottom: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
-  refundIcon: {
-    fontSize: 24,
-    marginBottom: 8,
-  },
-  refundLabel: {
-    color: '#9ca3af',
-    fontSize: 11,
-    fontWeight: '600',
-    marginBottom: 4,
-    textTransform: 'uppercase',
-    textAlign: 'center',
-  },
-  refundValue: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  refundNote: {
-    color: '#f59e0b',
-    fontSize: 12,
-    textAlign: 'center',
-    fontStyle: 'italic',
-    marginTop: 8,
-  },
-  cashBreakdownSection: {
-    backgroundColor: '#1f2937',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
-  cashSummary: {
-    backgroundColor: '#111827',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#22c55e',
-  },
-  cashTotal: {
-    color: '#22c55e',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  denominationSection: {
-    marginBottom: 16,
-  },
-  denominationTitle: {
-    color: '#e5e7eb',
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 12,
-    textTransform: 'uppercase',
-  },
-  denominationRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#374151',
-  },
-  denominationLabel: {
-    color: '#9ca3af',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  denominationAmount: {
+  overviewValue: {
     color: '#ffffff',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
   },
-  paymentSection: {
-    backgroundColor: '#1f2937',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
-  paymentGrid: {
+  
+  // Payment Method Row
+  paymentMethodRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  paymentCard: {
-    backgroundColor: '#111827',
-    borderRadius: 12,
-    padding: 16,
-    width: '48%',
-    marginBottom: 12,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#374151',
+    padding: 16,
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
   },
   paymentIcon: {
-    fontSize: 24,
-    marginBottom: 8,
+    fontSize: 28,
+    marginRight: 12,
+  },
+  paymentInfo: {
+    flex: 1,
   },
   paymentLabel: {
     color: '#9ca3af',
-    fontSize: 11,
-    fontWeight: '600',
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  paymentValue: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  
+  // Currency Cash Row
+  currencyCashRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  currencyCashItem: {
+    alignItems: 'center',
+    flex: 1,
+    padding: 16,
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    marginHorizontal: 4,
+    borderWidth: 1,
+  },
+  currencyCashIcon: {
+    fontSize: 28,
+    marginBottom: 8,
+  },
+  currencyCashLabel: {
+    fontSize: 10,
+    fontWeight: '700',
     marginBottom: 4,
     textTransform: 'uppercase',
   },
-  paymentAmount: {
+  currencyCashValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    marginBottom: 8,
+  },
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  statusBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  
+  // Total Cash Sales Row
+  totalCashSalesRow: {
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+  },
+  totalCashSalesLabel: {
+    color: '#f59e0b',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  totalCashSalesValue: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '800',
+    marginTop: 4,
+  },
+  totalCashSalesSubtext: {
+    color: '#6b7280',
+    fontSize: 10,
+    marginTop: 4,
+  },
+  
+  // Over By
+  overByValue: {
+    color: '#10b981',
+    fontSize: 24,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  overBySubtext: {
+    color: '#6b7280',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  
+  // Cash Breakdown
+  cashBreakdownTotal: {
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 16,
   },
-  totalPaymentCard: {
-    backgroundColor: '#111827',
-    borderRadius: 12,
-    padding: 20,
+  cashBreakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  cashBreakdownItem: {
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#10b981',
+    padding: 16,
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    flex: 1,
+    marginHorizontal: 8,
   },
-  totalPaymentIcon: {
-    fontSize: 32,
+  cashBreakdownLabel: {
+    color: '#9ca3af',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 8,
+  },
+  
+  // All Payment Methods
+  allPaymentMethodsGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  allPaymentMethodItem: {
+    alignItems: 'center',
+    flex: 1,
+    padding: 16,
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    marginHorizontal: 4,
+  },
+  allPaymentIcon: {
+    fontSize: 28,
     marginBottom: 8,
   },
-  totalPaymentLabel: {
-    color: '#ffffff',
-    fontSize: 14,
+  allPaymentLabel: {
+    color: '#9ca3af',
+    fontSize: 10,
     fontWeight: '700',
     marginBottom: 4,
-    textTransform: 'uppercase',
   },
-  totalPaymentAmount: {
-    color: '#10b981',
-    fontSize: 20,
+  allPaymentValue: {
+    color: '#ffffff',
+    fontSize: 14,
     fontWeight: '800',
   },
-  performanceSection: {
-    backgroundColor: '#1f2937',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
-  performanceGrid: {
+  allPaymentTotalRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+  },
+  allPaymentTotalLabel: {
+    color: '#f59e0b',
+    fontSize: 14,
+    fontWeight: '700',
+    marginLeft: 8,
+  },
+  allPaymentTotalValue: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '800',
+    marginLeft: 8,
+  },
+  
+  // Performance
+  performanceRow: {
+    flexDirection: 'row',
     justifyContent: 'space-between',
+    marginBottom: 12,
   },
   performanceItem: {
-    backgroundColor: '#111827',
-    borderRadius: 12,
+    flex: 1,
     padding: 16,
-    width: '48%',
-    marginBottom: 12,
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    marginHorizontal: 4,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#374151',
+  },
+  performanceIcon: {
+    fontSize: 24,
+    marginBottom: 8,
   },
   performanceLabel: {
     color: '#9ca3af',
-    fontSize: 11,
-    fontWeight: '600',
+    fontSize: 10,
+    fontWeight: '700',
     marginBottom: 4,
-    textTransform: 'uppercase',
-    textAlign: 'center',
   },
   performanceValue: {
-    color: '#f59e0b',
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  lastUpdatedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+  },
+  lastUpdatedText: {
+    color: '#6b7280',
+    fontSize: 10,
+    marginLeft: 4,
+  },
+  
+  // Wallet
+  walletRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  walletItem: {
+    alignItems: 'center',
+    flex: 1,
+    padding: 16,
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    marginHorizontal: 4,
+  },
+  walletIcon: {
+    fontSize: 28,
+    marginBottom: 8,
+  },
+  walletLabel: {
+    color: '#9ca3af',
+    fontSize: 10,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  walletValue: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  walletTransactions: {
+    color: '#6b7280',
+    fontSize: 9,
+  },
+  totalWalletRow: {
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#8b5cf6',
+  },
+  totalWalletLabel: {
+    color: '#8b5cf6',
+    fontSize: 14,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  totalWalletValue: {
+    color: '#ffffff',
+    fontSize: 24,
+    fontWeight: '800',
+    marginTop: 8,
+  },
+  totalWalletSubtext: {
+    color: '#6b7280',
+    fontSize: 10,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  
+  // Currency Display
+  currencyContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  currencyCard: {
+    backgroundColor: '#111827',
+    borderRadius: 16,
+    padding: 24,
+    width: '31%',
+    alignItems: 'center',
+    borderWidth: 3,
+    minHeight: 140,
+    justifyContent: 'center',
+  },
+  currencyIcon: {
+    fontSize: 40,
+    marginBottom: 12,
+  },
+  currencyLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  currencyAmount: {
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  totalSection: {
+    backgroundColor: '#1f2937',
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#10b981',
+    marginBottom: 20,
+  },
+  totalLabel: {
+    color: '#ffffff',
     fontSize: 16,
     fontWeight: '700',
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  totalAmount: {
+    color: '#10b981',
+    fontSize: 24,
+    fontWeight: '800',
+    textAlign: 'center',
   },
   updateSection: {
     backgroundColor: '#111827',
@@ -914,12 +1252,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#374151',
+    marginBottom: 20,
   },
   updateText: {
     color: '#6b7280',
     fontSize: 12,
     textAlign: 'center',
     fontStyle: 'italic',
+  },
+  quickActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 20,
+  },
+  actionButton: {
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    padding: 16,
+    width: '48%',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  actionButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   webScrollContent: {
     flexGrow: 1,

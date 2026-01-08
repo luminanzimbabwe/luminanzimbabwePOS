@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Modal, TextInput, Platform } from 'react-native';
 
 const BarcodeScannerComponent = ({ 
   visible, 
@@ -7,32 +7,58 @@ const BarcodeScannerComponent = ({
   onScan, 
   title = "Scan Product Barcode"
 }) => {
+  const [manualBarcode, setManualBarcode] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+
   const handleBarCodeScanned = ({ type, data }) => {
+    if (isProcessing) return; // Prevent multiple scans
+    setIsProcessing(true);
+    
+    console.log('📷 Barcode Scanned:', { type, data });
     onScan({ type, data });
+    
     Alert.alert(
-      "Barcode Scanned!",
-      `Type: ${type}\nData: ${data}`,
+      "✅ Barcode Scanned!",
+      `Type: ${type}\nCode: ${data}`,
       [
         {
           text: "Scan Again",
-          onPress: () => {}
+          onPress: () => setIsProcessing(false)
         },
         {
           text: "Use Result",
           onPress: () => {
             onClose();
+            setIsProcessing(false);
           }
         }
       ]
     );
   };
 
-  // Simulate a barcode scan for demo purposes
-  const simulateScan = () => {
-    // For demo purposes, simulate finding a product
-    const mockData = "1234567890123";
-    const mockType = "ean13";
-    handleBarCodeScanned({ type: mockType, data: mockData });
+  const handleManualBarcodeSubmit = () => {
+    if (!manualBarcode.trim()) {
+      Alert.alert('⚠️ Empty Barcode', 'Please enter a barcode code.');
+      return;
+    }
+    
+    console.log('✏️ Manual Barcode Entered:', manualBarcode);
+    handleBarCodeScanned({ type: 'manual', data: manualBarcode.trim() });
+    setManualBarcode('');
+  };
+
+  // Test scan function for demo purposes
+  const testScan = () => {
+    const testCodes = [
+      { data: "1234567890123", type: "ean13" },
+      { data: "978020137962", type: "isbn" },
+      { data: "123456789", type: "code128" },
+      { data: "0123456789012", type: "upc" }
+    ];
+    
+    const randomCode = testCodes[Math.floor(Math.random() * testCodes.length)];
+    console.log('🧪 Test scan generated:', randomCode);
+    handleBarCodeScanned(randomCode);
   };
 
   return (
@@ -47,30 +73,63 @@ const BarcodeScannerComponent = ({
         </View>
 
         <View style={styles.cameraContainer}>
-          <View style={styles.cameraFallback}>
-            <Text style={styles.cameraIcon}>📷</Text>
-            <Text style={styles.cameraTitle}>Barcode Scanner</Text>
-            <Text style={styles.cameraSubtitle}>Camera functionality not available in this environment</Text>
-            
-            <TouchableOpacity 
-              style={styles.demoButton} 
-              onPress={simulateScan}
-            >
-              <Text style={styles.demoButtonText}>🔍 Simulate Scan (Demo)</Text>
-            </TouchableOpacity>
-            
-            <Text style={styles.fallbackText}>
-              Use the product search button to add items manually
+          <View style={styles.scannerContent}>
+            <Text style={styles.scannerIcon}>📷</Text>
+            <Text style={styles.scannerTitle}>Barcode Scanner</Text>
+            <Text style={styles.scannerSubtitle}>
+              {Platform.OS === 'web' ? 'Web camera not supported in this demo' : 'Camera scanning available on mobile devices'}
             </Text>
+            
+            {/* Manual Barcode Input */}
+            <View style={styles.manualInputContainer}>
+              <Text style={styles.manualInputLabel}>Enter Barcode Manually:</Text>
+              <View style={styles.manualInputRow}>
+                <TextInput
+                  style={styles.manualInput}
+                  value={manualBarcode}
+                  onChangeText={setManualBarcode}
+                  placeholder="Type barcode here..."
+                  keyboardType="default"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  onSubmitEditing={handleManualBarcodeSubmit}
+                />
+                <TouchableOpacity 
+                  style={[
+                    styles.submitButton,
+                    !manualBarcode.trim() && styles.submitButtonDisabled
+                  ]}
+                  onPress={handleManualBarcodeSubmit}
+                  disabled={!manualBarcode.trim()}
+                >
+                  <Text style={styles.submitButtonText}>SCAN</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            
+            {/* Test/Demo Options */}
+            <View style={styles.demoContainer}>
+              <Text style={styles.demoTitle}>Test/Demo Options:</Text>
+              <TouchableOpacity 
+                style={styles.testButton} 
+                onPress={testScan}
+              >
+                <Text style={styles.testButtonText}>🧪 Random Test Scan</Text>
+              </TouchableOpacity>
+              
+              <Text style={styles.demoInfo}>
+                💡 The system will automatically add products to cart when a valid barcode is scanned.
+              </Text>
+            </View>
           </View>
         </View>
 
         <View style={styles.footer}>
           <TouchableOpacity 
-            style={styles.button} 
+            style={styles.closeButtonFull} 
             onPress={onClose}
           >
-            <Text style={styles.buttonText}>Close Scanner</Text>
+            <Text style={styles.closeButtonText}>Close Scanner</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -113,63 +172,119 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
   },
-  cameraFallback: {
+  scannerContent: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#1a1a1a',
     borderRadius: 12,
-    padding: 40,
+    padding: 20,
   },
-  cameraIcon: {
+  scannerIcon: {
     fontSize: 80,
     marginBottom: 20,
   },
-  cameraTitle: {
+  scannerTitle: {
     color: '#fff',
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 10,
   },
-  cameraSubtitle: {
+  scannerSubtitle: {
     color: '#999',
     fontSize: 16,
     textAlign: 'center',
     marginBottom: 30,
     lineHeight: 22,
   },
-  demoButton: {
-    backgroundColor: '#3b82f6',
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 32,
+  
+  // Manual Input Styles
+  manualInputContainer: {
+    width: '100%',
     marginBottom: 30,
   },
-  demoButtonText: {
+  manualInputLabel: {
     color: '#fff',
     fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  manualInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  manualInput: {
+    flex: 1,
+    backgroundColor: '#374151',
+    color: '#fff',
+    fontSize: 16,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  submitButton: {
+    backgroundColor: '#10b981',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  submitButtonDisabled: {
+    backgroundColor: '#6b7280',
+    opacity: 0.6,
+  },
+  submitButtonText: {
+    color: '#fff',
+    fontSize: 14,
     fontWeight: 'bold',
   },
-  fallbackText: {
-    color: '#999',
-    fontSize: 14,
-    textAlign: 'center',
-    lineHeight: 20,
+  
+  // Demo/Test Styles
+  demoContainer: {
+    width: '100%',
+    alignItems: 'center',
   },
+  demoTitle: {
+    color: '#f59e0b',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 15,
+    textAlign: 'center',
+  },
+  testButton: {
+    backgroundColor: '#3b82f6',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    marginBottom: 20,
+  },
+  testButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  demoInfo: {
+    color: '#9ca3af',
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 18,
+    fontStyle: 'italic',
+    maxWidth: 280,
+  },
+  
   footer: {
     padding: 20,
     paddingBottom: 40,
   },
-  button: {
-    backgroundColor: '#10b981',
+  closeButtonFull: {
+    backgroundColor: '#ef4444',
     borderRadius: 8,
     padding: 16,
     alignItems: 'center',
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
   },
 });
 

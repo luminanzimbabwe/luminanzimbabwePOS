@@ -14,6 +14,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { shopStorage } from '../services/storage';
 import { shopAPI } from '../services/api';
+import { ROUTES } from '../constants/navigation';
 
 const { width } = Dimensions.get('window');
 
@@ -23,10 +24,80 @@ const SettingsScreen = () => {
   const [loading, setLoading] = useState(true);
   const [isButtonPressed, setIsButtonPressed] = useState(false);
   const [activeSection, setActiveSection] = useState('system');
+  const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
+  const [selectedCurrency, setSelectedCurrency] = useState('USD');
+  const [isUpdatingCurrency, setIsUpdatingCurrency] = useState(false);
 
   useEffect(() => {
     loadShopData();
   }, []);
+
+  const updateBaseCurrency = async (newCurrency) => {
+    try {
+      setIsUpdatingCurrency(true);
+
+      // Get owner credentials from storage
+      const credentials = await shopStorage.getCredentials();
+      if (!credentials || !credentials.email) {
+        Alert.alert('Error', 'Owner credentials not found. Please login again.');
+        return;
+      }
+
+      // Call the shop update API
+      const response = await shopAPI.updateShop({
+        email: credentials.email,
+        password: credentials.master_password,
+        base_currency: newCurrency
+      });
+
+      if (response.success) {
+        // Update local state
+        setShopData(prev => ({
+          ...prev,
+          base_currency: newCurrency
+        }));
+
+        // Update storage
+        await shopStorage.saveCredentials({
+          ...credentials,
+          base_currency: newCurrency
+        });
+
+        Alert.alert('Success', `Base currency updated to ${newCurrency}`);
+        Vibration.vibrate(100);
+      } else {
+        Alert.alert('Error', response.error || 'Failed to update base currency');
+      }
+    } catch (error) {
+      console.error('Error updating base currency:', error);
+      Alert.alert('Error', 'Failed to update base currency. Please try again.');
+    } finally {
+      setIsUpdatingCurrency(false);
+    }
+  };
+
+  const showCurrencySelection = () => {
+    const currencies = [
+      { code: 'USD', name: 'US Dollar' },
+      { code: 'ZIG', name: 'Zimbabwe Gold' },
+      { code: 'RAND', name: 'South African Rand' }
+    ];
+
+    Alert.alert(
+      'Select Base Currency',
+      'Choose your shop\'s primary currency',
+      currencies.map(currency => ({
+        text: `${currency.code} - ${currency.name}`,
+        onPress: () => updateBaseCurrency(currency.code),
+        style: currency.code === shopData?.base_currency ? 'destructive' : 'default'
+      })).concat([
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        }
+      ])
+    );
+  };
 
   const loadShopData = async () => {
     try {
@@ -700,6 +771,12 @@ const SettingsScreen = () => {
         >
           <Text style={[styles.navButtonText, activeSection === 'integrations' && styles.navButtonTextActive]}>🔗 Integration</Text>
         </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.navButton, activeSection === 'exchange' && styles.navButtonActive]}
+          onPress={() => setActiveSection('exchange')}
+        >
+          <Text style={[styles.navButtonText, activeSection === 'exchange' && styles.navButtonTextActive]}>💱 Exchange Rates</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Business Configuration Section */}
@@ -710,17 +787,18 @@ const SettingsScreen = () => {
           
           <View style={styles.settingsCard}>
             <View style={styles.settingRow}>
-              <Text style={styles.settingLabel}>💱 Currency</Text>
-              <Text style={styles.settingValue}>USD ($)</Text>
-              <TouchableOpacity style={styles.settingAction}>
-                <Text style={styles.settingActionText}>Change</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.settingRow}>
-              <Text style={styles.settingLabel}>🧾 Tax Rate</Text>
-              <Text style={styles.settingValue}>15% VAT</Text>
-              <TouchableOpacity style={styles.settingAction}>
-                <Text style={styles.settingActionText}>Edit</Text>
+              <Text style={styles.settingLabel}>💱 Base Currency</Text>
+              <Text style={styles.settingValue}>
+                {shopData.base_currency || 'USD'} (15% VAT)
+              </Text>
+              <TouchableOpacity
+                style={[styles.settingAction, isUpdatingCurrency && { opacity: 0.6 }]}
+                onPress={showCurrencySelection}
+                disabled={isUpdatingCurrency}
+              >
+                <Text style={styles.settingActionText}>
+                  {isUpdatingCurrency ? 'Updating...' : 'Edit'}
+                </Text>
               </TouchableOpacity>
             </View>
             <View style={styles.settingRow}>
@@ -983,6 +1061,57 @@ const SettingsScreen = () => {
               <Text style={styles.settingValue}>Every 15 minutes</Text>
               <TouchableOpacity style={styles.settingAction}>
                 <Text style={styles.settingActionText}>Schedule</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* Exchange Rate Management Section */}
+      {activeSection === 'exchange' && (
+        <View style={styles.exchangeSection}>
+          <Text style={styles.sectionTitle}>💱 Exchange Rate Management</Text>
+          <Text style={styles.sectionSubtitle}>Manage daily exchange rates for Zimbabwe Dollar, USD, and Rand</Text>
+          
+          <View style={styles.settingsCard}>
+            <View style={styles.settingRow}>
+              <Text style={styles.settingLabel}>💱 Set Daily Rates</Text>
+              <Text style={styles.settingValue}>Configure exchange rates</Text>
+              <TouchableOpacity 
+                style={styles.settingAction}
+                onPress={() => navigation.navigate(ROUTES.EXCHANGE_RATE_MANAGEMENT)}
+              >
+                <Text style={styles.settingActionText}>Manage</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.settingRow}>
+              <Text style={styles.settingLabel}>📊 Rate History</Text>
+              <Text style={styles.settingValue}>View historical changes</Text>
+              <TouchableOpacity 
+                style={styles.settingAction}
+                onPress={() => navigation.navigate(ROUTES.EXCHANGE_RATE_MANAGEMENT, { screen: 'history' })}
+              >
+                <Text style={styles.settingActionText}>View</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.settingRow}>
+              <Text style={styles.settingLabel}>🔄 Currency Converter</Text>
+              <Text style={styles.settingValue}>Quick conversion tool</Text>
+              <TouchableOpacity 
+                style={styles.settingAction}
+                onPress={() => navigation.navigate(ROUTES.EXCHANGE_RATE_MANAGEMENT, { screen: 'converter' })}
+              >
+                <Text style={styles.settingActionText}>Convert</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.settingRow}>
+              <Text style={styles.settingLabel}>✅ Current Rates</Text>
+              <Text style={styles.settingValue}>Active for today</Text>
+              <TouchableOpacity 
+                style={styles.settingAction}
+                onPress={() => navigation.navigate(ROUTES.EXCHANGE_RATE_MANAGEMENT, { screen: 'current' })}
+              >
+                <Text style={styles.settingActionText}>View</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2010,6 +2139,9 @@ const styles = StyleSheet.create({
   integrationsSection: {
     padding: 20,
   },
+  exchangeSection: {
+    padding: 20,
+  },
   settingsCard: {
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 12,
@@ -2023,13 +2155,6 @@ const styles = StyleSheet.create({
         boxSizing: 'border-box',
       }
     })
-  },
-  settingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
   },
   settingRow: {
     flexDirection: 'row',

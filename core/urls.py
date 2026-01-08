@@ -12,7 +12,9 @@ from .cash_float_refund_view import add_drawer_refund
 from .reconciliation_views import CashierCountView, ReconciliationSessionView, EODReconciliationEnhancedView
 from .cashier_refund_view import process_cashier_refund, get_cashier_refunds
 # Import cash float API views
-from .models import cash_float_management, activate_cashier_drawer, update_drawer_sale, settle_drawer_at_eod, get_all_cashiers_drawer_status
+from .models import cash_float_management, activate_cashier_drawer, update_drawer_sale, settle_drawer_at_eod, get_all_cashiers_drawer_status, reset_all_drawers_at_eod
+# Import exchange rate views
+from .exchange_rate_views import exchange_rate_api, exchange_rate_history_api, convert_currency_api, set_current_rates_api
 
 
 
@@ -39,6 +41,7 @@ urlpatterns = [
     
     path('status/', views.ShopStatusView.as_view(), name='shop-status'),
     path('register/', views.ShopRegisterView.as_view(), name='shop-register'),
+    path('update/', views.ShopUpdateView.as_view(), name='shop-update'),
     path('dashboard/', views.OwnerDashboardView.as_view(), name='owner-dashboard'),
     path('login/', views.ShopLoginView.as_view(), name='shop-login'),
     path('reset-password/', views.ResetPasswordView.as_view(), name='reset-password'),
@@ -85,6 +88,12 @@ urlpatterns = [
     path('reconciliation/count/', CashierCountView.as_view(), name='cashier-count'),
     path('reconciliation/session/', ReconciliationSessionView.as_view(), name='reconciliation-session'),
     
+    # Exchange Rate Management endpoints
+    path('exchange-rates/', exchange_rate_api, name='exchange-rate-management'),
+    path('exchange-rates/history/', exchange_rate_history_api, name='exchange-rate-history'),
+    path('exchange-rates/convert/', convert_currency_api, name='convert-currency'),
+    path('exchange-rates/set-current/', set_current_rates_api, name='set-current-rates'),
+    
     # Shop Day Management endpoints
     path('shop-status/', ShopDayManagementView.as_view(), name='shop-status-management'),
     path('start-day/', ShopDayManagementView.as_view(), name='start-day'),
@@ -96,6 +105,7 @@ urlpatterns = [
     path('cash-float/sale/', update_drawer_sale, name='update-drawer-sale'),
     path('cash-float/refund/', add_drawer_refund, name='add-drawer-refund'),
     path('cash-float/settle/', settle_drawer_at_eod, name='settle-drawer-eod'),
+    path('cash-float/reset-all/', reset_all_drawers_at_eod, name='reset-all-drawers-eod'),
     path('cash-float/all-status/', get_all_cashiers_drawer_status, name='all-cashiers-drawer-status'),
     
     # Simple Cashier Refund endpoints
@@ -107,7 +117,7 @@ urlpatterns = [
     path('shifts/<int:shift_id>/end/', views.ShiftDetailView.as_view(), name='shift-detail'),
     path('stock-valuation/', views.StockValuationView.as_view(), name='stock-valuation'),
     path('expenses/', views.ExpenseListView.as_view(), name='expense-list'),
-    path('staff-lunches/', views.StaffLunchListView.as_view(), name='staff-lunch-list'),
+    path('staff-lunch/', views.StaffLunchListView.as_view(), name='staff-lunch-list'),
     path('stock-takes/', views.StockTakeListView.as_view(), name='stock-take-list'),
     path('stock-takes/<int:stock_take_id>/', views.StockTakeDetailView.as_view(), name='stock-take-detail'),
     path('stock-takes/<int:stock_take_id>/items/', views.StockTakeItemListView.as_view(), name='stock-take-item-list'),
@@ -119,4 +129,9 @@ urlpatterns = [
     path('founder/shops/', views.FounderShopListView.as_view(), name='founder-shop-list'),
     path('founder/shops/dashboard/', views.FounderShopDashboardView.as_view(), name='founder-shop-dashboard'),
     path('founder/shops/reset-password/', views.FounderResetShopPasswordView.as_view(), name='founder-reset-shop-password'),
+    
+    # Currency Wallet Management endpoints
+    path('wallet/summary/', views.WalletSummaryView.as_view(), name='wallet-summary'),
+    path('wallet/transactions/', views.WalletTransactionsView.as_view(), name='wallet-transactions'),
+    path('wallet/adjustment/', views.WalletAdjustmentView.as_view(), name='wallet-adjustment'),
 ]

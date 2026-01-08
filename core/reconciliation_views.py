@@ -118,8 +118,10 @@ class CashierCountView(APIView):
         count.ecocash_receipts = int(data.get('ecocash_receipts', 0))
         count.other_receipts = int(data.get('other_receipts', 0))
         
-        # Update expected amounts
+        # Update expected amounts (support multi-currency)
         count.expected_cash = Decimal(str(data.get('expected_cash', 0)))
+        count.expected_cash_usd = Decimal(str(data.get('expected_cash_usd', 0)))
+        count.expected_cash_rand = Decimal(str(data.get('expected_cash_rand', 0)))
         count.expected_card = Decimal(str(data.get('expected_card', 0)))
         count.expected_ecocash = Decimal(str(data.get('expected_ecocash', 0)))
         

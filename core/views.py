@@ -11,7 +11,7 @@ from django.db import models, IntegrityError
 from django.db.models import Sum, F
 from datetime import timedelta
 from decimal import Decimal
-from .models import ShopConfiguration, Cashier, Product, Sale, SaleItem, Customer, Discount, Shift, Expense, StaffLunch, StockTake, StockTakeItem, InventoryLog, StockTransfer, Waste, ShopDay
+from .models import ShopConfiguration, Cashier, Product, Sale, SaleItem, Customer, Discount, Shift, Expense, StaffLunch, StockTake, StockTakeItem, InventoryLog, StockTransfer, Waste, ShopDay, CurrencyWallet, CurrencyTransaction
 from .serializers import ShopConfigurationSerializer, ShopLoginSerializer, ResetPasswordSerializer, CashierSerializer, CashierLoginSerializer, ProductSerializer, SaleSerializer, CreateSaleSerializer, ExpenseSerializer, StockValuationSerializer, StaffLunchSerializer, BulkProductSerializer, CustomerSerializer, DiscountSerializer, StockTakeSerializer, StockTakeItemSerializer, CreateStockTakeSerializer, AddStockTakeItemSerializer, BulkAddStockTakeItemsSerializer, CashierResetPasswordSerializer, InventoryLogSerializer, StockTransferSerializer
 from django.db import transaction
 from django.shortcuts import get_object_or_404
@@ -51,7 +51,8 @@ class ShopStatusView(APIView):
                     "register_id": shop.register_id,
                     "shop_id": shop.shop_id,
                     "business_type": shop.business_type,
-                    "industry": shop.industry
+                    "industry": shop.industry,
+                    "base_currency": shop.base_currency
                 }
             })
         except ShopConfiguration.DoesNotExist:
@@ -76,6 +77,35 @@ class ShopRegisterView(APIView):
                 "shop_id": shop.shop_id,
                 "register_id": shop.register_id
             }, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@method_decorator(csrf_exempt, name='dispatch')
+class ShopUpdateView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    def patch(self, request):
+        try:
+            shop = ShopConfiguration.objects.get()
+        except ShopConfiguration.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Check owner authentication
+        email = request.data.get('email')
+        password = request.data.get('password')
+
+        if not email or not password:
+            return Response({"error": "Owner authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        if shop.email != email or not shop.validate_shop_owner_master_password(password):
+            return Response({"error": "Invalid owner credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        serializer = ShopConfigurationSerializer(shop, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "message": "Shop configuration updated successfully",
+                "shop": serializer.data
+            }, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -219,6 +249,7 @@ class CashierLoginView(APIView):
                             "address": shop.address,
                             "phone": shop.phone,
                             "shop_id": shop.shop_id,  # Add shop_id for API authentication
+                            "base_currency": shop.base_currency,
                             "shop_open": True  # Indicate shop is open
                         }
                     }, status=status.HTTP_200_OK)
@@ -493,12 +524,20 @@ class SaleListView(APIView):
 
         items_data = serializer.validated_data['items']
         payment_method = serializer.validated_data['payment_method']
+        # CRITICAL FIX: product_price_currency is always USD (products are priced in USD in database)
+        product_price_currency = serializer.validated_data.get('product_price_currency', 'USD')
+        # CRITICAL FIX: payment_currency is what the customer actually paid in
+        payment_currency = serializer.validated_data.get('payment_currency', product_price_currency)
         customer_name = serializer.validated_data.get('customer_name', '')
         customer_phone = serializer.validated_data.get('customer_phone', '')
-
+        
+        # CRITICAL FIX: Get the total amount from frontend in the payment currency
+        # The frontend already converts product prices to the selected payment currency
+        # We trust the frontend's calculation when payment_currency is provided
+        frontend_total = serializer.validated_data.get('total_amount')
+        
         with transaction.atomic():
             total_amount = 0
-            currency = None
             sale_items = []
 
             for item_data in items_data:
@@ -519,11 +558,6 @@ class SaleListView(APIView):
                 total_price = unit_price * quantity
                 total_amount += total_price
 
-                if currency is None:
-                    currency = product.currency
-                elif currency != product.currency:
-                    return Response({"error": "All products must be in the same currency"}, status=status.HTTP_400_BAD_REQUEST)
-
                 sale_items.append({
                     'product': product,
                     'quantity': quantity,
@@ -531,24 +565,94 @@ class SaleListView(APIView):
                     'total_price': total_price
                 })
 
+            # Get exchange rates for currency conversion
+            try:
+                from .models_exchange_rates import ExchangeRate
+                exchange_rates = ExchangeRate.get_current_rates()
+                exchange_rate_used = None
+                
+                # Determine wallet currency (which currency wallet gets the money)
+                # wallet_currency is the currency the customer paid in
+                wallet_currency = payment_currency if payment_currency else product_price_currency
+                
+                # CRITICAL FIX: When payment_currency is different from product currency (USD),
+                # we need to convert the USD total to the payment currency
+                final_amount = total_amount
+                if product_price_currency != wallet_currency:
+                    # Convert amount from product currency (USD) to wallet currency (ZIG/RAND)
+                    final_amount = exchange_rates.convert_amount(total_amount, product_price_currency, wallet_currency)
+                    exchange_rate_used = exchange_rates.convert_amount(1, product_price_currency, wallet_currency)
+                    print(f"DEBUG: Currency conversion - {total_amount} {product_price_currency} -> {final_amount} {wallet_currency} (rate: {exchange_rate_used})")
+                elif frontend_total and payment_currency and payment_currency != 'USD':
+                    # CRITICAL FIX: Frontend already sent the converted amount in payment_currency
+                    # Use that amount directly instead of recalculating from USD prices
+                    final_amount = Decimal(str(frontend_total))
+                    wallet_currency = payment_currency
+                    print(f"DEBUG: Using frontend total amount: {final_amount} {wallet_currency} (frontend already converted)")
+                
+            except Exception as e:
+                print(f"WARNING: Could not get exchange rates: {e}")
+                exchange_rates = None
+                exchange_rate_used = None
+                wallet_currency = currency
+                final_amount = total_amount
+
             # Create sale
             sale = Sale.objects.create(
                 shop=shop,
                 cashier=cashier,
-                total_amount=total_amount,
-                currency=currency,
+                total_amount=final_amount,  # Use the final converted amount
+                currency=product_price_currency,  # Product price currency (always USD)
+                payment_currency=wallet_currency,  # Currency actually received
                 payment_method=payment_method,
                 customer_name=customer_name,
-                customer_phone=customer_phone
+                customer_phone=customer_phone,
+                wallet_account=wallet_currency,
+                exchange_rate_used=exchange_rate_used
             )
             
             # Log sale attribution for debugging
             print(f"🔍 SALE ATTRIBUTION LOG: Sale #{sale.id} created")
             print(f"   Cashier ID: {cashier.id}")
             print(f"   Cashier Name: {cashier.name}")
-            print(f"   Amount: ${total_amount}")
+            print(f"   Amount: ${final_amount}")
+            print(f"   Currency: {wallet_currency}")
             print(f"   Payment Method: {payment_method}")
             print(f"   Timestamp: {sale.created_at}")
+
+            # Route sale to correct currency wallet and create transaction record
+            try:
+                from .models import CurrencyWallet, CurrencyTransaction
+                
+                # Get or create wallet for this shop
+                wallet, created = CurrencyWallet.objects.get_or_create(shop=shop)
+                
+                # Get balance before transaction
+                balance_before = wallet.get_balance(wallet_currency)
+                
+                # Add amount to wallet
+                balance_after = wallet.add_amount(final_amount, wallet_currency)
+                
+                # Create transaction record
+                CurrencyTransaction.objects.create(
+                    shop=shop,
+                    wallet=wallet,
+                    transaction_type='SALE',
+                    currency=wallet_currency,
+                    amount=final_amount,
+                    reference_type='Sale',
+                    reference_id=sale.id,
+                    description=f"Sale #{sale.id} - {len(sale_items)} items - {payment_method}",
+                    exchange_rate_used=exchange_rate_used,
+                    balance_after=balance_after,
+                    performed_by=cashier
+                )
+                
+                print(f"✅ WALLET UPDATE: Added {final_amount} {wallet_currency} to wallet (balance: {balance_after})")
+                
+            except Exception as wallet_error:
+                print(f"⚠️ WARNING: Failed to update wallet: {wallet_error}")
+                # Don't fail the sale if wallet update fails
 
             # NOTE: Drawer is now updated automatically via Django signals
             # Manual drawer updates removed to prevent double-counting
@@ -593,7 +697,7 @@ class SaleListView(APIView):
                     cost_price=item_data['product'].cost_price
                 )
 
-            print(f"✅ SALE COMPLETE: Sale #{sale.id} processed successfully with drawer update")
+            print(f"✅ SALE COMPLETE: Sale #{sale.id} processed successfully with wallet update")
             serializer = SaleSerializer(sale)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -1005,65 +1109,269 @@ class StaffLunchListView(APIView):
     authentication_classes = []
     def get(self, request):
         shop = ShopConfiguration.objects.get()
-        lunches = StaffLunch.objects.filter(shop=shop).order_by('-created_at')
-        serializer = StaffLunchSerializer(lunches, many=True)
-        return Response(serializer.data)
-
-    def post(self, request):
-        shop = ShopConfiguration.objects.get()
-
-        # Check owner password
-        password = request.data.get('password')
-        if not password or not shop.validate_shop_owner_master_password(password):
-            return Response({"error": "Invalid owner password"}, status=status.HTTP_401_UNAUTHORIZED)
-
-        product_id = request.data.get('product_id')
-        quantity = request.data.get('quantity')
-
-        if not product_id or not quantity:
-            return Response({"error": "Product ID and quantity are required"}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            product = Product.objects.get(id=product_id, shop=shop)
-        except Product.DoesNotExist:
-            return Response({"error": "Product not found"}, status=status.HTTP_404_NOT_FOUND)
-
-        if product.price <= 0:
-            return Response({"error": f"Cannot record staff lunch for {product.name} - price is not set or zero"}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Allow negative stock - no stock validation needed for staff lunch
-        # if product.stock_quantity < int(quantity):
-        #     return Response({"error": f"Insufficient stock for {product.name}. Available: {product.stock_quantity}"}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Calculate total cost
-        total_cost = product.price * int(quantity)
-        print(f"DEBUG: Staff lunch calculation - Product: {product.name}, Price: ${product.price}, Quantity: {quantity}, Total Cost: ${total_cost}")
-
-        # Create staff lunch record
-        staff_lunch = StaffLunch.objects.create(
-            shop=shop,
-            product=product,
-            quantity=int(quantity),
-            total_cost=total_cost,
-            notes=request.data.get('notes', '')
-        )
-    
-        # Reduce product stock
-        product.stock_quantity -= int(quantity)
-        product.save()
-
-        # Set recorded_by if cashier_id provided
-        cashier_id = request.data.get('cashier_id')
+        lunches = StaffLunch.objects.filter(shop=shop).select_related('product', 'recorded_by').order_by('-created_at')
+        
+        # Add filtering capabilities
+        staff_name = request.query_params.get('staff_name', '').strip()
+        date_from = request.query_params.get('date_from', '').strip()
+        date_to = request.query_params.get('date_to', '').strip()
+        cashier_id = request.query_params.get('cashier_id', '').strip()
+        search = request.query_params.get('search', '').strip()
+        
+        # Filter by staff name (from notes field)
+        if staff_name:
+            lunches = lunches.filter(notes__icontains=staff_name)
+        
+        # Filter by date range
+        if date_from:
+            try:
+                from datetime import datetime
+                from_date = datetime.strptime(date_from, '%Y-%m-%d').date()
+                lunches = lunches.filter(created_at__date__gte=from_date)
+            except ValueError:
+                pass  # Invalid date format, ignore filter
+        
+        if date_to:
+            try:
+                from datetime import datetime
+                to_date = datetime.strptime(date_to, '%Y-%m-%d').date()
+                lunches = lunches.filter(created_at__date__lte=to_date)
+            except ValueError:
+                pass  # Invalid date format, ignore filter
+        
+        # Filter by cashier who recorded it
         if cashier_id:
             try:
-                cashier = Cashier.objects.get(id=cashier_id, shop=shop)
-                staff_lunch.recorded_by = cashier
-                staff_lunch.save()
-            except Cashier.DoesNotExist:
+                cashier_id_int = int(cashier_id)
+                lunches = lunches.filter(recorded_by_id=cashier_id_int)
+            except ValueError:
+                pass  # Invalid cashier ID, ignore filter
+        
+        # Search in product names and notes
+        if search:
+            lunches = lunches.filter(
+                models.Q(notes__icontains=search) |
+                models.Q(product__name__icontains=search)
+            )
+        
+        # Limit results if needed
+        limit = request.query_params.get('limit', '')
+        if limit:
+            try:
+                limit_int = int(limit)
+                lunches = lunches[:limit_int]
+            except ValueError:
                 pass
+        
+        serializer = StaffLunchSerializer(lunches, many=True)
+        
+        # Return enhanced response with metadata
+        response_data = {
+            'success': True,
+            'data': serializer.data,
+            'meta': {
+                'total_count': StaffLunch.objects.filter(shop=shop).count(),
+                'filtered_count': lunches.count(),
+                'filters_applied': {
+                    'staff_name': staff_name,
+                    'date_from': date_from,
+                    'date_to': date_to,
+                    'cashier_id': cashier_id,
+                    'search': search
+                }
+            }
+        }
+        
+        return Response(response_data)
 
-        serializer = StaffLunchSerializer(staff_lunch)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    def post(self, request):
+        print(f"DEBUG: Staff lunch request data: {request.data}")
+        shop = ShopConfiguration.objects.get()
+
+        # Extract fields from the frontend data structure
+        staff_name = request.data.get('staff_name')
+        lunch_type = request.data.get('lunch_type', 'stock')  # 'stock' or 'cash'
+        reason = request.data.get('reason', '')
+        cashier_name = request.data.get('cashier_name', '')
+        timestamp = request.data.get('timestamp')
+        
+        # Validate required fields
+        if not staff_name:
+            return Response({"error": "Staff name is required"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        if not lunch_type:
+            return Response({"error": "Lunch type is required"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        # Handle different lunch types
+        if lunch_type == 'stock':
+            # Handle stock-based lunch (deduct products from inventory)
+            products = request.data.get('products', [])
+            if not products:
+                return Response({"error": "Products are required for stock lunch"}, status=status.HTTP_400_BAD_REQUEST)
+                
+            total_value = float(request.data.get('total_value', 0))
+            created_lunches = []
+            
+            # Process each product
+            for product_data in products:
+                product_id = product_data.get('product_id')
+                product_name = product_data.get('product_name')
+                quantity_str = product_data.get('quantity', '0')
+                unit_price_str = product_data.get('unit_price', '0')
+                
+                if not product_id or not quantity_str:
+                    continue
+                    
+                try:
+                    quantity = float(quantity_str)
+                    unit_price = float(unit_price_str)
+                except (ValueError, TypeError):
+                    print(f"DEBUG: Invalid quantity or price for product {product_id}")
+                    continue
+                    
+                if quantity <= 0:
+                    continue
+                    
+                try:
+                    product = Product.objects.get(id=product_id, shop=shop)
+                except Product.DoesNotExist:
+                    print(f"DEBUG: Product {product_id} not found, skipping")
+                    continue
+                
+                # Get the timestamp from frontend, or use current time
+                try:
+                    recorded_time = timezone.now()
+                    if timestamp:
+                        recorded_time = timezone.make_aware(timezone.datetime.fromisoformat(timestamp.replace('Z', '+00:00')))
+                except (ValueError, TypeError):
+                    recorded_time = timezone.now()
+                    
+                # Create staff lunch record for this product with exact timestamp
+                staff_lunch = StaffLunch.objects.create(
+                    shop=shop,
+                    product=product,
+                    quantity=int(quantity),
+                    total_cost=Decimal(str(unit_price * quantity)),
+                    notes=f"Staff: {staff_name}, Reason: {reason}, Time: {recorded_time.strftime('%Y-%m-%d %H:%M:%S')}",
+                    created_at=recorded_time  # Set the exact timestamp
+                )
+                
+                # Reduce product stock (convert float to Decimal)
+                product.stock_quantity = product.stock_quantity - Decimal(str(quantity))
+                product.save()
+                
+                created_lunches.append({
+                    'product_id': product.id,
+                    'product_name': product.name,
+                    'quantity': quantity,
+                    'total_cost': float(staff_lunch.total_cost)
+                })
+                
+            # Set recorded_by if cashier can be found
+            if cashier_name:
+                try:
+                    cashier = Cashier.objects.filter(shop=shop, name__icontains=cashier_name).first()
+                    if cashier:
+                        # Update the created lunch records
+                        for lunch_data in created_lunches:
+                            # Find the actual StaffLunch record and update it
+                            try:
+                                lunch = StaffLunch.objects.get(
+                                    shop=shop, 
+                                    product_id=lunch_data['product_id'], 
+                                    created_at__gte=timezone.now() - timezone.timedelta(seconds=10)
+                                )
+                                lunch.recorded_by = cashier
+                                lunch.save()
+                            except StaffLunch.DoesNotExist:
+                                print(f"DEBUG: Could not find StaffLunch record to update")
+                except Exception as e:
+                    print(f"DEBUG: Could not find cashier {cashier_name}: {e}")
+            
+            return Response({
+                "success": True,
+                "message": f"Stock lunch recorded for {staff_name}",
+                "staff_name": staff_name,
+                "lunch_type": lunch_type,
+                "total_value": total_value,
+                "products": created_lunches,
+                "reason": reason
+            }, status=status.HTTP_201_CREATED)
+            
+        elif lunch_type == 'cash':
+            # Handle cash-based lunch (just record the expense)
+            cash_amount_str = request.data.get('cash_amount', '0')
+            
+            # Properly convert string to float
+            try:
+                cash_amount = float(cash_amount_str)
+            except (ValueError, TypeError):
+                return Response({"error": "Invalid cash amount format. Please enter a valid number."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            if cash_amount <= 0:
+                return Response({"error": "Valid cash amount is required for cash lunch"}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Get the timestamp from frontend, or use current time
+            try:
+                recorded_time = timezone.now()
+                if timestamp:
+                    recorded_time = timezone.make_aware(timezone.datetime.fromisoformat(timestamp.replace('Z', '+00:00')))
+            except (ValueError, TypeError):
+                recorded_time = timezone.now()
+            
+            # For cash lunches, we'll create a special note in the database
+            # Since StaffLunch model is designed for products, we'll store this as a special case
+            notes = f"CASH LUNCH - Staff: {staff_name}, Amount: ${cash_amount:.2f}, Reason: {reason}, Time: {recorded_time.strftime('%Y-%m-%d %H:%M:%S')}"
+            
+            # Create a dummy staff lunch record to track cash expenses
+            # Use the first available product as a placeholder, or create a special "Cash Lunch" entry
+            try:
+                # Try to find or create a "Cash Lunch" tracking product
+                cash_product, created = Product.objects.get_or_create(
+                    shop=shop,
+                    name="Staff Cash Lunch",
+                    defaults={
+                        'price': cash_amount,
+                        'cost_price': cash_amount,
+                        'category': 'Staff Expenses',
+                        'stock_quantity': 999999  # Large number to avoid depletion
+                    }
+                )
+                
+                staff_lunch = StaffLunch.objects.create(
+                    shop=shop,
+                    product=cash_product,
+                    quantity=1,
+                    total_cost=Decimal(str(cash_amount)),
+                    notes=notes,
+                    created_at=recorded_time  # Set the exact timestamp
+                )
+                
+                # Set recorded_by if cashier can be found
+                if cashier_name:
+                    try:
+                        cashier = Cashier.objects.filter(shop=shop, name__icontains=cashier_name).first()
+                        if cashier:
+                            staff_lunch.recorded_by = cashier
+                            staff_lunch.save()
+                            print(f"DEBUG: Set recorded_by to {cashier.name} for cash lunch")
+                    except Exception as e:
+                        print(f"DEBUG: Could not find cashier {cashier_name}: {e}")
+                
+                return Response({
+                    "success": True,
+                    "message": f"Cash lunch recorded for {staff_name}",
+                    "staff_name": staff_name,
+                    "lunch_type": lunch_type,
+                    "cash_amount": cash_amount,
+                    "reason": reason
+                }, status=status.HTTP_201_CREATED)
+                
+            except Exception as e:
+                return Response({"error": f"Failed to record cash lunch: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        else:
+            return Response({"error": f"Invalid lunch type: {lunch_type}. Must be 'stock' or 'cash'"}, status=status.HTTP_400_BAD_REQUEST)
 
 @method_decorator(csrf_exempt, name='dispatch')
 class StockTakeListView(APIView):
@@ -2507,3 +2815,174 @@ class ProductSplittingViewSet(viewsets.ViewSet):
             'errors': errors,
             'warnings': warnings
         }
+
+
+# ============================================================================
+# CURRENCY WALLET API VIEWS
+# ============================================================================
+
+@method_decorator(csrf_exempt, name='dispatch')
+class WalletSummaryView(APIView):
+    """Get wallet summary with all currency balances"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    
+    def get(self, request):
+        try:
+            shop = ShopConfiguration.objects.get()
+            wallet, created = CurrencyWallet.objects.get_or_create(shop=shop)
+            
+            return Response({
+                'success': True,
+                'wallet': wallet.get_wallet_summary()
+            })
+        except Exception as e:
+            return Response({
+                'error': f'Server error: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class WalletTransactionsView(APIView):
+    """Get wallet transaction history"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    
+    def get(self, request):
+        try:
+            shop = ShopConfiguration.objects.get()
+            
+            # Optional filters
+            currency = request.query_params.get('currency')
+            transaction_type = request.query_params.get('type')
+            limit = request.query_params.get('limit', '50')
+            
+            transactions = CurrencyTransaction.objects.filter(shop=shop).order_by('-created_at')
+            
+            if currency:
+                transactions = transactions.filter(currency=currency.upper())
+            
+            if transaction_type:
+                transactions = transactions.filter(transaction_type=transaction_type.upper())
+            
+            try:
+                limit_int = int(limit)
+                transactions = transactions[:limit_int]
+            except ValueError:
+                pass
+            
+            transaction_data = []
+            for tx in transactions:
+                transaction_data.append({
+                    'id': tx.id,
+                    'type': tx.transaction_type,
+                    'currency': tx.currency,
+                    'amount': float(tx.amount),
+                    'description': tx.description,
+                    'balance_after': float(tx.balance_after),
+                    'performed_by': tx.performed_by.name if tx.performed_by else None,
+                    'created_at': tx.created_at.isoformat()
+                })
+            
+            return Response({
+                'success': True,
+                'transactions': transaction_data,
+                'total_count': CurrencyTransaction.objects.filter(shop=shop).count()
+            })
+        except Exception as e:
+            return Response({
+                'error': f'Server error: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class WalletAdjustmentView(APIView):
+    """Make manual adjustments to wallet balance (owner only)"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    
+    def post(self, request):
+        try:
+            shop = ShopConfiguration.objects.get()
+            
+            # Verify owner credentials
+            email = request.data.get('email')
+            password = request.data.get('password')
+            
+            if not email or not password:
+                return Response({"error": "Owner authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+            
+            if shop.email != email or not shop.validate_shop_owner_master_password(password):
+                return Response({"error": "Invalid owner credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+            
+            # Get adjustment details
+            currency = request.data.get('currency', 'USD').upper()
+            amount = request.data.get('amount')
+            adjustment_type = request.data.get('type', 'ADJUSTMENT')  # ADJUSTMENT, DEPOSIT, WITHDRAWAL
+            description = request.data.get('description', '')
+            cashier_id = request.data.get('cashier_id')
+            
+            if not amount:
+                return Response({"error": "Amount is required"}, status=status.HTTP_400_BAD_REQUEST)
+            
+            try:
+                amount = Decimal(str(amount))
+            except (ValueError, TypeError):
+                return Response({"error": "Invalid amount format"}, status=status.HTTP_400_BAD_REQUEST)
+            
+            if amount <= 0:
+                return Response({"error": "Amount must be positive"}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Get or create wallet
+            wallet, created = CurrencyWallet.objects.get_or_create(shop=shop)
+            
+            # Get performed by
+            performed_by = None
+            if cashier_id:
+                try:
+                    performed_by = Cashier.objects.get(id=cashier_id, shop=shop)
+                except Cashier.DoesNotExist:
+                    pass
+            
+            # Get balance before
+            balance_before = wallet.get_balance(currency)
+            
+            # Apply adjustment based on type
+            if adjustment_type in ['DEPOSIT', 'ADJUSTMENT']:
+                balance_after = wallet.add_amount(amount, currency)
+                tx_type = 'DEPOSIT' if adjustment_type == 'DEPOSIT' else 'ADJUSTMENT'
+            else:  # WITHDRAWAL
+                # Subtract from wallet
+                if currency == 'USD':
+                    wallet.balance_usd -= amount
+                elif currency == 'ZIG':
+                    wallet.balance_zig -= amount
+                elif currency == 'RAND':
+                    wallet.balance_rand -= amount
+                wallet.total_transactions += 1
+                wallet.save()
+                balance_after = wallet.get_balance(currency)
+                tx_type = 'WITHDRAWAL'
+            
+            # Create transaction record
+            CurrencyTransaction.objects.create(
+                shop=shop,
+                wallet=wallet,
+                transaction_type=tx_type,
+                currency=currency,
+                amount=amount if tx_type in ['DEPOSIT', 'ADJUSTMENT'] else -amount,
+                reference_type='ManualAdjustment',
+                description=description or f'{tx_type} by shop owner',
+                balance_after=balance_after,
+                performed_by=performed_by
+            )
+            
+            return Response({
+                'success': True,
+                'message': f'{tx_type} of {amount} {currency} processed successfully',
+                'wallet': wallet.get_wallet_summary()
+            })
+        except Exception as e:
+            return Response({
+                'error': f'Server error: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

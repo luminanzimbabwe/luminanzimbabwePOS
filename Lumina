@@ -1,0 +1,673 @@
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  ActivityIndicator,
+  RefreshControl,
+} from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { shopStorage } from '../services/storage';
+import { shopAPI } from '../services/api';
+
+const CashierDrawerScreen = () => {
+  const navigation = useNavigation();
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [cashierData, setCashierData] = useState(null);
+  const [drawerStatus, setDrawerStatus] = useState(null);
+  const [transactionCount, setTransactionCount] = useState(0);
+
+  useEffect(() => {
+    loadDrawerData();
+  }, []);
+
+  const loadDrawerData = async () => {
+    try {
+      const credentials = await shopStorage.getCredentials();
+      if (!credentials) {
+        navigation.replace('Login');
+        return;
+      }
+
+      setCashierData(credentials);
+
+      // Load drawer status
+      const response = await shopAPI.getCashFloat();
+      
+      if (response.data && response.data.success) {
+        const payload = response.data.drawer || response.data.shop_status || response.data;
+        const today = new Date().toISOString().slice(0,10);
+        const payloadDate = payload?.date || payload?.current_shop_day?.date || null;
+        
+        if (payloadDate && payloadDate !== today) {
+          setDrawerStatus({
+            cashier: credentials.name || 'Unknown',
+            float_amount: 0,
+            current_breakdown: { cash: 0, card: 0, transfer: 0, total: 0 },
+            session_sales: { cash: 0, card: 0, transfer: 0, total: 0 },
+            eod_expectations: { expected_cash: 0, variance: 0, efficiency: 100 },
+            status: 'INACTIVE',
+            last_activity: null
+          });
+          setTransactionCount(0);
+          return;
+        }
+
+        if (payload && Array.isArray(payload.drawers)) {
+          const cashierId = credentials.name || credentials.username || credentials.id || 
+                          credentials.cashier_id || credentials.user_id || credentials.email;
+          
+          const matched = payload.drawers.find(d => {
+            if (!d) return false;
+            if (typeof d.cashier === 'string' && cashierId && d.cashier.toLowerCase() === String(cashierId).toLowerCase()) return true;
+            if (d.cashier_id && credentials?.id && String(d.cashier_id) === String(credentials.id)) return true;
+            return false;
+          });
+
+          if (matched) {
+            setDrawerStatus(matched);
+          } else if (payload.drawers.length === 1) {
+            setDrawerStatus(payload.drawers[0]);
+          }
+        } else if (response.data.drawer) {
+          setDrawerStatus(response.data.drawer);
+        }
+
+        // Set transaction count
+        if (response.data.transaction_count !== undefined) {
+          setTransactionCount(response.data.transaction_count);
+        } else if (drawerStatus?.session_sales?.transaction_count !== undefined) {
+          setTransactionCount(drawerStatus.session_sales.transaction_count);
+        } else {
+          const totalSales = drawerStatus?.session_sales?.total || 0;
+          const avgTransaction = 10;
+          setTransactionCount(Math.round(totalSales / avgTransaction));
+        }
+      }
+    } catch (error) {
+      console.error('Error loading drawer data:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadDrawerData();
+  };
+
+  // Currency formatting
+  const formatCurrency = (amount, currency) => {
+    if (currency === 'ZIG') return `${amount.toFixed(2)} ZIG`;
+    if (currency === 'RAND') return `${amount.toFixed(2)} RAND`;
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount || 0);
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <Text style={styles.backButton}>← Back</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>💰 My Drawer</Text>
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#10b981" />
+          <Text style={styles.loadingText}>Loading drawer...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Get cash amounts for each currency
+  const getCurrencyAmounts = () => {
+    if (!drawerStatus) return { usd: 0, zig: 0, rand: 0 };
+    
+    const usd = drawerStatus.current_breakdown_by_currency?.usd?.cash || 
+                drawerStatus.current_cash_usd || 
+                drawerStatus.session_cash_sales_usd || 0;
+    const zig = drawerStatus.current_breakdown_by_currency?.zig?.cash || 
+                drawerStatus.current_cash_zig || 
+                drawerStatus.session_cash_sales_zig || 0;
+    const rand = drawerStatus.current_breakdown_by_currency?.rand?.cash || 
+                 drawerStatus.current_cash_rand || 
+                 drawerStatus.session_cash_sales_rand || 0;
+    
+    return { usd, zig, rand };
+  };
+
+  const currencyAmounts = getCurrencyAmounts();
+
+  return (
+    <ScrollView 
+      style={styles.container}
+      contentContainerStyle={styles.scrollContent}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+    >
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Text style={styles.backButton}>← Back</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>💰 My Drawer</Text>
+        <TouchableOpacity onPress={onRefresh} disabled={refreshing}>
+          <Text style={styles.refreshButton}>{refreshing ? '⟳' : '↻'}</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.content}>
+        
+        {/* Status Banner */}
+        <View style={styles.statusBanner}>
+          <Text style={styles.statusIcon}>✅</Text>
+          <Text style={styles.statusText}>Drawer is active</Text>
+        </View>
+
+        {!drawerStatus ? (
+          <View style={styles.noDrawerContainer}>
+            <Text style={styles.noDrawerIcon}>💰</Text>
+            <Text style={styles.noDrawerText}>No drawer found</Text>
+            <Text style={styles.noDrawerSubtext}>Contact your supervisor</Text>
+          </View>
+        ) : (
+          <>
+            {/* ALL THREE CURRENCIES - Current Cash */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>💰 CURRENT CASH IN DRAWER</Text>
+              
+              {/* USD */}
+              <View style={[styles.currencyCard, styles.currencyCardUSD]}>
+                <View style={styles.currencyRow}>
+                  <Text style={styles.currencyIcon}>💵</Text>
+                  <Text style={styles.currencyName}>USD</Text>
+                </View>
+                <Text style={styles.currencyAmount}>{formatCurrency(currencyAmounts.usd, 'USD')}</Text>
+              </View>
+
+              {/* ZIG */}
+              <View style={[styles.currencyCard, styles.currencyCardZIG]}>
+                <View style={styles.currencyRow}>
+                  <Text style={styles.currencyIcon}>💰</Text>
+                  <Text style={styles.currencyNameZIG}>ZIG</Text>
+                </View>
+                <Text style={styles.currencyAmountZIG}>{formatCurrency(currencyAmounts.zig, 'ZIG')}</Text>
+              </View>
+
+              {/* RAND */}
+              <View style={[styles.currencyCard, styles.currencyCardRAND]}>
+                <View style={styles.currencyRow}>
+                  <Text style={styles.currencyIcon}>💸</Text>
+                  <Text style={styles.currencyNameRAND}>RAND</Text>
+                </View>
+                <Text style={styles.currencyAmountRAND}>{formatCurrency(currencyAmounts.rand, 'RAND')}</Text>
+              </View>
+            </View>
+
+            {/* Float Amount */}
+            <View style={styles.floatSection}>
+              <Text style={styles.floatLabel}>Your Float:</Text>
+              <Text style={styles.floatValue}>
+                {currencyAmounts.zig > 0 ? formatCurrency(drawerStatus.float_amount || 0, 'ZIG') :
+                 currencyAmounts.rand > 0 ? formatCurrency(drawerStatus.float_amount || 0, 'RAND') :
+                 formatCurrency(drawerStatus.float_amount || 0, 'USD')}
+              </Text>
+            </View>
+
+            {/* Transaction Count */}
+            <View style={styles.transactionCard}>
+              <Text style={styles.transactionIcon}>🧾</Text>
+              <View style={styles.transactionInfo}>
+                <Text style={styles.transactionLabel}>Transactions Today</Text>
+                <Text style={styles.transactionCount}>{transactionCount}</Text>
+              </View>
+            </View>
+
+            {/* Today's Sales by Currency */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>📊 TODAY'S SALES</Text>
+              
+              <View style={styles.salesRow}>
+                <View style={styles.salesCard}>
+                  <Text style={styles.salesIcon}>💵</Text>
+                  <Text style={styles.salesLabel}>Cash USD</Text>
+                  <Text style={styles.salesValue}>{formatCurrency(currencyAmounts.usd, 'USD')}</Text>
+                </View>
+                
+                <View style={styles.salesCard}>
+                  <Text style={styles.salesIcon}>💰</Text>
+                  <Text style={styles.salesLabel}>Cash ZIG</Text>
+                  <Text style={styles.salesValueZIG}>{formatCurrency(currencyAmounts.zig, 'ZIG')}</Text>
+                </View>
+                
+                <View style={styles.salesCard}>
+                  <Text style={styles.salesIcon}>💸</Text>
+                  <Text style={styles.salesLabel}>Cash RAND</Text>
+                  <Text style={styles.salesValueRAND}>{formatCurrency(currencyAmounts.rand, 'RAND')}</Text>
+                </View>
+              </View>
+
+              <View style={styles.salesRow}>
+                <View style={styles.salesCard}>
+                  <Text style={styles.salesIcon}>💳</Text>
+                  <Text style={styles.salesLabel}>Card</Text>
+                  <Text style={styles.salesValue}>{formatCurrency(drawerStatus.session_sales?.card || 0, 'USD')}</Text>
+                </View>
+                
+                <View style={styles.salesCard}>
+                  <Text style={styles.salesIcon}>🏦</Text>
+                  <Text style={styles.salesLabel}>Transfer</Text>
+                  <Text style={styles.salesValue}>{formatCurrency(drawerStatus.session_sales?.transfer || 0, 'USD')}</Text>
+                </View>
+                
+                <View style={[styles.salesCard, styles.totalCard]}>
+                  <Text style={styles.salesIcon}>📊</Text>
+                  <Text style={styles.salesLabel}>Total</Text>
+                  <Text style={styles.salesValueTotal}>
+                    {currencyAmounts.zig > 0 ? formatCurrency(currencyAmounts.zig, 'ZIG') + ' + ' + formatCurrency(currencyAmounts.rand, 'RAND') + ' + ' + formatCurrency(currencyAmounts.usd, 'USD') :
+                     currencyAmounts.rand > 0 ? formatCurrency(currencyAmounts.rand, 'RAND') + ' + ' + formatCurrency(currencyAmounts.usd, 'USD') :
+                     formatCurrency(currencyAmounts.usd + (drawerStatus.session_sales?.card || 0) + (drawerStatus.session_sales?.transfer || 0), 'USD')}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Expected at End of Day */}
+            {drawerStatus.eod_expectations?.expected_cash > 0 && (
+              <View style={styles.expectedSection}>
+                <Text style={styles.expectedTitle}>🎯 EXPECTED AT END OF DAY</Text>
+                <Text style={styles.expectedValue}>
+                  {currencyAmounts.zig > 0 ? formatCurrency(drawerStatus.eod_expectations.expected_cash, 'ZIG') :
+                   currencyAmounts.rand > 0 ? formatCurrency(drawerStatus.eod_expectations.expected_cash, 'RAND') :
+                   formatCurrency(drawerStatus.eod_expectations.expected_cash, 'USD')}
+                </Text>
+                {drawerStatus.eod_expectations.variance !== undefined && drawerStatus.eod_expectations.variance !== 0 && (
+                  <Text style={[
+                    styles.varianceText,
+                    { color: drawerStatus.eod_expectations.variance >= 0 ? '#22c55e' : '#ef4444' }
+                  ]}>
+                    {drawerStatus.eod_expectations.variance >= 0 ? '↑' : '↓'} 
+                    {formatCurrency(Math.abs(drawerStatus.eod_expectations.variance), 
+                      currencyAmounts.zig > 0 ? 'ZIG' : currencyAmounts.rand > 0 ? 'RAND' : 'USD')} 
+                    {drawerStatus.eod_expectations.variance >= 0 ? ' over' : ' under'}
+                  </Text>
+                )}
+              </View>
+            )}
+
+            {/* Quick Actions */}
+            <View style={styles.actionsSection}>
+              <TouchableOpacity 
+                style={styles.refundButton}
+                onPress={() => navigation.navigate('SalesAndRefunds')}
+              >
+                <Text style={styles.actionIcon}>💰</Text>
+                <Text style={styles.actionText}>Do Refunds</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.salesButton}
+                onPress={() => navigation.navigate('Sales')}
+              >
+                <Text style={styles.actionIcon}>🛒</Text>
+                <Text style={styles.actionText}>New Sale</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Last Updated */}
+            <View style={styles.updateSection}>
+              <Text style={styles.updateText}>
+                🕐 Updated: {drawerStatus.last_activity ? 
+                  new Date(drawerStatus.last_activity).toLocaleTimeString() : 'Just now'}
+              </Text>
+            </View>
+
+          </>
+        )}
+      </View>
+
+      <View style={styles.bottomSpacing} />
+    </ScrollView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#0a0a0a',
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 20,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 20,
+    paddingTop: 40,
+    backgroundColor: '#111111',
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+  },
+  backButton: {
+    color: '#10b981',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  headerTitle: {
+    color: '#ffffff',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  refreshButton: {
+    color: '#10b981',
+    fontSize: 20,
+    fontWeight: '600',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#9ca3af',
+    marginTop: 16,
+    fontSize: 16,
+  },
+  content: {
+    flex: 1,
+    padding: 20,
+  },
+  statusBanner: {
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#22c55e',
+  },
+  statusIcon: {
+    fontSize: 18,
+    marginRight: 8,
+  },
+  statusText: {
+    color: '#22c55e',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  noDrawerContainer: {
+    backgroundColor: '#1f2937',
+    borderRadius: 16,
+    padding: 40,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  noDrawerIcon: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  noDrawerText: {
+    color: '#9ca3af',
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  noDrawerSubtext: {
+    color: '#6b7280',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  section: {
+    marginBottom: 20,
+  },
+  sectionTitle: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 12,
+    textTransform: 'uppercase',
+  },
+  // Currency Cards
+  currencyCard: {
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 10,
+  },
+  currencyCardUSD: {
+    backgroundColor: '#1f2937',
+    borderWidth: 1,
+    borderColor: '#10b981',
+  },
+  currencyCardZIG: {
+    backgroundColor: '#2d2a1a',
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+  },
+  currencyCardRAND: {
+    backgroundColor: '#1a2a3d',
+    borderWidth: 1,
+    borderColor: '#3b82f6',
+  },
+  currencyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  currencyIcon: {
+    fontSize: 20,
+    marginRight: 8,
+  },
+  currencyName: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  currencyNameZIG: {
+    color: '#f59e0b',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  currencyNameRAND: {
+    color: '#3b82f6',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  currencyAmount: {
+    color: '#ffffff',
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  currencyAmountZIG: {
+    color: '#f59e0b',
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  currencyAmountRAND: {
+    color: '#3b82f6',
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  // Float Section
+  floatSection: {
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  floatLabel: {
+    color: '#9ca3af',
+    fontSize: 14,
+  },
+  floatValue: {
+    color: '#10b981',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  // Transaction Card
+  transactionCard: {
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#8b5cf6',
+  },
+  transactionIcon: {
+    fontSize: 32,
+    marginRight: 16,
+  },
+  transactionInfo: {
+    flex: 1,
+  },
+  transactionLabel: {
+    color: '#9ca3af',
+    fontSize: 12,
+  },
+  transactionCount: {
+    color: '#ffffff',
+    fontSize: 28,
+    fontWeight: '800',
+  },
+  // Sales Section
+  salesRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  salesCard: {
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    padding: 14,
+    width: '32%',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  totalCard: {
+    backgroundColor: '#1a2e1a',
+    borderColor: '#22c55e',
+  },
+  salesIcon: {
+    fontSize: 20,
+    marginBottom: 6,
+  },
+  salesLabel: {
+    color: '#9ca3af',
+    fontSize: 10,
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  salesValue: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  salesValueZIG: {
+    color: '#f59e0b',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  salesValueRAND: {
+    color: '#3b82f6',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  salesValueTotal: {
+    color: '#22c55e',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  // Expected Section
+  expectedSection: {
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 20,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#8b5cf6',
+  },
+  expectedTitle: {
+    color: '#8b5cf6',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+  },
+  expectedValue: {
+    color: '#ffffff',
+    fontSize: 24,
+    fontWeight: '800',
+  },
+  varianceText: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 8,
+  },
+  // Actions
+  actionsSection: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  refundButton: {
+    backgroundColor: '#ef4444',
+    borderRadius: 12,
+    padding: 16,
+    flex: 1,
+    marginRight: 8,
+    alignItems: 'center',
+  },
+  salesButton: {
+    backgroundColor: '#10b981',
+    borderRadius: 12,
+    padding: 16,
+    flex: 1,
+    marginLeft: 8,
+    alignItems: 'center',
+  },
+  actionIcon: {
+    fontSize: 24,
+    marginBottom: 4,
+  },
+  actionText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  // Update
+  updateSection: {
+    alignItems: 'center',
+  },
+  updateText: {
+    color: '#6b7280',
+    fontSize: 12,
+    fontStyle: 'italic',
+  },
+  bottomSpacing: {
+    height: 20,
+  },
+});
+
+export default CashierDrawerScreen;

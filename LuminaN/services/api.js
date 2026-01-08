@@ -53,6 +53,7 @@ export const shopAPI = {
   retrieveCredentials: (data) => api.post('/retrieve-credentials/', data),
   resetCashierPassword: (data) => api.post('/cashiers/reset-password/', data),
   getOwnerDashboard: () => api.get('/dashboard/'),
+  updateShop: (data) => api.patch('/update/', data),
   
   // Staff management methods - NO AUTHENTICATION REQUIRED
   registerCashier: (data) => api.post('/cashiers/', data),
@@ -197,6 +198,7 @@ export const shopAPI = {
     cashier_id: cashierId,
     actual_cash_counted: actualCashCounted
   }),
+  resetAllDrawersAtEOD: () => api.post('/cash-float/reset-all/'),
   getAllDrawersStatus: () => api.get('/cash-float/all-status/'),
 
   getSalesHistory: (config = {}) => api.get('/sales-history/', config),
@@ -223,6 +225,28 @@ export const shopAPI = {
   
   // Public product access - NO AUTHENTICATION REQUIRED  
   getPublicProducts: () => api.get('/products/'),
+  
+  // Staff Lunch methods
+  createStaffLunch: (data) => api.post('/staff-lunch/', data),
+  getStaffLunchHistory: (params = '') => {
+    const queryParams = params ? `?${params}` : '';
+    return api.get(`/staff-lunch/${queryParams}`);
+  },
+
+  // Exchange Rate Management methods
+  getExchangeRates: () => api.get('/exchange-rates/'),
+  updateExchangeRates: (data) => api.post('/exchange-rates/', data),
+  getExchangeRateHistory: () => api.get('/exchange-rates/history/'),
+  convertCurrency: (params) => api.get('/exchange-rates/convert/', { params }),
+  setCurrentRates: (data) => api.post('/exchange-rates/set-current/', data),
+
+  // Multi-Currency Wallet methods
+  getWalletSummary: () => api.get('/wallet/summary/'),
+  getWalletTransactions: (params = '') => {
+    const queryParams = params ? `?${params}` : '';
+    return api.get(`/wallet/transactions/${queryParams}`);
+  },
+  createWalletAdjustment: (data) => api.post('/wallet/adjustment/', data),
 };
 
 export default api;

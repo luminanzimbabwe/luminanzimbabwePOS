@@ -4,12 +4,21 @@ from django.contrib.auth.hashers import make_password, check_password
 from django.utils import timezone
 from decimal import Decimal
 
+# Import exchange rate models
+from .models_exchange_rates import ExchangeRate, ExchangeRateHistory
+
 # Forward declaration to avoid circular import
 from django.apps import apps
 def get_stock_movement_model():
     return apps.get_model('core', 'StockMovement')
 
 class ShopConfiguration(models.Model):
+    BASE_CURRENCY_CHOICES = [
+        ('USD', 'US Dollar'),
+        ('ZIG', 'Zimbabwe Gold'),
+        ('RAND', 'South African Rand'),
+    ]
+
     shop_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     register_id = models.CharField(max_length=5, unique=True)
     name = models.CharField(max_length=255)
@@ -19,6 +28,7 @@ class ShopConfiguration(models.Model):
     description = models.TextField(blank=True, help_text="Optional business description")
     email = models.EmailField(unique=True)
     phone = models.CharField(max_length=20)
+    base_currency = models.CharField(max_length=4, choices=BASE_CURRENCY_CHOICES, default='USD', help_text="Primary currency for the shop")
     password = models.CharField(max_length=255)  # hashed
     registered_at = models.DateTimeField(auto_now_add=True)
     
@@ -85,6 +95,7 @@ class Product(models.Model):
     CURRENCY_CHOICES = [
         ('USD', 'US Dollar'),
         ('ZIG', 'Zimbabwe Gold'),
+        ('RAND', 'South African Rand'),
     ]
 
     PRICE_TYPE_CHOICES = [
@@ -100,7 +111,7 @@ class Product(models.Model):
     description = models.TextField(blank=True)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     cost_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='USD')
+    currency = models.CharField(max_length=4, choices=CURRENCY_CHOICES, default='USD')
     price_type = models.CharField(max_length=10, choices=PRICE_TYPE_CHOICES, default='unit')
     category = models.CharField(max_length=100, blank=True)
     barcode = models.CharField(max_length=100, blank=True, help_text="Primary barcode for scanning during sales")
@@ -429,24 +440,65 @@ class ShopDay(models.Model):
             active_cashiers = Cashier.objects.filter(shop=self.shop, status='active')
             for cashier in active_cashiers:
                 try:
-                    CashFloat.objects.get_or_create(
+                    # Use get_or_create with comprehensive defaults to ensure all fields are zeroed
+                    CashFloat.objects.update_or_create(
                         shop=self.shop,
                         cashier=cashier,
                         date=today,
                         defaults={
+                            'status': 'INACTIVE',
                             'float_amount': Decimal('0.00'),
+                            
+                            # Legacy USD fields
                             'current_cash': Decimal('0.00'),
                             'current_card': Decimal('0.00'),
                             'current_ecocash': Decimal('0.00'),
                             'current_transfer': Decimal('0.00'),
                             'current_total': Decimal('0.00'),
+                            
+                            # Currency-specific current amounts
+                            'current_cash_usd': Decimal('0.00'),
+                            'current_cash_zig': Decimal('0.00'),
+                            'current_cash_rand': Decimal('0.00'),
+                            'current_card_usd': Decimal('0.00'),
+                            'current_card_zig': Decimal('0.00'),
+                            'current_card_rand': Decimal('0.00'),
+                            'current_ecocash_usd': Decimal('0.00'),
+                            'current_ecocash_zig': Decimal('0.00'),
+                            'current_ecocash_rand': Decimal('0.00'),
+                            'current_transfer_usd': Decimal('0.00'),
+                            'current_transfer_zig': Decimal('0.00'),
+                            'current_transfer_rand': Decimal('0.00'),
+                            'current_total_usd': Decimal('0.00'),
+                            'current_total_zig': Decimal('0.00'),
+                            'current_total_rand': Decimal('0.00'),
+                            
+                            # Session sales (clear for new day)
                             'session_cash_sales': Decimal('0.00'),
                             'session_card_sales': Decimal('0.00'),
                             'session_ecocash_sales': Decimal('0.00'),
                             'session_transfer_sales': Decimal('0.00'),
                             'session_total_sales': Decimal('0.00'),
+                            
+                            # Currency-specific session sales
+                            'session_cash_sales_usd': Decimal('0.00'),
+                            'session_cash_sales_zig': Decimal('0.00'),
+                            'session_cash_sales_rand': Decimal('0.00'),
+                            'session_card_sales_usd': Decimal('0.00'),
+                            'session_card_sales_zig': Decimal('0.00'),
+                            'session_card_sales_rand': Decimal('0.00'),
+                            'session_ecocash_sales_usd': Decimal('0.00'),
+                            'session_ecocash_sales_zig': Decimal('0.00'),
+                            'session_ecocash_sales_rand': Decimal('0.00'),
+                            'session_transfer_sales_usd': Decimal('0.00'),
+                            'session_transfer_sales_zig': Decimal('0.00'),
+                            'session_transfer_sales_rand': Decimal('0.00'),
+                            'session_total_sales_usd': Decimal('0.00'),
+                            'session_total_sales_zig': Decimal('0.00'),
+                            'session_total_sales_rand': Decimal('0.00'),
+                            
+                            # EOD expectations
                             'expected_cash_at_eod': Decimal('0.00'),
-                            'status': 'INACTIVE'
                         }
                     )
                 except Exception:
@@ -473,19 +525,60 @@ class ShopDay(models.Model):
             drawers = CashFloat.objects.filter(shop=self.shop, date=today)
             for d in drawers:
                 try:
-                    # Mark as settled and clear running totals to avoid showing previous day data
+                    # Mark as settled and clear ALL running totals to avoid showing previous day data
                     d.status = 'SETTLED'
+                    
+                    # Legacy USD fields
                     d.current_cash = Decimal('0.00')
                     d.current_card = Decimal('0.00')
                     d.current_ecocash = Decimal('0.00')
                     d.current_transfer = Decimal('0.00')
                     d.current_total = Decimal('0.00')
+                    
+                    # Currency-specific current amounts
+                    d.current_cash_usd = Decimal('0.00')
+                    d.current_cash_zig = Decimal('0.00')
+                    d.current_cash_rand = Decimal('0.00')
+                    d.current_card_usd = Decimal('0.00')
+                    d.current_card_zig = Decimal('0.00')
+                    d.current_card_rand = Decimal('0.00')
+                    d.current_ecocash_usd = Decimal('0.00')
+                    d.current_ecocash_zig = Decimal('0.00')
+                    d.current_ecocash_rand = Decimal('0.00')
+                    d.current_transfer_usd = Decimal('0.00')
+                    d.current_transfer_zig = Decimal('0.00')
+                    d.current_transfer_rand = Decimal('0.00')
+                    d.current_total_usd = Decimal('0.00')
+                    d.current_total_zig = Decimal('0.00')
+                    d.current_total_rand = Decimal('0.00')
+                    
+                    # Session sales (clear for next day)
                     d.session_cash_sales = Decimal('0.00')
                     d.session_card_sales = Decimal('0.00')
                     d.session_ecocash_sales = Decimal('0.00')
                     d.session_transfer_sales = Decimal('0.00')
                     d.session_total_sales = Decimal('0.00')
+                    
+                    # Currency-specific session sales
+                    d.session_cash_sales_usd = Decimal('0.00')
+                    d.session_cash_sales_zig = Decimal('0.00')
+                    d.session_cash_sales_rand = Decimal('0.00')
+                    d.session_card_sales_usd = Decimal('0.00')
+                    d.session_card_sales_zig = Decimal('0.00')
+                    d.session_card_sales_rand = Decimal('0.00')
+                    d.session_ecocash_sales_usd = Decimal('0.00')
+                    d.session_ecocash_sales_zig = Decimal('0.00')
+                    d.session_ecocash_sales_rand = Decimal('0.00')
+                    d.session_transfer_sales_usd = Decimal('0.00')
+                    d.session_transfer_sales_zig = Decimal('0.00')
+                    d.session_transfer_sales_rand = Decimal('0.00')
+                    d.session_total_sales_usd = Decimal('0.00')
+                    d.session_total_sales_zig = Decimal('0.00')
+                    d.session_total_sales_rand = Decimal('0.00')
+                    
+                    # EOD expectations
                     d.expected_cash_at_eod = Decimal('0.00')
+                    
                     d.save()
                 except Exception:
                     continue
@@ -578,8 +671,18 @@ class Sale(models.Model):
     shop = models.ForeignKey(ShopConfiguration, on_delete=models.CASCADE)
     cashier = models.ForeignKey('Cashier', on_delete=models.CASCADE)
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
-    currency = models.CharField(max_length=3, choices=Product.CURRENCY_CHOICES, default='USD')
+    currency = models.CharField(max_length=4, choices=Product.CURRENCY_CHOICES, default='USD', help_text="Currency of the product prices")
+    payment_currency = models.CharField(max_length=4, choices=Product.CURRENCY_CHOICES, default='USD', help_text="Currency actually received for payment")
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES)
+    
+    # Wallet tracking - which currency wallet this sale went to
+    wallet_account = models.CharField(max_length=4, choices=Product.CURRENCY_CHOICES, default='USD', 
+                                       help_text="Which currency wallet received this sale (ZIG, USD, or RAND)")
+    
+    # Exchange rate info for the day of sale
+    exchange_rate_used = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True,
+                                              help_text="Exchange rate used if payment currency differs from wallet currency")
+    
     customer_name = models.CharField(max_length=255, blank=True)
     customer_phone = models.CharField(max_length=20, blank=True)
     status = models.CharField(max_length=20, default='completed', choices=[
@@ -600,6 +703,12 @@ class Sale(models.Model):
 
     def __str__(self):
         return f"Sale #{self.id}"
+
+    def save(self, *args, **kwargs):
+        # Auto-set wallet_account to match payment_currency if not set
+        if not self.wallet_account:
+            self.wallet_account = self.payment_currency or self.currency or 'USD'
+        super().save(*args, **kwargs)
 
 class SaleItem(models.Model):
     REFUND_TYPE_CHOICES = [
@@ -702,9 +811,10 @@ class Cashier(models.Model):
     
     # Compensation Information
     salary_amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True, help_text="Salary amount")
-    salary_currency = models.CharField(max_length=3, choices=[
+    salary_currency = models.CharField(max_length=4, choices=[
         ('USD', 'US Dollar'),
         ('ZIG', 'Zimbabwe Gold'),
+        ('RAND', 'South African Rand'),
     ], default='USD', help_text="Currency for salary")
     payment_frequency = models.CharField(max_length=20, choices=[
         ('weekly', 'Weekly'),
@@ -771,7 +881,7 @@ class Expense(models.Model):
     expense_type = models.CharField(max_length=20, choices=EXPENSE_TYPE_CHOICES)
     description = models.TextField()
     amount = models.DecimalField(max_digits=10, decimal_places=2)
-    currency = models.CharField(max_length=3, choices=Product.CURRENCY_CHOICES, default='USD')
+    currency = models.CharField(max_length=4, choices=Product.CURRENCY_CHOICES, default='USD')
     recorded_by = models.ForeignKey(Cashier, on_delete=models.SET_NULL, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -788,7 +898,7 @@ class StaffLunch(models.Model):
     quantity = models.PositiveIntegerField()
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)  # Cost price at time of lunch
     total_cost = models.DecimalField(max_digits=10, decimal_places=2)
-    currency = models.CharField(max_length=3, choices=Product.CURRENCY_CHOICES, default='USD')
+    currency = models.CharField(max_length=4, choices=Product.CURRENCY_CHOICES, default='USD')
     recorded_by = models.ForeignKey(Cashier, on_delete=models.SET_NULL, null=True, blank=True)
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -806,12 +916,9 @@ class StaffLunch(models.Model):
         self.total_cost = self.unit_price * self.quantity
         self.currency = self.product.currency
 
-        # Reduce inventory
-        if self.product.stock_quantity >= self.quantity:
-            self.product.stock_quantity -= self.quantity
-            self.product.save()
-        else:
-            raise ValueError(f"Insufficient stock for {self.product.name}")
+        # Reduce inventory (allow negative stock for staff lunch)
+        self.product.stock_quantity -= self.quantity
+        self.product.save()
 
         super().save(*args, **kwargs)
 
@@ -1959,27 +2066,87 @@ class CashFloat(models.Model):
     cashier = models.ForeignKey('Cashier', on_delete=models.CASCADE)
     date = models.DateField(default=timezone.now)
     
-    # Float Management
-    float_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Owner-set float amount")
+    # Float Management - Multi-currency support
+    float_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Owner-set float amount (USD)")
+    float_amount_zig = models.DecimalField(max_digits=15, decimal_places=2, default=0, help_text="Owner-set float amount (ZIG)")
+    float_amount_rand = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Owner-set float amount (RAND)")
     float_set_by = models.ForeignKey('Cashier', on_delete=models.SET_NULL, null=True, blank=True, related_name='floats_set', help_text="Who set the float")
     float_set_at = models.DateTimeField(null=True, blank=True, help_text="When float was last set")
     
-    # Current Drawer Contents (Real-time tracking)
-    current_cash = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current cash in drawer")
-    current_card = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current card payments in drawer")
-    current_ecocash = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current EcoCash in drawer")
-    current_transfer = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current bank transfers in drawer")
-    current_total = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Total current amount in drawer")
+    # Current Drawer Contents (Real-time tracking) - Legacy USD-only fields (keeping for backward compatibility)
+    current_cash = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current cash in drawer (USD only)")
+    current_card = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current card payments in drawer (USD only)")
+    current_ecocash = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current EcoCash in drawer (USD only)")
+    current_transfer = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current bank transfers in drawer (USD only)")
+    current_total = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Total current amount in drawer (USD only)")
     
-    # Sales Tracking (for current session)
+    # Currency-specific current drawer contents
+    # Cash by currency
+    current_cash_usd = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current USD cash in drawer")
+    current_cash_zig = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current ZIG cash in drawer")
+    current_cash_rand = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current RAND cash in drawer")
+    
+    # Card by currency
+    current_card_usd = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current USD card payments in drawer")
+    current_card_zig = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current ZIG card payments in drawer")
+    current_card_rand = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current RAND card payments in drawer")
+    
+    # EcoCash by currency
+    current_ecocash_usd = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current USD EcoCash in drawer")
+    current_ecocash_zig = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current ZIG EcoCash in drawer")
+    current_ecocash_rand = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current RAND EcoCash in drawer")
+    
+    # Transfer by currency
+    current_transfer_usd = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current USD bank transfers in drawer")
+    current_transfer_zig = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current ZIG bank transfers in drawer")
+    current_transfer_rand = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current RAND bank transfers in drawer")
+    
+    # Total by currency
+    current_total_usd = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current total USD in drawer")
+    current_total_zig = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current total ZIG in drawer")
+    current_total_rand = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Current total RAND in drawer")
+    
+    # Sales Tracking (for current session) - Legacy USD-only fields (keeping for backward compatibility)
     session_cash_sales = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     session_card_sales = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     session_ecocash_sales = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     session_transfer_sales = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     session_total_sales = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     
-    # EOD Integration
-    expected_cash_at_eod = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Expected cash at end of day (float + cash sales)")
+    # Currency-specific session sales
+    # Cash sales by currency
+    session_cash_sales_usd = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Session cash sales in USD")
+    session_cash_sales_zig = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Session cash sales in ZIG")
+    session_cash_sales_rand = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Session cash sales in RAND")
+    
+    # Card sales by currency
+    session_card_sales_usd = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Session card sales in USD")
+    session_card_sales_zig = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Session card sales in ZIG")
+    session_card_sales_rand = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Session card sales in RAND")
+    
+    # EcoCash sales by currency
+    session_ecocash_sales_usd = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Session EcoCash sales in USD")
+    session_ecocash_sales_zig = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Session EcoCash sales in ZIG")
+    session_ecocash_sales_rand = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Session EcoCash sales in RAND")
+    
+    # Transfer sales by currency
+    session_transfer_sales_usd = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Session transfer sales in USD")
+    session_transfer_sales_zig = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Session transfer sales in ZIG")
+    session_transfer_sales_rand = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Session transfer sales in RAND")
+    
+    # Total sales by currency
+    session_total_sales_usd = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Session total sales in USD")
+    session_total_sales_zig = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Session total sales in ZIG")
+    session_total_sales_rand = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Session total sales in RAND")
+    
+    # EOD Integration - Legacy USD-only field
+    expected_cash_at_eod = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Expected cash at end of day (float + cash sales) - USD only")
+    
+    # Multi-currency EOD expected cash
+    expected_cash_usd = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Expected USD cash at EOD (float + cash sales)")
+    expected_cash_zig = models.DecimalField(max_digits=15, decimal_places=2, default=0, help_text="Expected ZIG cash at EOD (float + cash sales)")
+    expected_cash_rand = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text="Expected RAND cash at EOD (float + cash sales)")
+    
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='INACTIVE')
     
     # Tracking
@@ -2012,8 +2179,21 @@ class CashFloat(models.Model):
     
     @property
     def cash_variance(self):
-        """Difference between current cash and expected cash"""
-        return self.current_cash - self.expected_drawer_total
+        """Difference between current cash and expected cash - uses primary currency"""
+        primary_currency = self._get_primary_currency()
+        
+        # Get current cash for primary currency
+        if primary_currency == 'ZIG':
+            current_cash = self.current_cash_zig
+            expected_cash = self.float_amount + self.session_cash_sales_zig
+        elif primary_currency == 'RAND':
+            current_cash = self.current_cash_rand
+            expected_cash = self.float_amount + self.session_cash_sales_rand
+        else:  # USD is default
+            current_cash = self.current_cash_usd
+            expected_cash = self.float_amount + self.session_cash_sales_usd
+        
+        return current_cash - expected_cash
     
     @property
     def drawer_efficiency(self):
@@ -2033,41 +2213,110 @@ class CashFloat(models.Model):
         self.save()
         return self
     
-    def set_float_amount(self, amount, set_by):
-        """Set or update float amount"""
-        # Ensure amount is Decimal for consistency
-        if not isinstance(amount, Decimal):
-            amount = Decimal(str(amount))
-        self.float_amount = amount
+    def set_float_amount(self, amount_usd, set_by, amount_zig=None, amount_rand=None):
+        """Set or update float amounts for all currencies"""
+        from decimal import Decimal
+        
+        # Ensure amounts are Decimal for consistency
+        if not isinstance(amount_usd, Decimal):
+            amount_usd = Decimal(str(amount_usd))
+        
+        self.float_amount = amount_usd
+        
+        # Handle multi-currency floats
+        if amount_zig is not None:
+            if not isinstance(amount_zig, Decimal):
+                amount_zig = Decimal(str(amount_zig))
+            self.float_amount_zig = amount_zig
+        
+        if amount_rand is not None:
+            if not isinstance(amount_rand, Decimal):
+                amount_rand = Decimal(str(amount_rand))
+            self.float_amount_rand = amount_rand
+        
         self.float_set_by = set_by
         self.float_set_at = timezone.now()
         self.update_expected_cash()
         self.save()
         return self
     
-    def add_sale(self, amount, payment_method):
-        """Add a sale to the drawer"""
+    def add_sale(self, amount, payment_method, currency='USD'):
+        """Add a sale to the drawer with currency tracking"""
         # Ensure amount is Decimal for consistency
         if not isinstance(amount, Decimal):
             amount = Decimal(str(amount))
         
+        # Normalize currency to uppercase
+        currency = currency.upper() if isinstance(currency, str) else 'USD'
+        
         if payment_method == 'cash':
             self.session_cash_sales += amount
             self.current_cash += amount
+            # Currency-specific tracking
+            if currency == 'USD':
+                self.session_cash_sales_usd += amount
+                self.current_cash_usd += amount
+            elif currency == 'ZIG':
+                self.session_cash_sales_zig += amount
+                self.current_cash_zig += amount
+            elif currency == 'RAND':
+                self.session_cash_sales_rand += amount
+                self.current_cash_rand += amount
         elif payment_method == 'card':
             self.session_card_sales += amount
             self.current_card += amount
+            # Currency-specific tracking
+            if currency == 'USD':
+                self.session_card_sales_usd += amount
+                self.current_card_usd += amount
+            elif currency == 'ZIG':
+                self.session_card_sales_zig += amount
+                self.current_card_zig += amount
+            elif currency == 'RAND':
+                self.session_card_sales_rand += amount
+                self.current_card_rand += amount
         elif payment_method == 'ecocash':
             self.session_ecocash_sales += amount
             self.current_ecocash += amount
+            # Currency-specific tracking
+            if currency == 'USD':
+                self.session_ecocash_sales_usd += amount
+                self.current_ecocash_usd += amount
+            elif currency == 'ZIG':
+                self.session_ecocash_sales_zig += amount
+                self.current_ecocash_zig += amount
+            elif currency == 'RAND':
+                self.session_ecocash_sales_rand += amount
+                self.current_ecocash_rand += amount
         elif payment_method == 'transfer':
             self.session_transfer_sales += amount
             self.current_transfer += amount
+            # Currency-specific tracking
+            if currency == 'USD':
+                self.session_transfer_sales_usd += amount
+                self.current_transfer_usd += amount
+            elif currency == 'ZIG':
+                self.session_transfer_sales_zig += amount
+                self.current_transfer_zig += amount
+            elif currency == 'RAND':
+                self.session_transfer_sales_rand += amount
+                self.current_transfer_rand += amount
         
         # Update totals
         self.session_total_sales += amount
         self.current_total = (self.current_cash + self.current_card + 
                              self.current_ecocash + self.current_transfer)
+        
+        # Update currency-specific totals
+        if currency == 'USD':
+            self.session_total_sales_usd += amount
+            self.current_total_usd += amount
+        elif currency == 'ZIG':
+            self.session_total_sales_zig += amount
+            self.current_total_zig += amount
+        elif currency == 'RAND':
+            self.session_total_sales_rand += amount
+            self.current_total_rand += amount
         
         self.update_expected_cash()
         self.last_activity = timezone.now()
@@ -2076,14 +2325,75 @@ class CashFloat(models.Model):
         return self
     
     def update_expected_cash(self):
-        """Update expected cash amount at EOD"""
+        """Update expected cash amount at EOD - Multi-currency support"""
+        # Legacy USD-only expected cash for backward compatibility
         self.expected_cash_at_eod = self.float_amount + self.session_cash_sales
+        # Update multi-currency expected cash fields
+        self.expected_cash_usd = self.float_amount + self.session_cash_sales_usd
+        self.expected_cash_zig = self.float_amount_zig + self.session_cash_sales_zig
+        self.expected_cash_rand = self.float_amount_rand + self.session_cash_sales_rand
+        
+    def _get_primary_currency(self):
+        """Determine the primary currency based on total sales"""
+        totals = {
+            'USD': float(self.current_total_usd),
+            'ZIG': float(self.current_total_zig),
+            'RAND': float(self.current_total_rand)
+        }
+        
+        # Return the currency with the highest total
+        return max(totals, key=totals.get) if any(totals.values()) else 'USD'
     
     def get_drawer_summary(self):
-        """Get comprehensive drawer summary"""
+        """Get comprehensive drawer summary with currency differentiation and transaction counts"""
+        from django.db.models import Count
+        from django.db.models import Q
+        
+        # Get today's date for business day
+        today = timezone.now().date()
+        
+        # Check if this drawer is for today or a previous day
+        is_today_drawer = (self.date == today)
+        
+        # Calculate transaction counts by currency from actual sales
+        # Only count sales for the CURRENT business day
+        if is_today_drawer:
+            usd_count = Sale.objects.filter(
+                shop=self.shop,
+                cashier=self.cashier,
+                created_at__date=today,
+                status='completed',
+                payment_currency='USD'
+            ).count()
+            
+            zig_count = Sale.objects.filter(
+                shop=self.shop,
+                cashier=self.cashier,
+                created_at__date=today,
+                status='completed',
+                payment_currency='ZIG'
+            ).count()
+            
+            rand_count = Sale.objects.filter(
+                shop=self.shop,
+                cashier=self.cashier,
+                created_at__date=today,
+                status='completed',
+                payment_currency='RAND'
+            ).count()
+        else:
+            # This is a drawer from a previous day - show 0 for new day
+            usd_count = 0
+            zig_count = 0
+            rand_count = 0
+        
         return {
             'cashier': self.cashier.name,
+            'cashier_id': self.cashier.id,
             'float_amount': float(self.float_amount),
+            'float_amount_zig': float(self.float_amount_zig),
+            'float_amount_rand': float(self.float_amount_rand),
+            # Legacy breakdown for backward compatibility - KEEPING USD ONLY
             'current_breakdown': {
                 'cash': float(self.current_cash),
                 'card': float(self.current_card),
@@ -2091,20 +2401,99 @@ class CashFloat(models.Model):
                 'transfer': float(self.current_transfer),
                 'total': float(self.current_total)
             },
+            # Currency-specific breakdown (NEW)
+            'current_breakdown_by_currency': {
+                'usd': {
+                    'cash': float(self.current_cash_usd),
+                    'card': float(self.current_card_usd),
+                    'ecocash': float(self.current_ecocash_usd),
+                    'transfer': float(self.current_transfer_usd),
+                    'total': float(self.current_total_usd)
+                },
+                'zig': {
+                    'cash': float(self.current_cash_zig),
+                    'card': float(self.current_card_zig),
+                    'ecocash': float(self.current_ecocash_zig),
+                    'transfer': float(self.current_transfer_zig),
+                    'total': float(self.current_total_zig)
+                },
+                'rand': {
+                    'cash': float(self.current_cash_rand),
+                    'card': float(self.current_card_rand),
+                    'ecocash': float(self.current_ecocash_rand),
+                    'transfer': float(self.current_transfer_rand),
+                    'total': float(self.current_total_rand)
+                }
+            },
+            # Legacy session sales for backward compatibility - KEEPING USD ONLY
             'session_sales': {
                 'cash': float(self.session_cash_sales),
                 'card': float(self.session_card_sales),
                 'ecocash': float(self.session_ecocash_sales),
                 'transfer': float(self.session_transfer_sales),
-                'total': float(self.session_total_sales)
+                'total': float(self.session_total_sales),
+                'usd_count': usd_count,
+                'zig_count': zig_count,
+                'rand_count': rand_count
             },
+            # Currency-specific session sales (NEW)
+            'session_sales_by_currency': {
+                'usd': {
+                    'cash': float(self.session_cash_sales_usd),
+                    'card': float(self.session_card_sales_usd),
+                    'ecocash': float(self.session_ecocash_sales_usd),
+                    'transfer': float(self.session_transfer_sales_usd),
+                    'total': float(self.session_total_sales_usd),
+                    'count': usd_count
+                },
+                'zig': {
+                    'cash': float(self.session_cash_sales_zig),
+                    'card': float(self.session_card_sales_zig),
+                    'ecocash': float(self.session_ecocash_sales_zig),
+                    'transfer': float(self.session_transfer_sales_zig),
+                    'total': float(self.session_total_sales_zig),
+                    'count': zig_count
+                },
+                'rand': {
+                    'cash': float(self.session_cash_sales_rand),
+                    'card': float(self.session_card_sales_rand),
+                    'ecocash': float(self.session_ecocash_sales_rand),
+                    'transfer': float(self.session_transfer_sales_rand),
+                    'total': float(self.session_total_sales_rand),
+                    'count': rand_count
+                }
+            },
+            # Direct transaction count fields for easy frontend access
+            'usd_transaction_count': usd_count,
+            'zig_transaction_count': zig_count,
+            'rand_transaction_count': rand_count,
+            'total_transaction_count': usd_count + zig_count + rand_count,
             'eod_expectations': {
                 'expected_cash': float(self.expected_cash_at_eod),
                 'variance': float(self.cash_variance),
                 'efficiency': float(self.drawer_efficiency)
             },
             'status': self.status,
-            'last_activity': self.last_activity.isoformat() if self.last_activity else None
+            'last_activity': self.last_activity.isoformat() if self.last_activity else None,
+            # Currency summary for quick cashier reference
+            'currency_summary': {
+                'total_usd': float(self.current_total_usd),
+                'total_zig': float(self.current_total_zig),
+                'total_rand': float(self.current_total_rand),
+                'primary_currency': self._get_primary_currency(),
+                'cash_breakdown': {
+                    'usd_cash': float(self.current_cash_usd),
+                    'zig_cash': float(self.current_cash_zig),
+                    'rand_cash': float(self.current_cash_rand)
+                }
+            },
+            # Add direct access fields for drawer status display
+            'current_cash_usd': float(self.current_cash_usd),
+            'current_cash_zig': float(self.current_cash_zig),
+            'current_cash_rand': float(self.current_cash_rand),
+            'session_cash_sales_usd': float(self.session_cash_sales_usd),
+            'session_cash_sales_zig': float(self.session_cash_sales_zig),
+            'session_cash_sales_rand': float(self.session_cash_sales_rand)
         }
     
     def settle_at_eod(self, actual_cash_counted):
@@ -2133,21 +2522,80 @@ class CashFloat(models.Model):
     @classmethod
     def get_active_drawer(cls, shop, cashier):
         """Get or create active drawer for cashier"""
+        from decimal import Decimal
         today = timezone.now().date()
-        drawer, created = cls.objects.get_or_create(
-            shop=shop,
-            cashier=cashier,
-            date=today,
-            defaults={
-                'status': 'INACTIVE',
-                'float_amount': 0
-            }
-        )
-        return drawer
+        
+        # First try to get existing drawer for today
+        try:
+            drawer = cls.objects.get(shop=shop, cashier=cashier, date=today)
+            return drawer
+        except cls.DoesNotExist:
+            # Create new drawer for today with ALL fields explicitly zeroed
+            # This ensures a fresh start for each new day
+            drawer = cls.objects.create(
+                shop=shop,
+                cashier=cashier,
+                date=today,
+                status='INACTIVE',
+                float_amount=Decimal('0.00'),
+                
+                # Legacy USD fields
+                current_cash=Decimal('0.00'),
+                current_card=Decimal('0.00'),
+                current_ecocash=Decimal('0.00'),
+                current_transfer=Decimal('0.00'),
+                current_total=Decimal('0.00'),
+                
+                # Currency-specific current amounts
+                current_cash_usd=Decimal('0.00'),
+                current_cash_zig=Decimal('0.00'),
+                current_cash_rand=Decimal('0.00'),
+                current_card_usd=Decimal('0.00'),
+                current_card_zig=Decimal('0.00'),
+                current_card_rand=Decimal('0.00'),
+                current_ecocash_usd=Decimal('0.00'),
+                current_ecocash_zig=Decimal('0.00'),
+                current_ecocash_rand=Decimal('0.00'),
+                current_transfer_usd=Decimal('0.00'),
+                current_transfer_zig=Decimal('0.00'),
+                current_transfer_rand=Decimal('0.00'),
+                current_total_usd=Decimal('0.00'),
+                current_total_zig=Decimal('0.00'),
+                current_total_rand=Decimal('0.00'),
+                
+                # Session sales (clear for new day)
+                session_cash_sales=Decimal('0.00'),
+                session_card_sales=Decimal('0.00'),
+                session_ecocash_sales=Decimal('0.00'),
+                session_transfer_sales=Decimal('0.00'),
+                session_total_sales=Decimal('0.00'),
+                
+                # Currency-specific session sales
+                session_cash_sales_usd=Decimal('0.00'),
+                session_cash_sales_zig=Decimal('0.00'),
+                session_cash_sales_rand=Decimal('0.00'),
+                session_card_sales_usd=Decimal('0.00'),
+                session_card_sales_zig=Decimal('0.00'),
+                session_card_sales_rand=Decimal('0.00'),
+                session_ecocash_sales_usd=Decimal('0.00'),
+                session_ecocash_sales_zig=Decimal('0.00'),
+                session_ecocash_sales_rand=Decimal('0.00'),
+                session_transfer_sales_usd=Decimal('0.00'),
+                session_transfer_sales_zig=Decimal('0.00'),
+                session_transfer_sales_rand=Decimal('0.00'),
+                session_total_sales_usd=Decimal('0.00'),
+                session_total_sales_zig=Decimal('0.00'),
+                session_total_sales_rand=Decimal('0.00'),
+                
+                # EOD expectations
+                expected_cash_at_eod=Decimal('0.00'),
+            )
+            return drawer
     
     @classmethod
     def get_shop_drawer_status(cls, shop):
-        """Get status of all drawers in shop"""
+        """Get status of all drawers in shop with multi-currency support"""
+        from django.db.models import Sum
         today = timezone.now().date()
         drawers = cls.objects.filter(shop=shop, date=today)
         
@@ -2155,8 +2603,64 @@ class CashFloat(models.Model):
         inactive_drawers = drawers.filter(status='INACTIVE')
         settled_drawers = drawers.filter(status='SETTLED')
         
-        total_expected_cash = sum([d.expected_cash_at_eod for d in active_drawers])
-        total_current_cash = sum([d.current_cash for d in active_drawers])
+        total_expected_cash = sum([d.expected_cash_usd for d in active_drawers])
+        total_current_cash = sum([d.current_total_usd for d in active_drawers])
+        
+        # Get exchange rates for multi-currency conversion to USD
+        try:
+            usd_to_zig = 1.0
+            usd_to_rand = 1.0
+            from .models_exchange_rates import ExchangeRate
+            rates = ExchangeRate.objects.filter(shop=shop, is_active=True).order_by('-created_at')[:5]
+            if rates:
+                for rate in rates:
+                    if rate.from_currency == 'USD' and rate.to_currency == 'ZIG':
+                        usd_to_zig = float(rate.rate)
+                    elif rate.from_currency == 'USD' and rate.to_currency == 'RAND':
+                        usd_to_rand = float(rate.rate)
+        except Exception:
+            usd_to_zig = 1.0
+            usd_to_rand = 1.0
+        
+        # Calculate multi-currency breakdowns from ALL drawers (not just active)
+        # This ensures we see all cashier data including inactive drawers
+        drawers_list = list(drawers)
+        
+        # Aggregate expected amounts by currency from model fields
+        # Use multi-currency expected cash fields
+        expected_zig = sum([float(d.float_amount_zig) + float(d.session_cash_sales_zig) for d in drawers_list])
+        expected_usd = sum([float(d.float_amount) + float(d.session_cash_sales_usd) for d in drawers_list])
+        expected_rand = sum([float(d.float_amount_rand) + float(d.session_cash_sales_rand) for d in drawers_list])
+        
+        # Aggregate current amounts by currency from model fields
+        current_zig = sum([float(d.current_total_zig) for d in drawers_list])
+        current_usd = sum([float(d.current_total_usd) for d in drawers_list])
+        current_rand = sum([float(d.current_total_rand) for d in drawers_list])
+        
+        # Calculate variances per currency
+        zig_variance = current_zig - expected_zig
+        usd_variance = current_usd - expected_usd
+        rand_variance = current_rand - expected_rand
+        
+        # Convert multi-currency totals to USD for combined display
+        # ZIG and RAND are converted to USD equivalent using exchange rates
+        total_expected_cash_multi = expected_usd + (expected_zig / usd_to_zig if usd_to_zig > 0 else 0) + (expected_rand / usd_to_rand if usd_to_rand > 0 else 0)
+        total_current_cash_multi = current_usd + (current_zig / usd_to_zig if usd_to_zig > 0 else 0) + (current_rand / usd_to_rand if usd_to_rand > 0 else 0)
+        
+        # Get drawer summaries for the response
+        drawer_summaries = [d.get_drawer_summary() for d in drawers]
+        
+        # Update eod_expectations in each drawer summary to include currency breakdown
+        for i, summary in enumerate(drawer_summaries):
+            drawer = drawers_list[i]
+            summary['eod_expectations'] = {
+                'expected_cash': float(drawer.expected_cash_at_eod),
+                'expected_zig': float(drawer.float_amount) + float(drawer.session_cash_sales_zig),
+                'expected_usd': float(drawer.float_amount) + float(drawer.session_cash_sales_usd),
+                'expected_rand': float(drawer.float_amount) + float(drawer.session_cash_sales_rand),
+                'variance': float(drawer.cash_variance),
+                'efficiency': float(drawer.drawer_efficiency)
+            }
         
         return {
             'shop': shop.name,
@@ -2166,12 +2670,177 @@ class CashFloat(models.Model):
             'inactive_drawers': inactive_drawers.count(),
             'settled_drawers': settled_drawers.count(),
             'cash_flow': {
+                # Legacy fields (USD only)
                 'total_expected_cash': float(total_expected_cash),
                 'total_current_cash': float(total_current_cash),
-                'variance': float(total_current_cash - total_expected_cash)
+                'variance': float(total_current_cash - total_expected_cash),
+                # Multi-currency breakdown
+                'expected_zig': expected_zig,
+                'expected_usd': expected_usd,
+                'expected_rand': expected_rand,
+                'current_zig': current_zig,
+                'current_usd': current_usd,
+                'current_rand': current_rand,
+                'zig_variance': zig_variance,
+                'usd_variance': usd_variance,
+                'rand_variance': rand_variance,
+                # Combined totals for display (all converted to USD equivalent)
+                'total_expected_cash_multi': total_expected_cash_multi,
+                'total_current_cash_multi': total_current_cash_multi,
+                'variance_multi': (total_current_cash_multi - total_expected_cash_multi),
             },
-            'drawers': [d.get_drawer_summary() for d in drawers]
+            'drawers': drawer_summaries
         }
+
+
+# ============================================================================
+# CURRENCY WALLET MODELS - Multi-currency wallet system for ZIG, USD, RAND
+# ============================================================================
+
+class CurrencyWallet(models.Model):
+    """
+    Currency Wallet - Stores balance for each currency type (ZIG, USD, RAND)
+    Each shop has one wallet with separate balances for each currency
+    """
+    CURRENCY_CHOICES = [
+        ('USD', 'US Dollar'),
+        ('ZIG', 'Zimbabwe Gold'),
+        ('RAND', 'South African Rand'),
+    ]
+    
+    shop = models.OneToOneField(ShopConfiguration, on_delete=models.CASCADE, related_name='wallet')
+    
+    # Balance fields for each currency
+    balance_usd = models.DecimalField(max_digits=15, decimal_places=2, default=0, help_text="USD balance")
+    balance_zig = models.DecimalField(max_digits=15, decimal_places=2, default=0, help_text="ZIG balance")
+    balance_rand = models.DecimalField(max_digits=15, decimal_places=2, default=0, help_text="RAND balance")
+    
+    # Transaction counters for tracking
+    total_transactions = models.PositiveIntegerField(default=0)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Currency Wallet"
+        verbose_name_plural = "Currency Wallets"
+    
+    def __str__(self):
+        return f"Wallet - {self.shop.name}"
+    
+    def get_balance(self, currency):
+        """Get balance for a specific currency"""
+        if currency == 'USD':
+            return self.balance_usd
+        elif currency == 'ZIG':
+            return self.balance_zig
+        elif currency == 'RAND':
+            return self.balance_rand
+        return 0
+    
+    def add_amount(self, amount, currency):
+        """Add amount to wallet for a specific currency"""
+        if currency == 'USD':
+            self.balance_usd += amount
+        elif currency == 'ZIG':
+            self.balance_zig += amount
+        elif currency == 'RAND':
+            self.balance_rand += amount
+        self.total_transactions += 1
+        self.save()
+        return self.get_balance(currency)
+    
+    def get_wallet_summary(self):
+        """Get comprehensive wallet summary"""
+        return {
+            'shop_id': self.shop.id,
+            'shop_name': self.shop.name,
+            'balances': {
+                'USD': float(self.balance_usd),
+                'ZIG': float(self.balance_zig),
+                'RAND': float(self.balance_rand)
+            },
+            'total_transactions': self.total_transactions,
+            'last_updated': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
+class CurrencyTransaction(models.Model):
+    """
+    Currency Transaction - Records all wallet transactions
+    Tracks sales, refunds, deposits, withdrawals per currency
+    """
+    TRANSACTION_TYPE_CHOICES = [
+        ('SALE', 'Sale Revenue'),
+        ('REFUND', 'Refund'),
+        ('DEPOSIT', 'Deposit'),
+        ('WITHDRAWAL', 'Withdrawal'),
+        ('TRANSFER_IN', 'Transfer In'),
+        ('TRANSFER_OUT', 'Transfer Out'),
+        ('EXCHANGE', 'Currency Exchange'),
+        ('ADJUSTMENT', 'Manual Adjustment'),
+    ]
+    
+    shop = models.ForeignKey(ShopConfiguration, on_delete=models.CASCADE, related_name='wallet_transactions')
+    wallet = models.ForeignKey(CurrencyWallet, on_delete=models.CASCADE, related_name='transactions')
+    
+    # Transaction details
+    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPE_CHOICES)
+    currency = models.CharField(max_length=4, choices=CurrencyWallet.CURRENCY_CHOICES)
+    amount = models.DecimalField(max_digits=15, decimal_places=2)
+    
+    # Reference to source (sale, refund, etc.)
+    reference_type = models.CharField(max_length=50, blank=True, help_text="e.g., 'Sale', 'Refund'")
+    reference_id = models.PositiveIntegerField(null=True, blank=True, help_text="ID of the related record")
+    
+    # Additional details
+    description = models.TextField(blank=True)
+    exchange_rate_used = models.DecimalField(max_digits=10, decimal_places=6, null=True, blank=True)
+    
+    # Balance after transaction
+    balance_after = models.DecimalField(max_digits=15, decimal_places=2)
+    
+    # Metadata
+    performed_by = models.ForeignKey('Cashier', on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Currency Transaction"
+        verbose_name_plural = "Currency Transactions"
+        indexes = [
+            models.Index(fields=['shop', 'currency', '-created_at']),
+            models.Index(fields=['transaction_type', '-created_at']),
+            models.Index(fields=['reference_type', 'reference_id']),
+        ]
+    
+    def __str__(self):
+        return f"{self.transaction_type} - {self.amount} {self.currency} ({self.created_at.strftime('%Y-%m-%d %H:%M')})"
+    
+    @property
+    def is_credit(self):
+        """Return True if this transaction adds money to wallet"""
+        return self.transaction_type in ['SALE', 'DEPOSIT', 'TRANSFER_IN']
+    
+    @property
+    def is_debit(self):
+        """Return True if this transaction removes money from wallet"""
+        return self.transaction_type in ['REFUND', 'WITHDRAWAL', 'TRANSFER_OUT']
+
+
+def create_wallet_for_shop(sender, instance, created, **kwargs):
+    """Signal handler to create wallet when a shop is created"""
+    if created:
+        CurrencyWallet.objects.get_or_create(shop=instance)
+
+
+# Connect signals
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+@receiver(post_save, sender=ShopConfiguration)
+def shop_wallet_handler(sender, instance, created, **kwargs):
+    create_wallet_for_shop(sender, instance, created, **kwargs)
 
 
 # ============================================================================
@@ -2228,30 +2897,35 @@ def cash_float_management(request):
         elif request.method == 'POST':
             data = request.data
             target_cashier_id = data.get('cashier_id')
-            float_amount = data.get('float_amount')
+            float_amount_usd = data.get('float_amount_usd', 0)
+            float_amount_zig = data.get('float_amount_zig', 0)
+            float_amount_rand = data.get('float_amount_rand', 0)
             
-            if not target_cashier_id or float_amount is None:
+            if not target_cashier_id:
                 return Response({
-                    'error': 'cashier_id and float_amount are required'
+                    'error': 'cashier_id is required'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
             try:
                 target_cashier = Cashier.objects.get(id=target_cashier_id, shop=shop)
-                float_amount = float(float_amount)
+                float_amount_usd = float(float_amount_usd) if float_amount_usd else 0
+                float_amount_zig = float(float_amount_zig) if float_amount_zig else 0
+                float_amount_rand = float(float_amount_rand) if float_amount_rand else 0
                 
-                if float_amount < 0:
+                if float_amount_usd < 0 or float_amount_zig < 0 or float_amount_rand < 0:
                     return Response({
-                        'error': 'Float amount cannot be negative'
+                        'error': 'Float amounts cannot be negative'
                     }, status=status.HTTP_400_BAD_REQUEST)
                 
                 # Get or create drawer for target cashier
                 drawer = CashFloat.get_active_drawer(shop, target_cashier)
-                # For now, set by owner (no specific cashier)
-                drawer.set_float_amount(float_amount, None)
+                
+                # Set multi-currency float
+                drawer.set_float_amount(float_amount_usd, None, float_amount_zig, float_amount_rand)
                 
                 return Response({
                     'success': True,
-                    'message': f'Float of ${float_amount:.2f} set for {target_cashier.name}',
+                    'message': f'Float set for {target_cashier.name}: USD ${float_amount_usd:.2f}, ZIG {float_amount_zig:.2f}, RAND {float_amount_rand:.2f}',
                     'drawer': drawer.get_drawer_summary()
                 })
                 
@@ -2326,10 +3000,6 @@ def update_drawer_sale(request):
         except Cashier.DoesNotExist:
             return Response({'error': 'Cashier not found'}, status=status.HTTP_404_NOT_FOUND)
         
-        # Remove the duplicate data assignment since we already have it
-        # data = request.data  # This was moved up
-        # sale_amount = data.get('amount')  # This was moved up
-        # payment_method = data.get('payment_method')  # This was moved up
 
         
         valid_payment_methods = ['cash', 'card', 'ecocash', 'transfer']
@@ -2414,6 +3084,109 @@ def settle_drawer_at_eod(request):
                 'error': 'Invalid cash amount'
             }, status=status.HTTP_400_BAD_REQUEST)
             
+    except Exception as e:
+        return Response({
+            'error': f'Server error: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def reset_all_drawers_at_eod(request):
+    """
+    Reset/clear all drawers at End of Day
+    This wipes out all cash, card, ecocash, and transfer amounts from all drawers
+    so the next day starts fresh with zero amounts.
+    """
+    try:
+        shop = ShopConfiguration.objects.get()
+        today = timezone.now().date()
+        
+        # Get all drawers for today
+        drawers = CashFloat.objects.filter(shop=shop, date=today)
+        
+        if not drawers.exists():
+            return Response({
+                'success': True,
+                'message': 'No drawers found to reset for today',
+                'reset_count': 0
+            })
+        
+        # Reset all drawer amounts to zero
+        reset_count = 0
+        for drawer in drawers:
+            try:
+                # Mark as settled and wipe out ALL running totals
+                drawer.status = 'SETTLED'
+                
+                # Legacy USD fields
+                drawer.current_cash = Decimal('0.00')
+                drawer.current_card = Decimal('0.00')
+                drawer.current_ecocash = Decimal('0.00')
+                drawer.current_transfer = Decimal('0.00')
+                drawer.current_total = Decimal('0.00')
+                
+                # Currency-specific current amounts
+                drawer.current_cash_usd = Decimal('0.00')
+                drawer.current_cash_zig = Decimal('0.00')
+                drawer.current_cash_rand = Decimal('0.00')
+                drawer.current_card_usd = Decimal('0.00')
+                drawer.current_card_zig = Decimal('0.00')
+                drawer.current_card_rand = Decimal('0.00')
+                drawer.current_ecocash_usd = Decimal('0.00')
+                drawer.current_ecocash_zig = Decimal('0.00')
+                drawer.current_ecocash_rand = Decimal('0.00')
+                drawer.current_transfer_usd = Decimal('0.00')
+                drawer.current_transfer_zig = Decimal('0.00')
+                drawer.current_transfer_rand = Decimal('0.00')
+                drawer.current_total_usd = Decimal('0.00')
+                drawer.current_total_zig = Decimal('0.00')
+                drawer.current_total_rand = Decimal('0.00')
+                
+                # Session sales (clear for next day)
+                drawer.session_cash_sales = Decimal('0.00')
+                drawer.session_card_sales = Decimal('0.00')
+                drawer.session_ecocash_sales = Decimal('0.00')
+                drawer.session_transfer_sales = Decimal('0.00')
+                drawer.session_total_sales = Decimal('0.00')
+                
+                # Currency-specific session sales
+                drawer.session_cash_sales_usd = Decimal('0.00')
+                drawer.session_cash_sales_zig = Decimal('0.00')
+                drawer.session_cash_sales_rand = Decimal('0.00')
+                drawer.session_card_sales_usd = Decimal('0.00')
+                drawer.session_card_sales_zig = Decimal('0.00')
+                drawer.session_card_sales_rand = Decimal('0.00')
+                drawer.session_ecocash_sales_usd = Decimal('0.00')
+                drawer.session_ecocash_sales_zig = Decimal('0.00')
+                drawer.session_ecocash_sales_rand = Decimal('0.00')
+                drawer.session_transfer_sales_usd = Decimal('0.00')
+                drawer.session_transfer_sales_zig = Decimal('0.00')
+                drawer.session_transfer_sales_rand = Decimal('0.00')
+                drawer.session_total_sales_usd = Decimal('0.00')
+                drawer.session_total_sales_zig = Decimal('0.00')
+                drawer.session_total_sales_rand = Decimal('0.00')
+                
+                # EOD expectations
+                drawer.expected_cash_at_eod = Decimal('0.00')
+                
+                drawer.save()
+                reset_count += 1
+                
+            except Exception as e:
+                print(f"Warning: Could not reset drawer for cashier {drawer.cashier.name}: {e}")
+                continue
+        
+        return Response({
+            'success': True,
+            'message': f'All {reset_count} drawers have been reset for the next day',
+            'reset_count': reset_count,
+            'date': today.isoformat()
+        })
+        
+    except ShopConfiguration.DoesNotExist:
+        return Response({
+            'error': 'Shop not found'
+        }, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         return Response({
             'error': f'Server error: {str(e)}'
