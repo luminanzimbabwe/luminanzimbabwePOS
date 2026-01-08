@@ -45,6 +45,79 @@ const CashierDashboardScreen = () => {
   // Payment Details State - Multi-Currency Support
   const [cardLast4, setCardLast4] = useState('');
   const [transferReference, setTransferReference] = useState('');
+  const [transferWallet, setTransferWallet] = useState('');
+  const [showTransferWalletModal, setShowTransferWalletModal] = useState(false);
+  const [cardNetwork, setCardNetwork] = useState('');
+  
+  // Available transfer wallets - Comprehensive list for Zimbabwe and regional payments
+  const transferWallets = [
+    // ===== ZIG CURRENCY WALLETS =====
+    { id: 'ecocash', name: 'EcoCash', currency: 'ZIG', icon: '📱' },
+    { id: 'onemoney', name: 'OneMoney', currency: 'ZIG', icon: '💰' },
+    { id: 'innbucks', name: 'InnBucks', currency: 'ZIG', icon: '💳' },
+    { id: 'telecash', name: 'Telecash', currency: 'ZIG', icon: '📞' },
+    { id: 'sadzaim', name: 'Sadzaim', currency: 'ZIG', icon: '🍲' },
+    { id: 'mpesa_zig', name: 'M-Pesa ZW', currency: 'ZIG', icon: '📲' },
+    { id: 'impesa', name: 'Impesa', currency: 'ZIG', icon: '💸' },
+    { id: 'zemax', name: 'Zemax Pay', currency: 'ZIG', icon: '🔶' },
+    { id: 'pauCash', name: 'PauCash', currency: 'ZIG', icon: '💴' },
+    { id: 'cashtech', name: 'CashTech', currency: 'ZIG', icon: '💵' },
+    { id: 'hughespay', name: 'HughesPay', currency: 'ZIG', icon: '🏦' },
+    { id: 'saspay', name: 'SasPay', currency: 'ZIG', icon: '💳' },
+    { id: 'vipcash', name: 'VIP Cash', currency: 'ZIG', icon: '⭐' },
+    { id: 'freecash', name: 'FreeCash', currency: 'ZIG', icon: '🆓' },
+    { id: 'zimbocash', name: 'ZimboCash', currency: 'ZIG', icon: '💰' },
+    { id: 'pocketvending', name: 'PocketVending', currency: 'ZIG', icon: '📱' },
+    
+    // ===== USD CURRENCY WALLETS/ACCOUNTS =====
+    { id: 'ecocash_usd', name: 'EcoCash USD', currency: 'USD', icon: '📱' },
+    { id: 'onemoney_usd', name: 'OneMoney USD', currency: 'USD', icon: '💰' },
+    { id: 'visa', name: 'Visa Card', currency: 'USD', icon: '💳' },
+    { id: 'mastercard', name: 'Mastercard', currency: 'USD', icon: '💳' },
+    { id: 'amex', name: 'Amex Card', currency: 'USD', icon: '💳' },
+    { id: 'zimswitch', name: 'ZimSwitch', currency: 'USD', icon: '🔄' },
+    { id: 'visa_debit', name: 'Visa Debit', currency: 'USD', icon: '💳' },
+    { id: 'mastercard_debit', name: 'Mastercard Debit', currency: 'USD', icon: '💳' },
+    { id: 'intl_card', name: 'International Card', currency: 'USD', icon: '🌍' },
+    { id: 'paypal', name: 'PayPal', currency: 'USD', icon: '🅿️' },
+    { id: 'skrill', name: 'Skrill', currency: 'USD', icon: '💸' },
+    { id: 'neteller', name: 'Neteller', currency: 'USD', icon: '💳' },
+    { id: 'wise', name: 'Wise', currency: 'USD', icon: '🌐' },
+    { id: 'payoneer', name: 'Payoneer', currency: 'USD', icon: '💼' },
+    { id: 'stripe', name: 'Stripe', currency: 'USD', icon: '💳' },
+    { id: 'bank_transfer_usd', name: 'Bank Transfer USD', currency: 'USD', icon: '🏦' },
+    { id: 'swift_usd', name: 'SWIFT USD', currency: 'USD', icon: '🌍' },
+    { id: 'westernunion', name: 'Western Union', currency: 'USD', icon: '💸' },
+    { id: 'moneygram', name: 'MoneyGram', currency: 'USD', icon: '💰' },
+    
+    // ===== RAND CURRENCY WALLETS/ACCOUNTS =====
+    { id: 'ecocash_rand', name: 'EcoCash Rand', currency: 'RAND', icon: '📱' },
+    { id: 'onemoney_rand', name: 'OneMoney Rand', currency: 'RAND', icon: '💰' },
+    { id: 'visa_rand', name: 'Visa Card Rand', currency: 'RAND', icon: '💳' },
+    { id: 'mastercard_rand', name: 'Mastercard Rand', currency: 'RAND', icon: '💳' },
+    { id: 'snapscan', name: 'SnapScan', currency: 'RAND', icon: '📸' },
+    { id: 'zapper', name: 'Zapper', currency: 'RAND', icon: '📱' },
+    { id: 'fnb', name: 'FNB Account', currency: 'RAND', icon: '🏦' },
+    { id: 'standard_bank', name: 'Standard Bank', currency: 'RAND', icon: '🏦' },
+    { id: 'absa_rand', name: 'ABSA Rand', currency: 'RAND', icon: '🏦' },
+    { id: 'nedbank_rand', name: 'Nedbank Rand', currency: 'RAND', icon: '🏦' },
+    { id: 'capitec_rand', name: 'Capitec Rand', currency: 'RAND', icon: '🏦' },
+    { id: 'ozow', name: 'Ozow', currency: 'RAND', icon: '💳' },
+    { id: 'peachpayments', name: 'Peach Payments', currency: 'RAND', icon: '🍑' },
+    { id: 'bank_transfer_rand', name: 'Bank Transfer Rand', currency: 'RAND', icon: '🏦' },
+  ];
+  
+  const cardNetworks = [
+    { id: 'visa', name: 'Visa', icon: '💳' },
+    { id: 'mastercard', name: 'Mastercard', icon: '💳' },
+    { id: 'amex', name: 'American Express', icon: '💳' },
+    { id: 'discover', name: 'Discover', icon: '💳' },
+    { id: 'visa_debit', name: 'Visa Debit', icon: '💳' },
+    { id: 'mastercard_debit', name: 'Mastercard Debit', icon: '💳' },
+    { id: 'visa_zig', name: 'Visa (ZIG)', icon: '💳' },
+    { id: 'visa_rand', name: 'Visa (RAND)', icon: '💳' },
+    { id: 'other', name: 'Other Card', icon: '💳' },
+  ];
   
   // Handle selected products from CashierProductsScreen
   useEffect(() => {
@@ -130,7 +203,7 @@ const CashierDashboardScreen = () => {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [weightInput, setWeightInput] = useState('');
 
-  // Calculator State - Retro 1990s Style
+  // Calculator State - Ultra Advanced Calculator with Graphing
   const [calculatorDisplay, setCalculatorDisplay] = useState('0');
   const [calculatorPreviousValue, setCalculatorPreviousValue] = useState(null);
   const [calculatorOperation, setCalculatorOperation] = useState(null);
@@ -138,6 +211,25 @@ const CashierDashboardScreen = () => {
   const [showCalculator, setShowCalculator] = useState(false);
   const [calculatorMemory, setCalculatorMemory] = useState(0);
   const [quantityMultiplier, setQuantityMultiplier] = useState('1');
+  // Formula display for showing current operation
+  const [calculatorFormula, setCalculatorFormula] = useState('');
+  
+  // Ultra Advanced Calculator Modes
+  const [calculatorMode, setCalculatorMode] = useState('scientific'); // basic, scientific, stats, graph, matrix, programmer
+  const [calculatorHistory, setCalculatorHistory] = useState([]);
+  const [graphData, setGraphData] = useState({ type: 'bar', labels: [], values: [], title: '' });
+  const [listInput, setListInput] = useState('');
+  const [listResults, setListResults] = useState(null);
+  const [matrixInput, setMatrixInput] = useState({ a: '', b: '', c: '', d: '' });
+  const [matrixResult, setMatrixResult] = useState(null);
+  const [equationInput, setEquationInput] = useState('x^2');
+  const [graphRange, setGraphRange] = useState({ xMin: -10, xMax: 10, yMin: -10, yMax: 10 });
+  const [customFunctions, setCustomFunctions] = useState([]);
+  const [showGraph, setShowGraph] = useState(false);
+  const [programmerMode, setProgrammerMode] = useState('dec'); // dec, bin, hex, oct
+  
+  // Tax Settings
+  const [taxRate, setTaxRate] = useState(15); // Default 15% VAT
 
   // Exchange Rates State
   const [exchangeRates, setExchangeRates] = useState(null);
@@ -671,46 +763,52 @@ const CashierDashboardScreen = () => {
     await loadDrawerStatus();
   };
 
-  // Get payment method breakdown - Multi-Currency Support with exact same pattern as working CashierDrawerScreen
-  const getPaymentMethodBreakdown = (drawerStatus) => {
-    if (!drawerStatus) return null;
+  // Check if session was reset at EOD (all session sales are 0)
+  const checkSessionResetAtEOD = () => {
+    if (!drawerStatus) return false;
+    
+    const sessionSales = drawerStatus.session_sales || {};
+    const sessionSalesByCurrency = drawerStatus.session_sales_by_currency || {};
+    
+    // If all currency session sales are 0, session was reset
+    const usdCash = sessionSales.usd_cash || sessionSalesByCurrency.usd?.cash || 0;
+    const zigCash = sessionSales.zig_cash || sessionSalesByCurrency.zig?.cash || 0;
+    const randCash = sessionSales.rand_cash || sessionSalesByCurrency.rand?.cash || 0;
+    const cardSales = sessionSales.card || 0;
+    const transferSales = sessionSales.transfer || 0;
+    
+    return usdCash === 0 && zigCash === 0 && randCash === 0 && cardSales === 0 && transferSales === 0;
+  };
 
+  // Get transaction counts with EOD reset check
+  const getDashboardTransactionCounts = () => {
+    // If session was reset at EOD, return 0 for all counts
+    if (checkSessionResetAtEOD()) {
+      console.log('🛑 EOD RESET DETECTED - Returning 0 transaction counts');
+      return { usd: 0, zig: 0, rand: 0 };
+    }
+    
     return {
-      usd_cash: {
-        total: drawerStatus.current_breakdown_by_currency?.usd?.cash ||
-               drawerStatus.session_sales_by_currency?.usd?.cash ||
-               drawerStatus.current_cash_usd ||
-               drawerStatus.session_cash_sales_usd || 0,
-        count: drawerStatus.session_sales?.usd_count || 0
-      },
-      zig_cash: {
-        total: drawerStatus.current_breakdown_by_currency?.zig?.cash ||
-               drawerStatus.session_sales_by_currency?.zig?.cash ||
-               drawerStatus.current_cash_zig ||
-               drawerStatus.session_cash_sales_zig || 0,
-        count: drawerStatus.session_sales?.zig_count || 0
-      },
-      rand_cash: {
-        total: drawerStatus.current_breakdown_by_currency?.rand?.cash ||
-               drawerStatus.session_sales_by_currency?.rand?.cash ||
-               drawerStatus.current_cash_rand ||
-               drawerStatus.session_cash_sales_rand || 0,
-        count: drawerStatus.session_sales?.rand_count || 0
-      },
-      card: {
-        total: drawerStatus.session_sales?.card || drawerStatus.current_breakdown?.card || 0
-      },
-      transfer: {
-        total: drawerStatus.session_sales?.transfer || drawerStatus.current_breakdown?.transfer || 0
-      },
-      total: {
-        overall: (drawerStatus.current_breakdown_by_currency?.usd?.cash || drawerStatus.current_cash_usd || drawerStatus.session_cash_sales_usd || 0) +
-                 (drawerStatus.current_breakdown_by_currency?.zig?.cash || drawerStatus.current_cash_zig || drawerStatus.session_cash_sales_zig || 0) +
-                 (drawerStatus.current_breakdown_by_currency?.rand?.cash || drawerStatus.current_cash_rand || drawerStatus.session_cash_sales_rand || 0) +
-                 (drawerStatus.session_sales?.card || drawerStatus.current_breakdown?.card || 0) +
-                 (drawerStatus.session_sales?.transfer || drawerStatus.current_breakdown?.transfer || 0)
-      }
+      usd: drawerStatus?.session_sales?.usd_count || 
+           drawerStatus?.session_sales_by_currency?.usd?.count || 
+           drawerStatus?.usd_transaction_count || 0,
+      zig: drawerStatus?.session_sales?.zig_count || 
+           drawerStatus?.session_sales_by_currency?.zig?.count || 
+           drawerStatus?.zig_transaction_count || 0,
+      rand: drawerStatus?.session_sales?.rand_count || 
+            drawerStatus?.session_sales_by_currency?.rand?.count || 
+            drawerStatus?.rand_transaction_count || 0
     };
+  };
+
+  const transactionCounts = getDashboardTransactionCounts();
+
+  // Get formatted transaction count text with EOD check
+  const getTransactionCountText = (count) => {
+    if (checkSessionResetAtEOD()) {
+      return '0 transactions';
+    }
+    return `${count} transactions`;
   };
 
   const formatCurrency = (amount, currency = 'USD') => {
@@ -756,17 +854,8 @@ const CashierDashboardScreen = () => {
     return amount;
   };
 
-  // Sidebar features for cashiers
+  // Sidebar features for cashiers - Drawer Status removed for security
   const sidebarFeatures = [
-    {
-      id: 'drawer-status',
-      title: '💰 Drawer Status',
-      description: 'View my cash float & sales',
-      icon: '💰',
-      type: 'drawer',
-      color: '#22c55e',
-      section: 'cashier-tools'
-    },
     {
       id: 'product-receiving',
       title: '📦 Product Receiving',
@@ -803,17 +892,9 @@ const CashierDashboardScreen = () => {
       color: '#10b981',
       section: 'cashier-tools'
     },
+    // Stock Transfer feature removed - only owner should access drawer management
+    // Keeping Stock Transfer for other operations
     {
-      id: 'my-drawer',
-      title: '💰 My Drawer',
-      description: 'View float & cash breakdown',
-      icon: '💰',
-      screen: 'CashierDrawer',
-      color: '#22c55e',
-      section: 'cashier-tools'
-    },
-    {
-      id: 'stock-transfer',
       title: '🔄 Stock Transfer',
       description: 'Transfer & convert stock between products',
       icon: '🔄',
@@ -840,16 +921,6 @@ const CashierDashboardScreen = () => {
       section: 'cashier-tools'
     },
     {
-      id: 'stock-take',
-      title: '📦 Stock Take',
-      description: 'Count physical inventory & update stock',
-      icon: '📦',
-      screen: 'CashierStockTake',
-      color: '#f59e0b',
-      section: 'cashier-tools'
-    },
-    {
-      id: 'staff-lunch',
       title: '🍽️ Staff Lunch',
       description: 'Take stock items or money for staff meals',
       icon: '🍽️',
@@ -874,7 +945,7 @@ const CashierDashboardScreen = () => {
         navigation.navigate(ROUTES.CASHIER_SALES);
         break;
       case 'CashierDrawer':
-        navigation.navigate('CashierDrawer');
+        // Cashier Drawer removed - only owner can access drawer management
         break;
       case 'StockTransfer':
         navigation.navigate(ROUTES.STOCK_TRANSFER);
@@ -1141,12 +1212,15 @@ const CashierDashboardScreen = () => {
 
     if (calculatorPreviousValue === null) {
       setCalculatorPreviousValue(inputValue);
+      setCalculatorFormula(`${inputValue} ${nextOperation}`);
     } else if (calculatorOperation) {
       const currentValue = calculatorPreviousValue || 0;
       const newValue = calculate(currentValue, inputValue, calculatorOperation);
-
       setCalculatorDisplay(String(newValue));
       setCalculatorPreviousValue(newValue);
+      setCalculatorFormula(`${currentValue} ${calculatorOperation} ${inputValue} = ${newValue}\n${newValue} ${nextOperation}`);
+    } else {
+      setCalculatorFormula(`${calculatorPreviousValue} ${nextOperation}`);
     }
 
     setCalculatorWaitingForNewValue(true);
@@ -1186,6 +1260,7 @@ const CashierDashboardScreen = () => {
     if (calculatorPreviousValue !== null && calculatorOperation) {
       const newValue = calculate(calculatorPreviousValue, inputValue, calculatorOperation);
       setCalculatorDisplay(String(newValue));
+      setCalculatorFormula(`${calculatorPreviousValue} ${calculatorOperation} ${inputValue} = ${newValue}`);
       setCalculatorPreviousValue(null);
       setCalculatorOperation(null);
       setCalculatorWaitingForNewValue(true);
@@ -1245,10 +1320,411 @@ const CashierDashboardScreen = () => {
     setCalculatorPreviousValue(null);
     setCalculatorOperation(null);
     setCalculatorWaitingForNewValue(false);
+    setCalculatorFormula('');
   };
 
   const clearEntry = () => {
     setCalculatorDisplay('0');
+  };
+
+  // ========== ADVANCED CALCULATOR FUNCTIONS ==========
+
+  // Scientific Functions
+  const performSin = () => {
+    const value = parseFloat(calculatorDisplay);
+    const result = Math.sin(value * Math.PI / 180); // Convert to radians
+    setCalculatorDisplay(String(result));
+    setCalculatorFormula(`sin(${value}°) = ${result.toFixed(6)}`);
+    addToHistory(`sin(${value}°)`, result.toFixed(6));
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const performCos = () => {
+    const value = parseFloat(calculatorDisplay);
+    const result = Math.cos(value * Math.PI / 180); // Convert to radians
+    setCalculatorDisplay(String(result));
+    setCalculatorFormula(`cos(${value}°) = ${result.toFixed(6)}`);
+    addToHistory(`cos(${value}°)`, result.toFixed(6));
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const performTan = () => {
+    const value = parseFloat(calculatorDisplay);
+    const result = Math.tan(value * Math.PI / 180); // Convert to radians
+    setCalculatorDisplay(String(result));
+    setCalculatorFormula(`tan(${value}°) = ${result.toFixed(6)}`);
+    addToHistory(`tan(${value}°)`, result.toFixed(6));
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const performAsin = () => {
+    const value = parseFloat(calculatorDisplay);
+    if (value < -1 || value > 1) {
+      Alert.alert('Error', 'Input must be between -1 and 1');
+      return;
+    }
+    const result = Math.asin(value) * 180 / Math.PI;
+    setCalculatorDisplay(String(result));
+    setCalculatorFormula(`arcsin(${value}) = ${result.toFixed(2)}°`);
+    addToHistory(`arcsin(${value})`, result.toFixed(2));
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const performAcos = () => {
+    const value = parseFloat(calculatorDisplay);
+    if (value < -1 || value > 1) {
+      Alert.alert('Error', 'Input must be between -1 and 1');
+      return;
+    }
+    const result = Math.acos(value) * 180 / Math.PI;
+    setCalculatorDisplay(String(result));
+    setCalculatorFormula(`arccos(${value}) = ${result.toFixed(2)}°`);
+    addToHistory(`arccos(${value})`, result.toFixed(2));
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const performAtan = () => {
+    const value = parseFloat(calculatorDisplay);
+    const result = Math.atan(value) * 180 / Math.PI;
+    setCalculatorDisplay(String(result));
+    setCalculatorFormula(`arctan(${value}) = ${result.toFixed(2)}°`);
+    addToHistory(`arctan(${value})`, result.toFixed(2));
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const performLog = () => {
+    const value = parseFloat(calculatorDisplay);
+    if (value <= 0) {
+      Alert.alert('Error', 'Logarithm requires positive input');
+      return;
+    }
+    const result = Math.log10(value);
+    setCalculatorDisplay(String(result));
+    setCalculatorFormula(`log(${value}) = ${result.toFixed(6)}`);
+    addToHistory(`log(${value})`, result.toFixed(6));
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const performLn = () => {
+    const value = parseFloat(calculatorDisplay);
+    if (value <= 0) {
+      Alert.alert('Error', 'Natural log requires positive input');
+      return;
+    }
+    const result = Math.log(value);
+    setCalculatorDisplay(String(result));
+    setCalculatorFormula(`ln(${value}) = ${result.toFixed(6)}`);
+    addToHistory(`ln(${value})`, result.toFixed(6));
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const performPow = () => {
+    const value = parseFloat(calculatorDisplay);
+    setCalculatorFormula(`${value}²`);
+    setCalculatorDisplay(String(value * value));
+    addToHistory(`${value}²`, value * value);
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const performPow10 = () => {
+    const value = parseFloat(calculatorDisplay);
+    const result = Math.pow(10, value);
+    setCalculatorDisplay(String(result));
+    setCalculatorFormula(`10^${value} = ${result.toExponential(4)}`);
+    addToHistory(`10^${value}`, result.toExponential(4));
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const performExp = () => {
+    const value = parseFloat(calculatorDisplay);
+    const result = Math.exp(value);
+    setCalculatorDisplay(String(result));
+    setCalculatorFormula(`e^${value} = ${result.toExponential(4)}`);
+    addToHistory(`e^${value}`, result.toExponential(4));
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const performAbs = () => {
+    const value = parseFloat(calculatorDisplay);
+    const result = Math.abs(value);
+    setCalculatorDisplay(String(result));
+    setCalculatorFormula(`|${value}| = ${result}`);
+    addToHistory(`|${value}|`, result);
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const performFactorial = () => {
+    const value = parseFloat(calculatorDisplay);
+    if (value < 0 || !Number.isInteger(value)) {
+      Alert.alert('Error', 'Factorial requires non-negative integer');
+      return;
+    }
+    let result = 1;
+    for (let i = 2; i <= value; i++) result *= i;
+    setCalculatorDisplay(String(result));
+    setCalculatorFormula(`${value}! = ${result}`);
+    addToHistory(`${value}!`, result);
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const performPi = () => {
+    if (!calculatorWaitingForNewValue && calculatorDisplay !== '0') {
+      setCalculatorDisplay(calculatorDisplay + Math.PI.toFixed(6));
+    } else {
+      setCalculatorDisplay(String(Math.PI.toFixed(6)));
+      setCalculatorWaitingForNewValue(false);
+    }
+  };
+
+  const performE = () => {
+    if (!calculatorWaitingForNewValue && calculatorDisplay !== '0') {
+      setCalculatorDisplay(calculatorDisplay + Math.E.toFixed(6));
+    } else {
+      setCalculatorDisplay(String(Math.E.toFixed(6)));
+      setCalculatorWaitingForNewValue(false);
+    }
+  };
+
+  // Statistics Functions
+  const parseListInput = () => {
+    const input = listInput.replace(/[^0-9.,\-]/g, '').replace(/,/g, ' ');
+    return input.split(/\s+/).filter(v => v.trim()).map(Number).filter(n => !isNaN(n));
+  };
+
+  const calculateStats = (operation) => {
+    const numbers = parseListInput();
+    if (numbers.length === 0) {
+      Alert.alert('Error', 'Please enter numbers separated by commas or spaces');
+      return null;
+    }
+
+    let result;
+    switch (operation) {
+      case 'sum':
+        result = numbers.reduce((a, b) => a + b, 0);
+        break;
+      case 'avg':
+        result = numbers.reduce((a, b) => a + b, 0) / numbers.length;
+        break;
+      case 'min':
+        result = Math.min(...numbers);
+        break;
+      case 'max':
+        result = Math.max(...numbers);
+        break;
+      case 'count':
+        result = numbers.length;
+        break;
+      case 'median':
+        const sorted = [...numbers].sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        result = sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+        break;
+      case 'mode':
+        const freq = {};
+        let maxFreq = 0;
+        numbers.forEach(n => {
+          freq[n] = (freq[n] || 0) + 1;
+          if (freq[n] > maxFreq) maxFreq = freq[n];
+        });
+        const modes = Object.keys(freq).filter(k => freq[k] === maxFreq);
+        result = modes.length === numbers.length ? 'No mode' : modes.join(', ');
+        break;
+      case 'range':
+        result = Math.max(...numbers) - Math.min(...numbers);
+        break;
+      case 'stddev':
+        const mean = numbers.reduce((a, b) => a + b, 0) / numbers.length;
+        const variance = numbers.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / numbers.length;
+        result = Math.sqrt(variance);
+        break;
+      case 'variance':
+        const avg = numbers.reduce((a, b) => a + b, 0) / numbers.length;
+        result = numbers.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / numbers.length;
+        break;
+      case 'prod':
+        result = numbers.reduce((a, b) => a * b, 1);
+        break;
+      default:
+        return null;
+    }
+    return result;
+  };
+
+  const performStats = (operation) => {
+    const result = calculateStats(operation);
+    if (result !== null) {
+      setListResults({ operation, result, numbers: parseListInput() });
+      addToHistory(`${operation}([${parseListInput().join(', ')}])`, typeof result === 'number' ? result.toFixed(4) : result);
+    }
+  };
+
+  // List Functions
+  const addToList = () => {
+    const value = parseFloat(calculatorDisplay);
+    if (!isNaN(value)) {
+      const numbers = parseListInput();
+      setListInput(numbers.length > 0 ? listInput + ', ' + value : String(value));
+      setCalculatorDisplay('0');
+    }
+  };
+
+  const clearList = () => {
+    setListInput('');
+    setListResults(null);
+  };
+
+  const sortListAsc = () => {
+    const numbers = parseListInput();
+    if (numbers.length > 0) {
+      const sorted = [...numbers].sort((a, b) => a - b);
+      setListInput(sorted.join(', '));
+    }
+  };
+
+  const sortListDesc = () => {
+    const numbers = parseListInput();
+    if (numbers.length > 0) {
+      const sorted = [...numbers].sort((a, b) => b - a);
+      setListInput(sorted.join(', '));
+    }
+  };
+
+  const reverseList = () => {
+    const numbers = parseListInput();
+    if (numbers.length > 0) {
+      const reversed = [...numbers].reverse();
+      setListInput(reversed.join(', '));
+    }
+  };
+
+  const removeDuplicates = () => {
+    const numbers = parseListInput();
+    if (numbers.length > 0) {
+      const unique = [...new Set(numbers)];
+      setListInput(unique.join(', '));
+    }
+  };
+
+  const filterGreaterThan = () => {
+    const numbers = parseListInput();
+    const threshold = parseFloat(calculatorDisplay);
+    if (numbers.length > 0 && !isNaN(threshold)) {
+      const filtered = numbers.filter(n => n > threshold);
+      setListInput(filtered.join(', '));
+    }
+  };
+
+  const filterLessThan = () => {
+    const numbers = parseListInput();
+    const threshold = parseFloat(calculatorDisplay);
+    if (numbers.length > 0 && !isNaN(threshold)) {
+      const filtered = numbers.filter(n => n < threshold);
+      setListInput(filtered.join(', '));
+    }
+  };
+
+  // Matrix Functions (2x2)
+  const calculateMatrixDet = () => {
+    const { a, b, c, d } = matrixInput;
+    const values = [parseFloat(a), parseFloat(b), parseFloat(c), parseFloat(d)];
+    if (values.some(isNaN)) {
+      Alert.alert('Error', 'Please enter all matrix values');
+      return;
+    }
+    const det = parseFloat(a) * parseFloat(d) - parseFloat(b) * parseFloat(c);
+    setMatrixResult({ type: 'determinant', value: det, matrix: { a, b, c, d } });
+    addToHistory('det([[a,b],[c,d]])', det);
+  };
+
+  const calculateMatrixInv = () => {
+    const { a, b, c, d } = matrixInput;
+    const det = parseFloat(a) * parseFloat(d) - parseFloat(b) * parseFloat(c);
+    if (Math.abs(det) < 1e-10) {
+      Alert.alert('Error', 'Matrix is singular (determinant = 0)');
+      return;
+    }
+    const invDet = 1 / det;
+    setMatrixResult({
+      type: 'inverse',
+      value: `[[${(parseFloat(d) * invDet).toFixed(4)}, ${(-parseFloat(b) * invDet).toFixed(4)}], [${(-parseFloat(c) * invDet).toFixed(4)}, ${(parseFloat(a) * invDet).toFixed(4)}]]`,
+      matrix: { a, b, c, d }
+    });
+    addToHistory('inverse([[a,b],[c,d]])', 'Calculated');
+  };
+
+  const clearMatrix = () => {
+    setMatrixInput({ a: '', b: '', c: '', d: '' });
+    setMatrixResult(null);
+  };
+
+  // Graph Functions
+  const generateGraphData = (type) => {
+    const numbers = parseListInput();
+    if (numbers.length === 0) {
+      Alert.alert('Error', 'Please enter numbers to graph');
+      return;
+    }
+    const labels = numbers.map((_, i) => `Item ${i + 1}`);
+    setGraphData({ type, labels, values: numbers });
+    addToHistory(`graph(${type})`, `Generated ${type} chart with ${numbers.length} data points`);
+  };
+
+  const generateLineGraph = () => generateGraphData('line');
+  const generateBarGraph = () => generateGraphData('bar');
+  const generatePieData = () => generateGraphData('pie');
+
+  // History Functions
+  const addToHistory = (formula, result) => {
+    setCalculatorHistory(prev => [{
+      formula,
+      result: typeof result === 'number' ? parseFloat(result.toFixed(8)) : result,
+      timestamp: new Date().toLocaleTimeString()
+    }, ...prev.slice(0, 19)]);
+  };
+
+  const clearHistory = () => {
+    setCalculatorHistory([]);
+  };
+
+  const recallFromHistory = (item) => {
+    setCalculatorDisplay(String(item.result));
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  // Tax Functions
+  const calculateTax = () => {
+    const value = parseFloat(calculatorDisplay);
+    const tax = (value * taxRate) / 100;
+    const total = value + tax;
+    setCalculatorDisplay(String(total));
+    setCalculatorFormula(`${value} + ${taxRate}% tax = ${tax.toFixed(2)} (Total: ${total.toFixed(2)})`);
+    addToHistory(`${value} + ${taxRate}% tax`, total.toFixed(2));
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const calculateTaxAmount = () => {
+    const value = parseFloat(calculatorDisplay);
+    const tax = (value * taxRate) / 100;
+    setCalculatorDisplay(String(tax));
+    setCalculatorFormula(`${taxRate}% of ${value} = ${tax.toFixed(2)}`);
+    addToHistory(`${taxRate}% of ${value}`, tax.toFixed(2));
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const removeTax = () => {
+    const total = parseFloat(calculatorDisplay);
+    const subtotal = total / (1 + taxRate / 100);
+    const tax = total - subtotal;
+    setCalculatorDisplay(String(subtotal.toFixed(2)));
+    setCalculatorFormula(`${total} - ${taxRate}% tax = ${subtotal.toFixed(2)} (Tax: ${tax.toFixed(2)})`);
+    addToHistory(`${total} - ${taxRate}% tax`, subtotal.toFixed(2));
+    setCalculatorWaitingForNewValue(true);
+  };
+
+  const changeTaxRate = (rate) => {
+    setTaxRate(rate);
+    Alert.alert('Tax Rate Changed', `Tax rate set to ${rate}%`);
   };
 
   // Quick Actions Functions
@@ -2308,109 +2784,83 @@ const CashierDashboardScreen = () => {
       return;
     }
 
-    // Allow negative stock sales - no stock validation needed
-
-    // Get cashier ID with proper fallback handling - FIXED to match actual credentials structure
-    let cashierId = cashierData?.cashier_info?.id || 
-                   cashierData?.id || 
-                   cashierData?.cashier_id || 
-                   cashierData?.user_id ||
-                   cashierData?.cashierInfo?.id ||
-                   // Try to extract from the login response structure
-                   (cashierData?.cashier_info && cashierData.cashier_info.id) ||
-                   // Try from presence service data
-                   (window.currentUser && window.currentUser.id) ||
-                   // Fallback: extract from name if available (for debugging)
-                   null;
-    
-    // If still no ID found, try to extract from raw credentials structure
-    if (!cashierId && cashierData) {
-      // Check if credentials has nested structure
-      if (cashierData.cashier_info && cashierData.cashier_info.id) {
-        cashierId = cashierData.cashier_info.id;
-      } else if (cashierData.user_id) {
-        cashierId = cashierData.user_id;
-      } else if (cashierData.id) {
-        cashierId = cashierData.id;
+    // Validate card payment
+    if (paymentMethod === 'card') {
+      if (!cardNetwork) {
+        Alert.alert(
+          '⚠️ CARD NETWORK REQUIRED',
+          'Please select the card network (Visa, Mastercard, etc.)',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+      if (!cardLast4 || cardLast4.length !== 4) {
+        Alert.alert(
+          '⚠️ CARD NUMBER REQUIRED',
+          'Please enter the last 4 digits of the card',
+          [{ text: 'OK' }]
+        );
+        return;
       }
     }
-    
-    console.log('Available cashier data:', { cashierData, cashierId });
-    console.log('Cashier data keys:', Object.keys(cashierData || {}));
-    console.log('Cashier info:', cashierData?.cashier_info);
-    
-    if (!cashierId) {
-      console.error('CASHIER ID EXTRACTION FAILED:', {
-        cashierData,
-        cashierDataKeys: Object.keys(cashierData || {}),
-        cashierInfo: cashierData?.cashier_info,
-        cashierInfoKeys: cashierData?.cashier_info ? Object.keys(cashierData.cashier_info) : 'N/A'
-      });
-      
-      Alert.alert(
-        'Cashier Information Error', 
-        `Unable to extract cashier ID from stored credentials.\n\n` +
-        `Cashier Data Keys: ${Object.keys(cashierData || {}).join(', ')}\n` +
-        `Cashier Info: ${cashierData?.cashier_info ? 'Present' : 'Missing'}\n\n` +
-        `Please log out and log back in to resolve this issue.`,
-        [{ text: 'OK' }]
-      );
-      return;
+
+    // Validate transfer payment
+    if (paymentMethod === 'transfer') {
+      if (!transferWallet) {
+        Alert.alert(
+          '⚠️ TRANSFER METHOD REQUIRED',
+          'Please select a transfer wallet or bank account from the modal',
+          [{ text: 'OK', onPress: () => setShowTransferWalletModal(true) }]
+        );
+        return;
+      }
     }
 
-    const total = getTotalAmount();
-    const received = parseFloat(amountReceived) || 0;
+    // For cash payments, require amount received
+    if (paymentMethod === 'cash') {
+      const received = parseFloat(amountReceived) || 0;
+      if (received <= 0) {
+        Alert.alert(
+          '⚠️ PAYMENT REQUIRED',
+          `Please enter the amount received from customer before processing the sale.\n\nTotal Amount: ${formatCurrency(getTotalAmount())}`,
+          [{ text: 'OK', style: 'default' }]
+        );
+        setTimeout(() => {
+          const amountInput = document.querySelector('input[placeholder="0.00"]');
+          if (amountInput) amountInput.focus();
+        }, 100);
+        return;
+      }
 
-    // Payment Validation - Multi-Currency Cash Support
-    if (received <= 0) {
-      Alert.alert(
-        '⚠️ PAYMENT REQUIRED',
-        `Please enter the amount received from customer before processing the sale.\n\nTotal Amount: ${formatCurrency(getTotalAmount())}`,
-        [{ text: 'OK', style: 'default' }]
-      );
-      // Focus on the amount input field
-      setTimeout(() => {
-        const amountInput = document.querySelector('input[placeholder="0.00"]');
-        if (amountInput) amountInput.focus();
-      }, 100);
-      return;
-    }
+      // Check if sufficient amount received
+      if (received < getTotalAmount()) {
+        const shortage = getTotalAmount() - received;
+        Alert.alert(
+          '⚠️ INSUFFICIENT PAYMENT',
+          `Insufficient amount received for ${selectedCurrency} cash payment.\n\nTotal Amount: ${formatCurrency(getTotalAmount())}\nAmount Received: ${formatCurrency(received, selectedCurrency)}\nShort Amount: ${formatCurrency(shortage, selectedCurrency)}\n\nPlease collect the remaining amount from customer.`,
+          [{ text: 'OK', style: 'default' }]
+        );
+        return;
+      }
 
-    // Check if sufficient amount received
-    if (received < getTotalAmount()) {
-      const shortage = getTotalAmount() - received;
-      Alert.alert(
-        '⚠️ INSUFFICIENT PAYMENT',
-        `Insufficient amount received for ${selectedCurrency} cash payment.\n\nTotal Amount: ${formatCurrency(getTotalAmount())}\nAmount Received: ${formatCurrency(received, selectedCurrency)}\nShort Amount: ${formatCurrency(shortage, selectedCurrency)}\n\nPlease collect the remaining amount from customer.`,
-        [{ text: 'OK', style: 'default' }]
-      );
-      // Focus on the amount input field
-      setTimeout(() => {
-        const amountInput = document.querySelector('input[placeholder="0.00"]');
-        if (amountInput) amountInput.focus();
-      }, 100);
-      return;
-    }
-
-    // Check for overpayment (customer error)
-    if (received > getTotalAmount()) {
-      const overpayment = received - getTotalAmount();
-      console.log('OVERPAYMENT DETECTED - ALLOWING WITH WARNING');
-      Alert.alert(
-        'Overpayment Detected',
-        `Overpayment detected!\n\nTotal: ${formatCurrency(getTotalAmount())}\nReceived: ${formatCurrency(received, selectedCurrency)}\nChange: ${formatCurrency(overpayment, selectedCurrency)}\n\nPlease verify the amount with customer before proceeding.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Proceed Anyway',
-            onPress: () => {
-              // Allow overpayment with confirmation
-              console.log('Overpayment confirmed by cashier');
+      // Check for overpayment
+      if (received > getTotalAmount()) {
+        const overpayment = received - getTotalAmount();
+        console.log('OVERPAYMENT DETECTED - ALLOWING WITH WARNING');
+        Alert.alert(
+          'Overpayment Detected',
+          `Overpayment detected!\n\nTotal: ${formatCurrency(getTotalAmount())}\nReceived: ${formatCurrency(received, selectedCurrency)}\nChange: ${formatCurrency(overpayment, selectedCurrency)}\n\nPlease verify the amount with customer before proceeding.`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Proceed Anyway',
+              onPress: () => {
+                console.log('Overpayment confirmed by cashier');
+              }
             }
-          }
-        ]
-      );
-      // Don't return - allow processing to continue
+          ]
+        );
+      }
     }
 
     console.log('Starting sale processing...');
@@ -2418,34 +2868,62 @@ const CashierDashboardScreen = () => {
     // Final validation summary
     const saleSummary = {
       items: cart.length,
-      total: formatCurrency(total),
-      received: formatCurrency(received),
-      change: formatCurrency(getChange()),
-      paymentMethod: paymentMethod.toUpperCase()
+      total: formatCurrency(getTotalAmount()),
+      paymentMethod: paymentMethod.toUpperCase(),
+      ...(paymentMethod === 'cash' && {
+        received: formatCurrency(parseFloat(amountReceived) || 0),
+        change: formatCurrency(getChange())
+      }),
+      ...(paymentMethod === 'transfer' && {
+        transferWallet: transferWallet,
+        transferReference: transferReference
+      }),
+      ...(paymentMethod === 'card' && {
+        cardNetwork: cardNetwork,
+        cardLast4: cardLast4
+      })
     };
+    console.log('Sale summary:', saleSummary);
     
-    // Prepare sale data outside try block for error handling - Multi-Currency Support
+    // Prepare sale data - Multi-Currency Support with Transfer/Card
+    // Determine the specific payment type for proper tracking
+    let paymentType = paymentMethod;
+    let walletAccount = transferWallet || 'bank';
+    
+    // For transfer payments, use the wallet ID for precise tracking
+    if (paymentMethod === 'transfer' && transferWallet) {
+      const selectedWallet = transferWallets.find(w => w.name === transferWallet);
+      if (selectedWallet) {
+        walletAccount = selectedWallet.id; // Use the wallet ID (e.g., 'ecocash', 'ecocash_usd')
+      }
+    }
+    
     const saleData = {
-      cashier_id: cashierId,
+      cashier_id: cashierData?.cashier_info?.id || cashierData?.id || cashierData?.cashier_id || 1,
       items: cart.map(item => ({
         product_id: item.id.toString(),
         quantity: item.price_type === 'unit' ? item.quantity.toString() : (item.weight || 0).toString(),
-        // FIX: Convert unit price to selected currency before sending
         unit_price: convertToCurrency(item.price, selectedCurrency).toString()
       })),
-      payment_method: 'cash', // Multi-Currency Cash
-      // CRITICAL FIX: product_price_currency is always USD (where products are priced)
-      // payment_currency is what the customer actually paid in
-      product_price_currency: 'USD',  
-      payment_currency: selectedCurrency, // What customer paid with
+      payment_method: paymentType, // cash, card, transfer
+      payment_currency: selectedCurrency,
+      product_price_currency: 'USD',
       customer_name: '',
       customer_phone: '',
-      // FIX: Send total amount in the selected payment currency (NOT in USD)
-      total_amount: total.toString()
+      total_amount: getTotalAmount().toString(),
+      // Transfer/Card specific fields
+      ...(paymentMethod === 'transfer' && {
+        wallet_account: walletAccount, // Now contains specific wallet ID like 'ecocash', 'ecocash_usd', 'onemoney', etc.
+        transfer_reference: transferReference
+      }),
+      ...(paymentMethod === 'card' && {
+        card_network: cardNetwork,
+        card_last_4: cardLast4
+      })
     };
     
     console.log('🔍 SALE ATTRIBUTION DEBUG:', {
-      cashierId,
+      cashierId: cashierData?.cashier_info?.id || cashierData?.id || cashierData?.cashier_id || 1,
       cashierName: cashierData?.name || cashierData?.cashier_info?.name || 'Unknown',
       saleData,
       timestamp: new Date().toISOString()
@@ -2459,20 +2937,27 @@ const CashierDashboardScreen = () => {
       if (response?.data) {
         // Process automatic receipt generation - Multi-Currency Support
         const receivedAmount = parseFloat(amountReceived) || 0;
-        printVintageReceipt(response.data, total, receivedAmount, selectedCurrency);
+        printVintageReceipt(response.data, getTotalAmount(), receivedAmount, selectedCurrency);
         
         // Calculate change first
-        const calculatedChange = Math.max(0, receivedAmount - total);
+        const calculatedChange = Math.max(0, receivedAmount - getTotalAmount());
         const updatedItems = cart.map(item => `${item.name}: ${item.stock_quantity - item.quantity} remaining`).join('\n');
-        // Note: Drawer updates are now handled automatically by the backend during sale creation
+
+        // Build payment method description
+        let paymentMethodDesc = '';
+        if (paymentMethod === 'cash') {
+          paymentMethodDesc = `Currency: ${selectedCurrency}\nCash Received: ${formatCurrency(receivedAmount, selectedCurrency)}\nChange: ${formatCurrency(calculatedChange, selectedCurrency)}`;
+        } else if (paymentMethod === 'transfer') {
+          paymentMethodDesc = `Transfer (${transferWallet}): ${transferReference}`;
+        } else if (paymentMethod === 'card') {
+          paymentMethodDesc = `Card: ${cardNetwork?.toUpperCase()}\nLast 4: ****${cardLast4}`;
+        }
 
         Alert.alert(
           'SALE COMPLETED!',
           `Sale #${response.data.id} completed successfully!\n\n` +
-          `Currency: ${selectedCurrency}\n` +
-          `Total: ${formatCurrency(total, selectedCurrency)}\n` +
-          `Cash Received: ${formatCurrency(receivedAmount, selectedCurrency)}\n` +
-          `Change: ${formatCurrency(calculatedChange, selectedCurrency)}\n\n` +
+          `Total: ${formatCurrency(getTotalAmount(), selectedCurrency)}\n` +
+          `${paymentMethodDesc}\n\n` +
           `Stock Updated:\n${updatedItems}`,
           [
             {
@@ -2480,7 +2965,11 @@ const CashierDashboardScreen = () => {
               onPress: () => {
                 setCart([]);
                 setAmountReceived('');
-                // Refresh products to show updated stock
+                setPaymentMethod('cash');
+                setCardLast4('');
+                setCardNetwork('');
+                setTransferWallet('');
+                setTransferReference('');
                 loadProducts();
                 setProcessingSale(false);
               }
@@ -2647,76 +3136,47 @@ const CashierDashboardScreen = () => {
               </TouchableOpacity>
             </View>
             
-            {/* Neural Status Display */}
+            {/* Neural Status Display - Compact Layout */}
             <View style={styles.neuralStatusGrid}>
               <View style={styles.neuralStatusCard}>
-                <Text style={styles.neuralStatusLabel}>NEURAL ITEMS</Text>
+                <Text style={styles.neuralStatusLabel}>ITEMS</Text>
                 <Text style={styles.neuralStatusValue}>{cart.length}</Text>
                 <View style={styles.neuralPulse}></View>
               </View>
               <View style={styles.neuralStatusCard}>
-                <Text style={styles.neuralStatusLabel}>TOTAL VALUE</Text>
+                <Text style={styles.neuralStatusLabel}>TOTAL</Text>
                 <Text style={styles.neuralStatusValue}>{formatCurrency(getTotalAmount())}</Text>
                 <View style={styles.neuralPulse}></View>
               </View>
               <View style={styles.neuralStatusCard}>
-                <Text style={styles.neuralStatusLabel}>SHOP STATUS</Text>
+                <Text style={styles.neuralStatusLabel}>STATUS</Text>
                 <Text style={[styles.neuralStatusValue, shopStatus?.is_open ? styles.neuralOnline : styles.neuralOffline]}>
                   {shopStatus?.is_open ? 'ONLINE' : 'OFFLINE'}
                 </Text>
                 <View style={[styles.neuralPulse, shopStatus?.is_open ? styles.neuralPulseOnline : styles.neuralPulseOffline]}></View>
               </View>
-              {/* Multi-Currency Status Cards */}
-              <View style={styles.currencyStatusContainer}>
-                <Text style={styles.currencyStatusTitle}>💱 CURRENCY SALES & TRANSACTIONS</Text>
-                <View style={styles.currencyStatusGrid}>
-                  <View style={styles.currencyStatusCard}>
-                    <Text style={styles.currencyStatusLabel}>💵 USD</Text>
-                    <Text style={styles.currencyStatusValue}>{formatCurrency(
-                      drawerStatus?.current_breakdown_by_currency?.usd?.cash ||
-                      drawerStatus?.session_sales_by_currency?.usd?.cash ||
-                      drawerStatus?.current_cash_usd ||
-                      drawerStatus?.session_cash_sales_usd || 0, 'USD')}</Text>
-                    <Text style={styles.currencyStatusSubtext}>
-                      {drawerStatus?.session_sales?.usd_count || 
-                       drawerStatus?.session_sales_by_currency?.usd?.count ||
-                       drawerStatus?.usd_transaction_count ||
-                       0} transactions
-                    </Text>
-                  </View>
-                  <View style={styles.currencyStatusCard}>
-                    <Text style={styles.currencyStatusLabel}>💰 ZIG</Text>
-                    <Text style={styles.currencyStatusValue}>{formatCurrency(
-                      drawerStatus?.current_breakdown_by_currency?.zig?.cash ||
-                      drawerStatus?.session_sales_by_currency?.zig?.cash ||
-                      drawerStatus?.current_cash_zig ||
-                      drawerStatus?.session_cash_sales_zig || 0, 'ZIG')}</Text>
-                    <Text style={styles.currencyStatusSubtext}>
-                      {drawerStatus?.session_sales?.zig_count || 
-                       drawerStatus?.session_sales_by_currency?.zig?.count ||
-                       drawerStatus?.zig_transaction_count ||
-                       0} transactions
-                    </Text>
-                  </View>
-                  <View style={styles.currencyStatusCard}>
-                    <Text style={styles.currencyStatusLabel}>💸 RAND</Text>
-                    <Text style={styles.currencyStatusValue}>{formatCurrency(
-                      drawerStatus?.current_breakdown_by_currency?.rand?.cash ||
-                      drawerStatus?.session_sales_by_currency?.rand?.cash ||
-                      drawerStatus?.current_cash_rand ||
-                      drawerStatus?.session_cash_sales_rand || 0, 'RAND')}</Text>
-                    <Text style={styles.currencyStatusSubtext}>
-                      {drawerStatus?.session_sales?.rand_count || 
-                       drawerStatus?.session_sales_by_currency?.rand?.count ||
-                       drawerStatus?.rand_transaction_count ||
-                       0} transactions
-                    </Text>
-                  </View>
-                </View>
+              
+              {/* Currency & Rates - Combined Compact Card (Moved before SYNC) */}
+              <View style={styles.neuralCurrencyCard}>
+                <Text style={styles.neuralRatesText}>
+                  USD ➜ {exchangeRates?.usd_to_zig?.toFixed(2) || '24.50'} ZIG | {exchangeRates?.usd_to_rand?.toFixed(2) || '18.20'} RAND
+                </Text>
               </View>
-              <TouchableOpacity onPress={() => {
-                loadDrawerStatus(cashierData);
-              }} style={styles.neuralRefreshButton}>
+              
+              
+              {/* SYNC Button - Refreshes entire screen */}
+              <TouchableOpacity 
+                onPress={() => {
+                  // Refresh all data for the cashier screen
+                  loadDrawerStatus(cashierData);
+                  loadProducts();
+                  loadShopStatus();
+                  fetchExchangeRates();
+                  updateRealTimeStats();
+                  Alert.alert('✅ REFRESHED', 'All data has been refreshed successfully!', [{ text: 'OK' }]);
+                }} 
+                style={styles.neuralRefreshButton}
+              >
                 <View style={styles.neuralButtonGlow}></View>
                 <Icon name="refresh" size={18} color="#00ffff" />
                 <Text style={styles.neuralRefreshText}>SYNC</Text>
@@ -3348,14 +3808,116 @@ const CashierDashboardScreen = () => {
               <Text style={styles.paymentMethodLabel}>Payment Type:</Text>
               <View style={styles.paymentButtons}>
                 <TouchableOpacity
-                  style={[styles.paymentButton, styles.paymentButtonActive]}
-                  onPress={() => setPaymentMethod('cash')}
+                  style={[
+                    styles.paymentButton,
+                    paymentMethod === 'cash' && styles.paymentButtonActive
+                  ]}
+                  onPress={() => {
+                    setPaymentMethod('cash');
+                    setTransferWallet('');
+                    setCardLast4('');
+                    setCardNetwork('');
+                    setTransferReference('');
+                  }}
                 >
                   <Text style={styles.paymentButtonText}>💵 CASH</Text>
                   <Text style={styles.paymentButtonSubtext}>Pay with {selectedCurrency} cash</Text>
                 </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.paymentButton,
+                    paymentMethod === 'transfer' && styles.paymentButtonActive
+                  ]}
+                  onPress={() => {
+                    setPaymentMethod('transfer');
+                    setShowTransferWalletModal(true);
+                  }}
+                >
+                  <Text style={styles.paymentButtonText}>📱 TRANSFER</Text>
+                  <Text style={styles.paymentButtonSubtext}>
+                    {transferWallet ? `${transferWallet} ${selectedCurrency}` : 'Bank/Wallet Transfer'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.paymentButton,
+                    paymentMethod === 'card' && styles.paymentButtonActive
+                  ]}
+                  onPress={() => {
+                    setPaymentMethod('card');
+                    setTransferWallet('');
+                    setTransferReference('');
+                  }}
+                >
+                  <Text style={styles.paymentButtonText}>💳 CARD</Text>
+                  <Text style={styles.paymentButtonSubtext}>
+                    {cardLast4 ? `${cardNetwork} ****${cardLast4}` : 'Credit/Debit Card'}
+                  </Text>
+                </TouchableOpacity>
               </View>
             </View>
+            
+            {/* Card Details Input - Only show when card payment is selected */}
+            {paymentMethod === 'card' && (
+              <View style={styles.cardDetailsContainer}>
+                <Text style={styles.cardDetailsLabel}>💳 CARD DETAILS:</Text>
+                <Text style={styles.cardDetailsSubtext}>Select card network and enter last 4 digits</Text>
+                
+                {/* Card Network Selection */}
+                <View style={styles.cardNetworkButtons}>
+                  {cardNetworks.map((network) => (
+                    <TouchableOpacity
+                      key={network.id}
+                      style={[
+                        styles.cardNetworkButton,
+                        cardNetwork === network.id && styles.cardNetworkButtonActive
+                      ]}
+                      onPress={() => setCardNetwork(network.id)}
+                    >
+                      <Text style={styles.cardNetworkButtonText}>{network.icon} {network.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                
+                {/* Last 4 Digits Input */}
+                <TextInput
+                  style={styles.cardLast4Input}
+                  value={cardLast4}
+                  onChangeText={(text) => {
+                    // Only allow numeric input, max 4 characters
+                    const filtered = text.replace(/[^0-9]/g, '').slice(0, 4);
+                    setCardLast4(filtered);
+                  }}
+                  keyboardType="numeric"
+                  placeholder="Last 4 digits"
+                  placeholderTextColor="#6b7280"
+                  maxLength={4}
+                />
+              </View>
+            )}
+            
+            {/* Transfer Details Input - Only show when transfer payment is selected */}
+            {paymentMethod === 'transfer' && (
+              <View style={styles.transferDetailsContainer}>
+                <Text style={styles.transferDetailsLabel}>📱 TRANSFER DETAILS:</Text>
+                <Text style={styles.transferDetailsSubtext}>
+                  Selected: {transferWallet || 'None selected'}
+                </Text>
+                <TouchableOpacity
+                  style={styles.changeWalletButton}
+                  onPress={() => setShowTransferWalletModal(true)}
+                >
+                  <Text style={styles.changeWalletButtonText}>🔄 Change Wallet / Account</Text>
+                </TouchableOpacity>
+                <TextInput
+                  style={styles.transferReferenceInput}
+                  value={transferReference}
+                  onChangeText={setTransferReference}
+                  placeholder="Transfer Reference (optional)"
+                  placeholderTextColor="#6b7280"
+                />
+              </View>
+            )}
           </View>
 
           {/* Amount Received - Multi-Currency Support */}
@@ -3527,6 +4089,169 @@ const CashierDashboardScreen = () => {
         </View>
       )}
 
+      {/* Transfer Wallet Selection Modal */}
+      {showTransferWalletModal && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.transferWalletModalContainer}>
+            <View style={styles.transferWalletModalHeader}>
+              <View style={styles.transferWalletHeaderContent}>
+                <Text style={styles.transferWalletModalTitle}>📱 SELECT PAYMENT METHOD</Text>
+                <Text style={styles.transferWalletModalSubtitle}>
+                  Choose how customer will pay
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.transferWalletModalCloseButton}
+                onPress={() => {
+                  setShowTransferWalletModal(false);
+                  if (!transferWallet) {
+                    setPaymentMethod('cash');
+                  }
+                }}
+              >
+                <Text style={styles.transferWalletModalCloseButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView 
+              style={styles.transferWalletModalBody}
+              showsVerticalScrollIndicator={true}
+              nestedScrollEnabled={true}
+            >
+              {/* ZIG Wallets Section */}
+              <View style={styles.transferWalletSection}>
+                <View style={styles.transferWalletSectionHeader}>
+                  <Text style={styles.transferWalletSectionIcon}>💰</Text>
+                  <Text style={styles.transferWalletSectionTitle}>ZIG CURRENCY</Text>
+                </View>
+                <View style={styles.transferWalletGridCompact}>
+                  {transferWallets.filter(w => w.currency === 'ZIG').map((wallet) => (
+                    <TouchableOpacity
+                      key={wallet.id}
+                      style={[
+                        styles.transferWalletButtonCompact,
+                        transferWallet === wallet.name && styles.transferWalletButtonActive
+                      ]}
+                      onPress={() => {
+                        setTransferWallet(wallet.name);
+                        setSelectedCurrency('ZIG');
+                        setShowTransferWalletModal(false);
+                      }}
+                    >
+                      <Text style={styles.transferWalletIconCompact}>{wallet.icon}</Text>
+                      <Text style={styles.transferWalletNameCompact}>{wallet.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+              
+              {/* USD Wallets Section */}
+              <View style={styles.transferWalletSection}>
+                <View style={styles.transferWalletSectionHeader}>
+                  <Text style={styles.transferWalletSectionIcon}>💵</Text>
+                  <Text style={styles.transferWalletSectionTitle}>USD CURRENCY</Text>
+                </View>
+                <View style={styles.transferWalletGridCompact}>
+                  {transferWallets.filter(w => w.currency === 'USD').map((wallet) => (
+                    <TouchableOpacity
+                      key={wallet.id}
+                      style={[
+                        styles.transferWalletButtonCompact,
+                        transferWallet === wallet.name && styles.transferWalletButtonActive
+                      ]}
+                      onPress={() => {
+                        setTransferWallet(wallet.name);
+                        setSelectedCurrency('USD');
+                        setShowTransferWalletModal(false);
+                      }}
+                    >
+                      <Text style={styles.transferWalletIconCompact}>{wallet.icon}</Text>
+                      <Text style={styles.transferWalletNameCompact}>{wallet.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+              
+              {/* RAND Wallets Section */}
+              <View style={styles.transferWalletSection}>
+                <View style={styles.transferWalletSectionHeader}>
+                  <Text style={styles.transferWalletSectionIcon}>💸</Text>
+                  <Text style={styles.transferWalletSectionTitle}>RAND CURRENCY</Text>
+                </View>
+                <View style={styles.transferWalletGridCompact}>
+                  {transferWallets.filter(w => w.currency === 'RAND').map((wallet) => (
+                    <TouchableOpacity
+                      key={wallet.id}
+                      style={[
+                        styles.transferWalletButtonCompact,
+                        transferWallet === wallet.name && styles.transferWalletButtonActive
+                      ]}
+                      onPress={() => {
+                        setTransferWallet(wallet.name);
+                        setSelectedCurrency('RAND');
+                        setShowTransferWalletModal(false);
+                      }}
+                    >
+                      <Text style={styles.transferWalletIconCompact}>{wallet.icon}</Text>
+                      <Text style={styles.transferWalletNameCompact}>{wallet.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+              
+              {/* Cards Section */}
+              <View style={styles.transferWalletSection}>
+                <View style={styles.transferWalletSectionHeader}>
+                  <Text style={styles.transferWalletSectionIcon}>💳</Text>
+                  <Text style={styles.transferWalletSectionTitle}>CARDS</Text>
+                </View>
+                <View style={styles.transferWalletGridCompact}>
+                  {cardNetworks.map((network) => (
+                    <TouchableOpacity
+                      key={network.id}
+                      style={[
+                        styles.transferWalletButtonCompact,
+                        transferWallet === `Card ${network.name}` && styles.transferWalletButtonActive
+                      ]}
+                      onPress={() => {
+                        setTransferWallet(`Card ${network.name}`);
+                        if (network.id === 'visa_zig') {
+                          setSelectedCurrency('ZIG');
+                        } else if (network.id === 'visa_rand') {
+                          setSelectedCurrency('RAND');
+                        } else {
+                          setSelectedCurrency('USD');
+                        }
+                        setShowTransferWalletModal(false);
+                      }}
+                    >
+                      <Text style={styles.transferWalletIconCompact}>{network.icon}</Text>
+                      <Text style={styles.transferWalletNameCompact}>{network.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+              
+              <View style={styles.transferWalletModalFooterSpacer} />
+            </ScrollView>
+            
+            <View style={styles.transferWalletModalFooter}>
+              <TouchableOpacity
+                style={styles.transferWalletCancelButton}
+                onPress={() => {
+                  setShowTransferWalletModal(false);
+                  if (!transferWallet) {
+                    setPaymentMethod('cash');
+                  }
+                }}
+              >
+                <Text style={styles.transferWalletCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
       {/* Currency Modals Removed - USD Only */}
 
       {/* Barcode Scanner Modal */}
@@ -3568,6 +4293,7 @@ const CashierDashboardScreen = () => {
             </View>
             
             <View style={styles.calculatorModalDisplayContainer}>
+              <Text style={styles.calculatorFormulaText}>{calculatorFormula || 'Ready to calculate'}</Text>
               <Text style={styles.calculatorModalDisplay}>{calculatorDisplay}</Text>
             </View>
             
@@ -3798,241 +4524,6 @@ const CashierDashboardScreen = () => {
                 <Text style={styles.sidebarCloseButtonText}>✕</Text>
               </TouchableOpacity>
             </View>
-
-            {/* Drawer Status Section - Prominent Display */}
-            {drawerStatus && (
-              <View style={styles.sidebarDrawerSection}>
-                <View style={styles.sidebarDrawerHeader}>
-                  <Text style={styles.sidebarDrawerTitle}>💰 MY DRAWER STATUS</Text>
-                  <TouchableOpacity 
-                    style={styles.sidebarRefreshButton}
-                    onPress={refreshDrawerStatus}
-                    disabled={refreshingDrawer}
-                  >
-                    <Text style={styles.sidebarRefreshButtonText}>
-                      {refreshingDrawer ? '⟳' : '↻'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-                
-                {/* Primary Financial Metrics */}
-                <View style={styles.sidebarDrawerMetrics}>
-                  <View style={styles.sidebarMetricCard}>
-                    <Text style={styles.sidebarMetricLabel}>FLOAT</Text>
-                    <Text style={styles.sidebarMetricValue}>{formatCurrency(drawerStatus.float_amount || 0)}</Text>
-                  </View>
-                  <View style={styles.sidebarMetricCard}>
-                    <Text style={styles.sidebarMetricLabel}>CASH</Text>
-                    <Text style={[styles.sidebarMetricValue, { color: '#22c55e' }]}>
-                      {(() => {
-                        // Show the dominant currency or total breakdown
-                        const usdAmount = drawerStatus.current_breakdown_by_currency?.usd?.cash || drawerStatus.current_cash_usd || drawerStatus.session_cash_sales_usd || 0;
-                        const zigAmount = drawerStatus.current_breakdown_by_currency?.zig?.cash || drawerStatus.current_cash_zig || drawerStatus.session_cash_sales_zig || 0;
-                        const randAmount = drawerStatus.current_breakdown_by_currency?.rand?.cash || drawerStatus.current_cash_rand || drawerStatus.session_cash_sales_rand || 0;
-                        
-                        // If only one currency has amount, show it with proper currency
-                        if (zigAmount > 0 && usdAmount === 0 && randAmount === 0) {
-                          return formatCurrency(zigAmount, 'ZIG');
-                        }
-                        if (usdAmount > 0 && zigAmount === 0 && randAmount === 0) {
-                          return formatCurrency(usdAmount, 'USD');
-                        }
-                        if (randAmount > 0 && usdAmount === 0 && zigAmount === 0) {
-                          return formatCurrency(randAmount, 'RAND');
-                        }
-                        
-                        // If multiple currencies, show the total in USD equivalent or use fallback
-                        const totalCash = usdAmount + zigAmount + randAmount;
-                        if (totalCash > 0) {
-                          return formatCurrency(totalCash);
-                        }
-                        
-                        return formatCurrency(0);
-                      })()}
-                    </Text>
-                  </View>
-                  <View style={styles.sidebarMetricCard}>
-                    <Text style={styles.sidebarMetricLabel}>SALES</Text>
-                    <Text style={[styles.sidebarMetricValue, { color: '#f59e0b' }]}>
-                      {formatCurrency(
-                        (drawerStatus.session_sales_by_currency?.usd?.cash || drawerStatus.session_cash_sales_usd || 0) +
-                        (drawerStatus.session_sales_by_currency?.zig?.cash || drawerStatus.session_cash_sales_zig || 0) +
-                        (drawerStatus.session_sales_by_currency?.rand?.cash || drawerStatus.session_cash_sales_rand || 0)
-                      )}
-                    </Text>
-                  </View>
-                  <View style={styles.sidebarMetricCard}>
-                    <Text style={styles.sidebarMetricLabel}>EOD</Text>
-                    <Text style={[styles.sidebarMetricValue, { color: '#3b82f6' }]}>
-                      {formatCurrency(
-                        (drawerStatus.float_amount || 0) +
-                        ((drawerStatus.session_sales_by_currency?.usd?.cash || drawerStatus.session_cash_sales_usd || 0) +
-                         (drawerStatus.session_sales_by_currency?.zig?.cash || drawerStatus.session_cash_sales_zig || 0) +
-                         (drawerStatus.session_sales_by_currency?.rand?.cash || drawerStatus.session_cash_sales_rand || 0))
-                      )}
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Variance Alert - Calculated locally */}
-                {(() => {
-                  // Calculate EOD expected locally: Float + Sales
-                  const floatAmount = drawerStatus.float_amount || 0;
-                  const usdSales = drawerStatus.session_sales_by_currency?.usd?.cash || drawerStatus.session_cash_sales_usd || 0;
-                  const zigSales = drawerStatus.session_sales_by_currency?.zig?.cash || drawerStatus.session_cash_sales_zig || 0;
-                  const randSales = drawerStatus.session_sales_by_currency?.rand?.cash || drawerStatus.session_cash_sales_rand || 0;
-                  const totalSales = usdSales + zigSales + randSales;
-                  const eodExpected = floatAmount + totalSales;
-                  
-                  // Current cash in drawer
-                  const usdCash = drawerStatus.current_breakdown_by_currency?.usd?.cash || drawerStatus.current_cash_usd || drawerStatus.session_cash_sales_usd || 0;
-                  const zigCash = drawerStatus.current_breakdown_by_currency?.zig?.cash || drawerStatus.current_cash_zig || drawerStatus.session_cash_sales_zig || 0;
-                  const randCash = drawerStatus.current_breakdown_by_currency?.rand?.cash || drawerStatus.current_cash_rand || drawerStatus.session_cash_sales_rand || 0;
-                  const currentCash = usdCash + zigCash + randCash;
-                  
-                  // Variance = Current Cash - EOD Expected
-                  const variance = currentCash - eodExpected;
-                  
-                  return (
-                    <View style={[
-                      styles.sidebarVarianceAlert, 
-                      { backgroundColor: variance >= 0 ? '#22c55e' : '#ef4444' }
-                    ]}>
-                      <Text style={styles.sidebarVarianceAlertText}>
-                        {variance >= 0 ? '✅' : '⚠️'} 
-                        {variance >= 0 ? 'OVER' : 'SHORT'}: {formatCurrency(Math.abs(variance))}
-                      </Text>
-                    </View>
-                  );
-                })()}
-
-
-
-
-
-                {/* Multi-Currency Payment Breakdown */}
-                <View style={styles.sidebarCurrencyBreakdown}>
-                  <Text style={styles.sidebarPaymentTitle}>💱 CURRENCY BREAKDOWN</Text>
-                  
-                  {/* USD Section */}
-                  <View style={styles.sidebarCurrencySection}>
-                    <Text style={styles.sidebarCurrencyTitle}>💵 USD CASH</Text>
-                    <View style={styles.sidebarCurrencyRow}>
-                      <Text style={styles.sidebarCurrencyLabel}>Sales:</Text>
-                      <Text style={styles.sidebarCurrencyValue}>{formatCurrency(
-                        drawerStatus.session_sales_by_currency?.usd?.cash ||
-                        drawerStatus.current_breakdown_by_currency?.usd?.cash ||
-                        drawerStatus.session_cash_sales_usd ||
-                        drawerStatus.current_cash_usd || 0, 'USD')}</Text>
-                    </View>
-                    <View style={styles.sidebarCurrencyRow}>
-                      <Text style={styles.sidebarCurrencyLabel}>Transactions:</Text>
-                      <Text style={styles.sidebarCurrencyValue}>
-                        {drawerStatus.session_sales?.usd_count || 
-                         drawerStatus.session_sales_by_currency?.usd?.count ||
-                         drawerStatus.usd_transaction_count ||
-                         0}
-                      </Text>
-                    </View>
-                    <View style={styles.sidebarCurrencyRow}>
-                      <Text style={styles.sidebarCurrencyLabel}>In Drawer:</Text>
-                      <Text style={styles.sidebarCurrencyValue}>{formatCurrency(
-                        drawerStatus.current_breakdown_by_currency?.usd?.cash ||
-                        drawerStatus.session_sales_by_currency?.usd?.cash ||
-                        drawerStatus.current_cash_usd ||
-                        drawerStatus.session_cash_sales_usd || 0, 'USD')}</Text>
-                    </View>
-                  </View>
-                  
-                  {/* ZIG Section */}
-                  <View style={styles.sidebarCurrencySection}>
-                    <Text style={styles.sidebarCurrencyTitle}>💰 ZIG CASH</Text>
-                    <View style={styles.sidebarCurrencyRow}>
-                      <Text style={styles.sidebarCurrencyLabel}>Sales:</Text>
-                      <Text style={styles.sidebarCurrencyValue}>{formatCurrency(
-                        drawerStatus.session_sales_by_currency?.zig?.cash ||
-                        drawerStatus.current_breakdown_by_currency?.zig?.cash ||
-                        drawerStatus.session_cash_sales_zig ||
-                        drawerStatus.current_cash_zig || 0, 'ZIG')}</Text>
-                    </View>
-                    <View style={styles.sidebarCurrencyRow}>
-                      <Text style={styles.sidebarCurrencyLabel}>Transactions:</Text>
-                      <Text style={styles.sidebarCurrencyValue}>
-                        {drawerStatus.session_sales?.zig_count || 
-                         drawerStatus.session_sales_by_currency?.zig?.count ||
-                         drawerStatus.zig_transaction_count ||
-                         0}
-                      </Text>
-                    </View>
-                    <View style={styles.sidebarCurrencyRow}>
-                      <Text style={styles.sidebarCurrencyLabel}>In Drawer:</Text>
-                      <Text style={styles.sidebarCurrencyValue}>{formatCurrency(
-                        drawerStatus.current_breakdown_by_currency?.zig?.cash ||
-                        drawerStatus.session_sales_by_currency?.zig?.cash ||
-                        drawerStatus.current_cash_zig ||
-                        drawerStatus.session_cash_sales_zig || 0, 'ZIG')}</Text>
-                    </View>
-                  </View>
-                  
-                  {/* RAND Section */}
-                  <View style={styles.sidebarCurrencySection}>
-                    <Text style={styles.sidebarCurrencyTitle}>💸 RAND CASH</Text>
-                    <View style={styles.sidebarCurrencyRow}>
-                      <Text style={styles.sidebarCurrencyLabel}>Sales:</Text>
-                      <Text style={styles.sidebarCurrencyValue}>{formatCurrency(
-                        drawerStatus.session_sales_by_currency?.rand?.cash ||
-                        drawerStatus.current_breakdown_by_currency?.rand?.cash ||
-                        drawerStatus.session_cash_sales_rand ||
-                        drawerStatus.current_cash_rand || 0, 'RAND')}</Text>
-                    </View>
-                    <View style={styles.sidebarCurrencyRow}>
-                      <Text style={styles.sidebarCurrencyLabel}>Transactions:</Text>
-                      <Text style={styles.sidebarCurrencyValue}>
-                        {drawerStatus.session_sales?.rand_count || 
-                         drawerStatus.session_sales_by_currency?.rand?.count ||
-                         drawerStatus.rand_transaction_count ||
-                         0}
-                      </Text>
-                    </View>
-                    <View style={styles.sidebarCurrencyRow}>
-                      <Text style={styles.sidebarCurrencyLabel}>In Drawer:</Text>
-                      <Text style={styles.sidebarCurrencyValue}>{formatCurrency(
-                        drawerStatus.current_breakdown_by_currency?.rand?.cash ||
-                        drawerStatus.session_sales_by_currency?.rand?.cash ||
-                        drawerStatus.current_cash_rand ||
-                        drawerStatus.session_cash_sales_rand || 0, 'RAND')}</Text>
-                    </View>
-                  </View>
-                  
-                  {/* Card and Transfer (Currency Neutral) */}
-                  <View style={styles.sidebarPaymentBreakdown}>
-                    <Text style={styles.sidebarPaymentTitle}>💳 OTHER PAYMENTS</Text>
-                    <View style={styles.sidebarPaymentRow}>
-                      <Text style={styles.sidebarPaymentLabel}>💳 Card:</Text>
-                      <Text style={styles.sidebarPaymentValue}>{formatCurrency(drawerStatus.current_breakdown?.card || 0)}</Text>
-                    </View>
-                    <View style={styles.sidebarPaymentRow}>
-                      <Text style={styles.sidebarPaymentLabel}>🏦 Transfer:</Text>
-                      <Text style={styles.sidebarPaymentValue}>{formatCurrency(drawerStatus.current_breakdown?.transfer || 0)}</Text>
-                    </View>
-                    <View style={styles.sidebarPaymentRowTotal}>
-                      <Text style={styles.sidebarPaymentLabelTotal}>💰 Total Cash:</Text>
-                      <Text style={styles.sidebarPaymentValueTotal}>
-                        {formatCurrency(
-                          (drawerStatus.current_breakdown_by_currency?.usd?.cash || drawerStatus.current_cash_usd || drawerStatus.session_cash_sales_usd || 0) +
-                          (drawerStatus.current_breakdown_by_currency?.zig?.cash || drawerStatus.current_cash_zig || drawerStatus.session_cash_sales_zig || 0) +
-                          (drawerStatus.current_breakdown_by_currency?.rand?.cash || drawerStatus.current_cash_rand || drawerStatus.session_cash_sales_rand || 0)
-                        )}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-
-                <Text style={styles.sidebarDrawerNote}>
-                  🕐 Updated: {drawerStatus.last_activity ? new Date(drawerStatus.last_activity).toLocaleTimeString() : 'N/A'}
-                </Text>
-              </View>
-            )}
 
             {/* Quick Access Tools */}
             <ScrollView style={styles.sidebarFeaturesList} showsVerticalScrollIndicator={false}>
@@ -4704,6 +5195,66 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
     fontStyle: 'italic',
+  },
+
+  // Compact Sidebar Drawer Styles
+  sidebarCompactMetrics: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  sidebarCompactMetric: {
+    flex: 1,
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    padding: 8,
+    marginHorizontal: 2,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  sidebarCompactLabel: {
+    color: '#9ca3af',
+    fontSize: 10,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    textTransform: 'uppercase',
+  },
+  sidebarCompactValue: {
+    color: '#10b981',
+    fontSize: 12,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    marginTop: 4,
+  },
+  sidebarCompactSubtext: {
+    color: '#6b7280',
+    fontSize: 8,
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    marginTop: 2,
+  },
+  sidebarCompactVariance: {
+    backgroundColor: '#1f2937',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#3b82f6',
+    alignItems: 'center',
+  },
+  sidebarVarianceLabel: {
+    color: '#9ca3af',
+    fontSize: 10,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+  },
+  sidebarVarianceSubtext: {
+    color: '#3b82f6',
+    fontSize: 11,
+    fontWeight: '500',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    marginTop: 4,
+    textAlign: 'center',
   },
 
   topProductsContainer: {
@@ -6763,9 +7314,18 @@ const styles = StyleSheet.create({
   calculatorModalDisplayContainer: {
     backgroundColor: '#0a0a0a',
     paddingHorizontal: 20,
-    paddingVertical: 24,
+    paddingVertical: 16,
     borderBottomWidth: 2,
     borderBottomColor: '#374151',
+  },
+  calculatorFormulaText: {
+    color: '#f59e0b',
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: Platform.OS === 'web' ? 'Courier New, monospace' : 'Courier New',
+    textAlign: 'right',
+    marginBottom: 8,
+    minHeight: 20,
   },
   calculatorModalDisplay: {
     color: '#10b981',
@@ -7215,6 +7775,48 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
+  
+  // Neural Currency Card Styles - Larger Display
+  neuralCurrencyCard: {
+    flex: 2,
+    backgroundColor: 'rgba(0, 255, 255, 0.08)',
+    borderWidth: 2,
+    borderColor: '#00ffff',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+    position: 'relative',
+    overflow: 'hidden',
+    minHeight: 70,
+  },
+  neuralCurrencyLabel: {
+    color: '#00ffff',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  neuralCurrencyValue: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  neuralRatesText: {
+    color: '#00ff88',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 4,
+    textShadowColor: '#00ff88',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 3,
+  },
 
   // Currency Status Display Styles
   currencyStatusContainer: {
@@ -7464,6 +8066,287 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 4,
     textAlign: 'center',
+  },
+
+  // Transfer Wallet Modal Styles
+  transferWalletModalContainer: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 20,
+    padding: 0,
+    maxWidth: 450,
+    width: '95%',
+    maxHeight: '85vh',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 15,
+    borderWidth: 2,
+    borderColor: '#3b82f6',
+    alignSelf: 'center',
+    overflow: 'hidden',
+  },
+  transferWalletModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    paddingTop: 20,
+    backgroundColor: 'linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%)',
+    borderBottomWidth: 0,
+  },
+  transferWalletHeaderContent: {
+    flex: 1,
+  },
+  transferWalletModalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 4,
+  },
+  transferWalletModalSubtitle: {
+    fontSize: 12,
+    color: '#bfdbfe',
+  },
+  transferWalletModalCloseButton: {
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 25,
+    minWidth: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  transferWalletModalCloseButtonText: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  transferWalletModalBody: {
+    flex: 1,
+    padding: 12,
+    backgroundColor: '#111827',
+  },
+  transferWalletSection: {
+    marginBottom: 12,
+  },
+  transferWalletSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+  },
+  transferWalletSectionIcon: {
+    fontSize: 16,
+    marginRight: 8,
+  },
+  transferWalletSectionTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#60a5fa',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  transferWalletGridCompact: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  transferWalletButtonCompact: {
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    padding: 12,
+    width: '31%',
+    marginBottom: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#374151',
+    minHeight: 70,
+  },
+  transferWalletButtonActive: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#60a5fa',
+  },
+  transferWalletIconCompact: {
+    fontSize: 22,
+    marginBottom: 6,
+  },
+  transferWalletNameCompact: {
+    color: '#e5e7eb',
+    fontSize: 10,
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 12,
+  },
+  transferWalletModalFooter: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    padding: 16,
+    backgroundColor: '#111827',
+    borderTopWidth: 1,
+    borderTopColor: '#374151',
+  },
+  transferWalletModalFooterSpacer: {
+    height: 16,
+  },
+  transferWalletCancelButton: {
+    backgroundColor: '#4b5563',
+    paddingVertical: 14,
+    paddingHorizontal: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    minWidth: 140,
+  },
+  transferWalletCancelButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+
+  // Legacy styles kept for reference (can be removed later)
+  transferWalletGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  transferWalletButton: {
+    backgroundColor: '#374151',
+    borderRadius: 12,
+    padding: 16,
+    width: '48%',
+    marginBottom: 12,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#4b5563',
+  },
+  transferWalletButtonActive: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#2563eb',
+  },
+  transferWalletIcon: {
+    fontSize: 28,
+    marginBottom: 8,
+  },
+  transferWalletName: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  transferWalletCurrency: {
+    color: '#10b981',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+
+  // Card Details Styles
+  cardDetailsContainer: {
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#3b82f6',
+  },
+  cardDetailsLabel: {
+    color: '#3b82f6',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+  },
+  cardDetailsSubtext: {
+    color: '#9ca3af',
+    fontSize: 12,
+    marginBottom: 12,
+    fontStyle: 'italic',
+  },
+  cardNetworkButtons: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  cardNetworkButton: {
+    backgroundColor: '#374151',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    width: '48%',
+    marginBottom: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  cardNetworkButtonActive: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#2563eb',
+  },
+  cardNetworkButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  cardLast4Input: {
+    backgroundColor: '#374151',
+    borderWidth: 2,
+    borderColor: '#3b82f6',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 18,
+    color: '#ffffff',
+    textAlign: 'center',
+    fontWeight: 'bold',
+  },
+
+  // Transfer Details Styles
+  transferDetailsContainer: {
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#10b981',
+  },
+  transferDetailsLabel: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+  },
+  transferDetailsSubtext: {
+    color: '#ffffff',
+    fontSize: 14,
+    marginBottom: 12,
+    fontWeight: '600',
+  },
+  changeWalletButton: {
+    backgroundColor: '#3b82f6',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  changeWalletButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  transferReferenceInput: {
+    backgroundColor: '#374151',
+    borderWidth: 1,
+    borderColor: '#4b5563',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    color: '#ffffff',
   },
 });
 

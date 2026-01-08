@@ -12,7 +12,7 @@ from .cash_float_refund_view import add_drawer_refund
 from .reconciliation_views import CashierCountView, ReconciliationSessionView, EODReconciliationEnhancedView
 from .cashier_refund_view import process_cashier_refund, get_cashier_refunds
 # Import cash float API views
-from .models import cash_float_management, activate_cashier_drawer, update_drawer_sale, settle_drawer_at_eod, get_all_cashiers_drawer_status, reset_all_drawers_at_eod
+from .models import cash_float_management, activate_cashier_drawer, update_drawer_sale, settle_drawer_at_eod, get_all_cashiers_drawer_status, reset_all_drawers_at_eod, emergency_reset_all_drawers, check_cashier_drawer_access, update_cashier_drawer_access, get_shop_status, get_cashier_drawer_today
 # Import exchange rate views
 from .exchange_rate_views import exchange_rate_api, exchange_rate_history_api, convert_currency_api, set_current_rates_api
 
@@ -106,7 +106,13 @@ urlpatterns = [
     path('cash-float/refund/', add_drawer_refund, name='add-drawer-refund'),
     path('cash-float/settle/', settle_drawer_at_eod, name='settle-drawer-eod'),
     path('cash-float/reset-all/', reset_all_drawers_at_eod, name='reset-all-drawers-eod'),
+    path('cash-float/emergency-reset/', emergency_reset_all_drawers, name='emergency-reset-drawers'),
     path('cash-float/all-status/', get_all_cashiers_drawer_status, name='all-cashiers-drawer-status'),
+    path('cash-float/drawer-access/check/', check_cashier_drawer_access, name='check-drawer-access'),
+    path('cash-float/drawer-access/update/', update_cashier_drawer_access, name='update-drawer-access'),
+    
+    # Shop Status endpoint (anonymous - no auth required)
+    path('shop-status-anonymous/', get_shop_status, name='shop-status-anonymous'),
     
     # Simple Cashier Refund endpoints
     path('cashier/refund/', process_cashier_refund, name='process-cashier-refund'),
@@ -134,4 +140,12 @@ urlpatterns = [
     path('wallet/summary/', views.WalletSummaryView.as_view(), name='wallet-summary'),
     path('wallet/transactions/', views.WalletTransactionsView.as_view(), name='wallet-transactions'),
     path('wallet/adjustment/', views.WalletAdjustmentView.as_view(), name='wallet-adjustment'),
+    
+    # Drawer Access Control endpoints
+    path('drawer-access/grant/', views.GrantDrawerAccessView.as_view(), name='grant-drawer-access'),
+    path('drawer-access/revoke/', views.RevokeDrawerAccessView.as_view(), name='revoke-drawer-access'),
+    path('drawer-access/status/', views.DrawerAccessStatusView.as_view(), name='drawer-access-status'),
+    
+    # NEW: Today's drawer endpoint - fetches ONLY today's sales for drawer display
+    path('cash-float/drawer-today/', get_cashier_drawer_today, name='cashier-drawer-today'),
 ]

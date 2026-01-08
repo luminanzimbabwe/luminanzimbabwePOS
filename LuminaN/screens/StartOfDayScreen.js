@@ -10,6 +10,7 @@ import {
   Modal,
   RefreshControl,
   Platform,
+  Switch,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
@@ -42,6 +43,10 @@ const StartOfDayScreen = ({ navigation, route }) => {
   const [floatAmountRAND, setFloatAmountRAND] = useState('');
   const [loadingFloat, setLoadingFloat] = useState(false);
 
+  // Drawer access state
+  const [drawerAccessLoading, setDrawerAccessLoading] = useState(false);
+  const [cashierDrawerAccess, setCashierDrawerAccess] = useState({});
+
   useEffect(() => {
     fetchShopStatus();
     fetchCashiers();
@@ -72,6 +77,13 @@ const StartOfDayScreen = ({ navigation, route }) => {
       if (styleElement) document.head.removeChild(styleElement);
     };
   }, []);
+
+  // Fetch drawer access when cashiers are loaded
+  useEffect(() => {
+    if (cashiers.length > 0) {
+      fetchCashierDrawerAccess();
+    }
+  }, [cashiers.length]);
 
   const fetchShopStatus = async () => {
     try {
@@ -164,6 +176,69 @@ const StartOfDayScreen = ({ navigation, route }) => {
       Alert.alert('Error', error.response?.data?.error || 'Failed to fetch drawer status.');
     } finally {
       setDrawerLoading(false);
+    }
+  };
+
+  // Fetch drawer access status for all cashiers
+  const fetchCashierDrawerAccess = async () => {
+    try {
+      setDrawerAccessLoading(true);
+      const accessMap = {};
+      
+      for (const cashier of cashiers) {
+        if (cashier.id) {
+          try {
+            const response = await shopAPI.checkDrawerAccess(cashier.id);
+            if (response.data && response.data.has_access !== undefined) {
+              accessMap[cashier.id] = response.data.has_access;
+            } else {
+              accessMap[cashier.id] = true; // Default to true
+            }
+          } catch (err) {
+            accessMap[cashier.id] = true; // Default to true on error
+          }
+        }
+      }
+      
+      setCashierDrawerAccess(accessMap);
+    } catch (error) {
+      console.error('❌ Error fetching drawer access:', error);
+    } finally {
+      setDrawerAccessLoading(false);
+    }
+  };
+
+  // Toggle drawer access for a cashier
+  const toggleDrawerAccess = async (cashierId, currentAccess) => {
+    try {
+      const newAccess = !currentAccess;
+      console.log(`🔄 Toggling drawer access for cashier ${cashierId}: ${currentAccess} -> ${newAccess}`);
+      
+      const response = await shopAPI.updateDrawerAccess(cashierId, newAccess);
+      
+      console.log('📋 API Response:', response.data);
+      
+      if (response.data && response.data.success) {
+        setCashierDrawerAccess(prev => {
+          console.log(`✅ Updated drawer access for cashier ${cashierId}: ${newAccess}`);
+          return {
+            ...prev,
+            [cashierId]: newAccess
+          };
+        });
+        
+        Alert.alert(
+          'Success',
+          `${response.data.cashier_name}'s drawer access is now ${newAccess ? 'ENABLED' : 'DISABLED'}`
+        );
+      } else {
+        console.error('❌ API returned error:', response.data?.error);
+        Alert.alert('Error', response.data?.error || 'Failed to update drawer access');
+      }
+    } catch (error) {
+      console.error('❌ Error updating drawer access:', error);
+      console.error('📋 Error response:', error.response?.data);
+      Alert.alert('Error', error.response?.data?.error || 'Failed to update drawer access');
     }
   };
 
@@ -764,6 +839,19 @@ const StartOfDayScreen = ({ navigation, route }) => {
                   <View style={styles.shiftStatusBadge}>
                     <Icon name="check-circle" size={16} color="#10b981" />
                     <Text style={styles.ultimateShiftStatusText}>Active</Text>
+                  </View>
+                  <View style={styles.drawerAccessToggle}>
+                    <Text style={styles.drawerAccessLabel}>Drawer Access</Text>
+                    <Switch
+                      value={cashierDrawerAccess[shift.cashier_id] !== false}
+                      onValueChange={() => toggleDrawerAccess(shift.cashier_id, cashierDrawerAccess[shift.cashier_id] !== false)}
+                      trackColor={{ false: '#ef4444', true: '#10b981' }}
+                      thumbColor="#ffffff"
+                      disabled={drawerAccessLoading}
+                    />
+                    <Text style={styles.drawerAccessStatus}>
+                      {cashierDrawerAccess[shift.cashier_id] !== false ? 'ON' : 'OFF'}
+                    </Text>
                   </View>
                   <TouchableOpacity style={styles.ultimateSetFloatButtonSmall} onPress={() => openFloatModal({ cashier_id: shift.cashier_id, cashier: shift.cashier_name, opening_balance: shift.opening_balance })}>
                     <Icon name="tune" size={12} color="#ffffff" />
@@ -2092,6 +2180,28 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 10,
     marginLeft: 4,
+  },
+  
+  // Drawer Access Toggle Styles
+  drawerAccessToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#374151',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  drawerAccessLabel: {
+    color: '#94a3b8',
+    fontSize: 10,
+    marginRight: 8,
+  },
+  drawerAccessStatus: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    marginLeft: 6,
+    color: '#10b981',
   },
 
   // Summary Section Styles

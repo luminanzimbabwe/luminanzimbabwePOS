@@ -145,9 +145,11 @@ const EODProductionScreen = () => {
       // Wait for all cashier counts to be saved
       await Promise.all(savePromises);
       
-      // Reset ALL drawers at EOD - wipe out all money so next day starts fresh
+      // CRITICAL: PERMANENTLY DELETE ALL DRAWER DATA for today before finalizing
+      // This ensures next day starts fresh with zero sales
+      // We do this FIRST to ensure data is cleared before session completion
+      console.log('🔄 PERMANENTLY DELETING all drawer data for today...');
       try {
-        console.log('🔄 Starting EOD drawer reset for all cashiers...');
         const resetResponse = await shopAPI.resetAllDrawersAtEOD();
         if (resetResponse.data && resetResponse.data.success) {
           console.log(`✅ ${resetResponse.data.message}`);
@@ -500,6 +502,18 @@ const EODProductionScreen = () => {
             <Icon name="account-balance" size={28} color="#00ff88" />
             <Text style={styles.neuralFinancialTitle}>FINANCIAL NEURAL GRID</Text>
             <View style={styles.financialHeaderScanner} />
+          </View>
+          
+          {/* Shop Status Indicator */}
+          <View style={[styles.neuralStatusPanel, { borderColor: '#ffaa00', backgroundColor: 'rgba(255, 170, 0, 0.1)' }]}>
+            <View style={styles.neuralStatusIndicator}>
+              <View style={[styles.neuralStatusPulse, { backgroundColor: '#ffaa00' }]} />
+              <Text style={[styles.neuralStatusText, { color: '#ffaa00' }]}>SHOP STATUS: CLOSING</Text>
+              <Icon name="schedule" size={16} color="#ffaa00" />
+            </View>
+            <Text style={{ color: '#ffaa00', fontSize: 12, textAlign: 'center', marginTop: 8 }}>
+              ⚠️ End of day in progress - All data will be PERMANENTLY DELETED after finalization
+            </Text>
           </View>
           
           {/* Enterprise Financial Overview - Multi-Currency */}

@@ -1034,10 +1034,7 @@ const SalesDashboardScreen = () => {
           </View>
         </View>
         
-        <View style={[
-          styles.ultimateCurrencyGrid, 
-          analyticsData?.performance_metrics?.currency_breakdown?.length > 2 ? styles.singleColumnCurrencyGrid : null
-        ]}>
+        <View style={styles.ultimateCurrencyGrid}>
           {analyticsData?.performance_metrics.currency_breakdown.map((currency, index) => {
             const maxRevenue = Math.max(...analyticsData.performance_metrics.currency_breakdown.map(c => c.total_revenue));
             const revenuePercentage = (currency.total_revenue / maxRevenue) * 100;
@@ -1064,8 +1061,7 @@ const SalesDashboardScreen = () => {
               <View key={currency.currency} style={[
                 styles.ultimateCurrencyCard,
                 { borderLeftColor: performanceColor },
-                isLeading && styles.leadingCurrencyCard,
-                analyticsData?.performance_metrics?.currency_breakdown?.length > 2 ? styles.singleColumnCurrencyCard : null
+                isLeading && styles.leadingCurrencyCard
               ]}>
                 {/* Elite Currency Header */}
                 <View style={styles.ultimateCurrencyHeader}>
@@ -4356,7 +4352,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#1e293b',
     borderRadius: 10,
     padding: 10,
-    width: '31%',
+    width: '48%',
     marginBottom: 10,
     borderLeftWidth: 4,
     boxShadow: '0 4px 8px rgba(0, 0, 0, 0.3)',

@@ -10,7 +10,7 @@ import {
   Platform,
   RefreshControl,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { shopStorage } from '../services/storage';
 import { shopAPI } from '../services/api';
@@ -21,11 +21,129 @@ const CashierDrawerScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [drawerStatus, setDrawerStatus] = useState(null);
   const [shopData, setShopData] = useState(null);
+  const [hasDrawerAccess, setHasDrawerAccess] = useState(true);
+  const [checkingAccess, setCheckingAccess] = useState(true);
+  // Track last refresh date to detect day changes and reset transaction counts
+  const [lastRefreshDate, setLastRefreshDate] = useState(new Date().toDateString());
+  // Track shop status to determine if we should show drawer data
+  const [shopStatus, setShopStatus] = useState(null);
+  // Track if shop was closed (for EOD reset detection)
+  const [wasShopClosed, setWasShopClosed] = useState(false);
 
   useEffect(() => {
+    checkDrawerAccess();
     loadDrawerData();
     loadShopData();
+    checkShopStatus();
   }, []);
+
+  // CRITICAL: Refresh drawer data EVERY TIME the screen comes into focus
+  // This ensures we always show fresh data, never cached old data
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('📱 Drawer screen came into focus - refreshing data...');
+      loadDrawerData();
+      checkShopStatus();
+      return () => {
+        console.log('📱 Drawer screen went out of focus');
+      };
+    }, [])
+  );
+
+  // Auto-refresh drawer every 10 seconds to ensure fresh data
+  useEffect(() => {
+    const refreshInterval = setInterval(() => {
+      if (!loading && !refreshing) {
+        console.log('🔄 Auto-refreshing drawer data...');
+        loadDrawerData();
+      }
+    }, 10000); // 10 seconds
+
+    return () => clearInterval(refreshInterval);
+  }, [loading, refreshing]);
+
+  // Check shop status to determine if drawer should show data or be empty
+  const checkShopStatus = async () => {
+    try {
+      // Use anonymous endpoint that doesn't require authentication
+      const response = await shopAPI.getAnonymousEndpoint('/shop-status-anonymous/');
+      if (response.data && response.data.shop_day) {
+        setShopStatus(response.data.shop_day);
+        console.log('📋 Shop status:', response.data.shop_day);
+      }
+    } catch (error) {
+      console.error('Error checking shop status:', error);
+      // Default to showing drawer as active if we can't check
+      setShopStatus({ status: 'OPEN', is_open: true, is_closed: false });
+    }
+  };
+
+  // Check if cashier has drawer access permission
+  const checkDrawerAccess = async () => {
+    try {
+      setCheckingAccess(true);
+      const credentials = await shopStorage.getCredentials();
+      console.log('🔍 Checking drawer access for credentials:', credentials?.id);
+      
+      if (!credentials || !credentials.id) {
+        console.log('⚠️ No credentials found, defaulting to allow access');
+        setHasDrawerAccess(true); // Default to allow if no credentials
+        return;
+      }
+      
+      console.log('📡 Calling checkDrawerAccess API for cashier:', credentials.id);
+      const response = await shopAPI.checkDrawerAccess(credentials.id);
+      console.log('📋 checkDrawerAccess response:', response.data);
+      
+      if (response.data && response.data.has_access !== undefined) {
+        setHasDrawerAccess(response.data.has_access);
+        console.log(`✅ Drawer access set to: ${response.data.has_access}`);
+      } else {
+        console.log('⚠️ No has_access in response, defaulting to allow');
+        setHasDrawerAccess(true); // Default to allow if response is unexpected
+      }
+    } catch (error) {
+      console.error('❌ Error checking drawer access:', error);
+      console.error('📋 Error response:', error.response?.data);
+      setHasDrawerAccess(true); // Default to allow on error
+    } finally {
+      setCheckingAccess(false);
+    }
+  };
+
+  // Check if day has changed and reset transaction counts if needed
+  const checkAndResetTransactionCounts = (currentDrawerStatus) => {
+    if (!currentDrawerStatus) return currentDrawerStatus;
+    
+    const today = new Date().toDateString();
+    const lastDate = lastRefreshDate;
+    
+    // If it's a new day, reset transaction counts to 0
+    if (today !== lastDate) {
+      setLastRefreshDate(today);
+      
+      // Return a copy with reset transaction counts
+      return {
+        ...currentDrawerStatus,
+        usd_transaction_count: 0,
+        zig_transaction_count: 0,
+        rand_transaction_count: 0,
+        total_transaction_count: 0,
+        session_sales_by_currency: {
+          usd: { ...currentDrawerStatus.session_sales_by_currency?.usd, count: 0 },
+          zig: { ...currentDrawerStatus.session_sales_by_currency?.zig, count: 0 },
+          rand: { ...currentDrawerStatus.session_sales_by_currency?.rand, count: 0 },
+        },
+        transaction_counts_by_currency: {
+          usd: 0,
+          zig: 0,
+          rand: 0,
+        },
+      };
+    }
+    
+    return currentDrawerStatus;
+  };
 
   const loadShopData = async () => {
     try {
@@ -47,59 +165,84 @@ const CashierDrawerScreen = () => {
         return;
       }
 
-      // Load drawer status specifically for this cashier
-      const response = await shopAPI.getCashFloat();
+      // First check shop status - CRITICAL: if shop is closed, drawer should be EMPTY
+      // Use anonymous endpoint that doesn't require authentication
+      let isShopOpen = true;
+      try {
+        const statusResponse = await shopAPI.getAnonymousEndpoint('/shop-status-anonymous/');
+        if (statusResponse.data && statusResponse.data.shop_day) {
+          const shopDay = statusResponse.data.shop_day;
+          isShopOpen = shopDay.status === 'OPEN' && !shopDay.is_closed;
+          setShopStatus(shopDay);
+          console.log('📋 Shop status:', shopDay);
+        }
+      } catch (statusError) {
+        console.warn('Could not check shop status, assuming open:', statusError);
+      }
+
+      // CRITICAL: If shop is closed, show ZEROED/EMPTY drawer regardless of date
+      // This handles the case where shop opens at 8, closes at 10, reopens at 1
+      // When closed, drawer must be empty so it starts fresh when reopened
+      if (!isShopOpen) {
+        console.log('🔒 Shop is CLOSED - showing empty drawer for new session');
+        setDrawerStatus({
+          cashier: credentials.name || credentials.username || 'Unknown',
+          float_amount: 0,
+          float_amount_zig: 0,
+          float_amount_rand: 0,
+          current_cash_usd: 0,
+          current_cash_zig: 0,
+          current_cash_rand: 0,
+          session_sales_by_currency: {
+            usd: { total: 0, count: 0, cash: 0, card: 0, ecocash: 0, transfer: 0 },
+            zig: { total: 0, count: 0, cash: 0, card: 0, ecocash: 0, transfer: 0 },
+            rand: { total: 0, count: 0, cash: 0, card: 0, ecocash: 0, transfer: 0 }
+          },
+          transaction_counts_by_currency: {
+            usd: 0,
+            zig: 0,
+            rand: 0
+          },
+          usd_transaction_count: 0,
+          zig_transaction_count: 0,
+          rand_transaction_count: 0,
+          total_transaction_count: 0,
+          status: 'INACTIVE',
+          is_shop_closed: true
+        });
+        setLoading(false);
+        return;
+      }
+
+      // Shop is OPEN - load drawer data using NEW endpoint that only returns TODAY's sales
+      // This endpoint fetches from Sale table filtered by today's date only
+      const cashierId = credentials.id;
+      if (!cashierId) {
+        console.log('⚠️ No cashier ID found, cannot load drawer');
+        setLoading(false);
+        return;
+      }
+      
+      console.log('📡 Loading today\'s drawer data for cashier:', cashierId);
+      const response = await shopAPI.getCashierDrawerToday(cashierId);
       
       if (response.data && response.data.success) {
-        // Handle two possible response formats:
-        // 1. Cashier request: { success: true, drawer: {...} }
-        // 2. Owner request: { success: true, shop_status: { drawers: [...] } }
+        const drawerData = response.data.drawer;
         
-        // Check if drawer is directly in response (cashier case)
-        if (response.data.drawer) {
-          setDrawerStatus(response.data.drawer);
-        } 
-        // Check if shop_status has drawers (owner case)
-        else if (response.data.shop_status && response.data.shop_status.drawers) {
-          const drawers = response.data.shop_status.drawers;
-          
-          // Match drawer by cashier name/id/email
-          const cashierId = credentials.name || credentials.username || credentials.id || 
-                          credentials.cashier_id || credentials.user_id || credentials.email;
-          
-          const matched = drawers.find(d => {
-            if (!d) return false;
-            if (typeof d.cashier === 'string' && cashierId && d.cashier.toLowerCase() === String(cashierId).toLowerCase()) return true;
-            if (d.cashier_id && credentials?.id && String(d.cashier_id) === String(credentials.id)) return true;
-            return false;
-          });
-
-          if (matched) {
-            setDrawerStatus(matched);
-          } else if (drawers.length === 1) {
-            setDrawerStatus(drawers[0]);
-          }
+        // If the new endpoint returned empty drawer data for today, show empty state
+        if (drawerData && drawerData.is_empty_drawer) {
+          console.log('📋 Today\'s drawer is empty (no sales yet today)');
+          setDrawerStatus(drawerData);
+        } else if (drawerData) {
+          console.log('📋 Today\'s drawer data loaded:', drawerData);
+          setDrawerStatus(drawerData);
+        } else {
+          console.log('📋 No drawer data returned');
+          setDrawerStatus(null);
         }
-        
-        // Also handle case where response has drawers array directly
-        if (response.data.drawers && Array.isArray(response.data.drawers)) {
-          const drawers = response.data.drawers;
-          const cashierId = credentials.name || credentials.username || credentials.id || 
-                          credentials.cashier_id || credentials.user_id || credentials.email;
-          
-          const matched = drawers.find(d => {
-            if (!d) return false;
-            if (typeof d.cashier === 'string' && cashierId && d.cashier.toLowerCase() === String(cashierId).toLowerCase()) return true;
-            if (d.cashier_id && credentials?.id && String(d.cashier_id) === String(credentials.id)) return true;
-            return false;
-          });
-
-          if (matched) {
-            setDrawerStatus(matched);
-          } else if (drawers.length === 1) {
-            setDrawerStatus(drawers[0]);
-          }
-        }
+      } else {
+        console.log('⚠️ Failed to load drawer data:', response.data);
+        setDrawerStatus(null);
       }
     } catch (error) {
       console.error('Error loading drawer data:', error);
@@ -129,16 +272,7 @@ const CashierDrawerScreen = () => {
     }
   };
 
-  // Get EOD expected (float + sales)
-  const getEODExpected = () => {
-    if (!drawerStatus) return { usd: 0, zig: 0, rand: 0 };
-    
-    return {
-      usd: (drawerStatus.float_amount || 0) + (drawerStatus.session_sales_by_currency?.usd?.total || drawerStatus.session_cash_sales_usd || drawerStatus.session_sales_usd || 0),
-      zig: (drawerStatus.float_amount_zig || 0) + (drawerStatus.session_sales_by_currency?.zig?.total || drawerStatus.session_cash_sales_zig || drawerStatus.session_sales_zig || 0),
-      rand: (drawerStatus.float_amount_rand || 0) + (drawerStatus.session_sales_by_currency?.rand?.total || drawerStatus.session_cash_sales_rand || drawerStatus.session_sales_rand || 0)
-    };
-  };
+
 
   // Get formatted cash display string with proper spacing
   const getFormattedCashDisplay = () => {
@@ -150,48 +284,8 @@ const CashierDrawerScreen = () => {
     return parts.length > 0 ? parts.join(' + ') : '$0.00';
   };
 
-  // Get formatted EOD display string
-  const getFormattedEODDisplay = () => {
-    const eod = getEODExpected();
-    const parts = [];
-    if (eod.usd > 0) parts.push(formatCurrency(eod.usd, 'USD'));
-    if (eod.zig > 0) parts.push(formatCurrency(eod.zig, 'ZIG'));
-    if (eod.rand > 0) parts.push(formatCurrency(eod.rand, 'RAND'));
-    return parts.length > 0 ? parts.join(' + ') : '$0.00';
-  };
 
-  // Get variance (actual - expected) for each currency
-  const getVariance = () => {
-    if (!drawerStatus) return { usd: 0, zig: 0, rand: 0 };
-    const eod = getEODExpected();
-    return {
-      usd: usd - eod.usd,
-      zig: zig - eod.zig,
-      rand: rand - eod.rand
-    };
-  };
 
-  // Get formatted variance display
-  const getFormattedVarianceDisplay = () => {
-    const variance = getVariance();
-    const parts = [];
-    if (variance.usd !== 0) parts.push(`${variance.usd >= 0 ? '+' : ''}${formatCurrency(variance.usd, 'USD')}`);
-    if (variance.zig !== 0) parts.push(`${variance.zig >= 0 ? '+' : ''}${formatCurrency(variance.zig, 'ZIG')}`);
-    if (variance.rand !== 0) parts.push(`${variance.rand >= 0 ? '+' : ''}${formatCurrency(variance.rand, 'RAND')}`);
-    return parts.length > 0 ? parts.join(' / ') : 'BALANCED';
-  };
-
-  // Get variance status
-  const getVarianceStatus = () => {
-    const variance = getVariance();
-    const isOver = variance.usd > 0 || variance.zig > 0 || variance.rand > 0;
-    const isShort = variance.usd < 0 || variance.zig < 0 || variance.rand < 0;
-    
-    if (!isOver && !isShort) return { title: '✅ BALANCED', color: '#10b981', value: '0.00' };
-    if (isOver) return { title: '📈 OVER BY', color: '#22c55e', value: '+' + getFormattedVarianceDisplay() };
-    if (isShort) return { title: '📉 SHORT BY', color: '#ef4444', value: getFormattedVarianceDisplay() };
-    return { title: '✅ BALANCED', color: '#10b981', value: '0.00' };
-  };
 
   // Get cash amounts for each currency (TODAY'S money only)
   const getCashAmounts = () => {
@@ -239,6 +333,23 @@ const CashierDrawerScreen = () => {
   const getTransactionCounts = () => {
     if (!drawerStatus) return { usd: 0, zig: 0, rand: 0 };
     
+    // Check if this is a new day (session sales are 0 but transaction counts are not)
+    // This can happen after EOD reset - show 0 for new day
+    const usdSales = drawerStatus.session_sales_by_currency?.usd?.total || 
+                    drawerStatus.session_cash_sales_usd ||
+                    drawerStatus.session_sales_usd || 0;
+    const zigSales = drawerStatus.session_sales_by_currency?.zig?.total || 
+                    drawerStatus.session_cash_sales_zig ||
+                    drawerStatus.session_sales_zig || 0;
+    const randSales = drawerStatus.session_sales_by_currency?.rand?.total || 
+                     drawerStatus.session_cash_sales_rand ||
+                     drawerStatus.session_sales_rand || 0;
+    
+    // If all session sales are 0, reset transaction counts to 0 (new day)
+    if (usdSales === 0 && zigSales === 0 && randSales === 0) {
+      return { usd: 0, zig: 0, rand: 0 };
+    }
+    
     return {
       usd: drawerStatus.transaction_counts_by_currency?.usd || 
            drawerStatus.session_sales_by_currency?.usd?.count ||
@@ -252,7 +363,7 @@ const CashierDrawerScreen = () => {
     };
   };
 
-  if (loading) {
+  if (loading || checkingAccess) {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
@@ -264,6 +375,34 @@ const CashierDrawerScreen = () => {
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#10b981" />
           <Text style={styles.loadingText}>Loading drawer information...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Show access denied message if user doesn't have drawer access
+  if (!hasDrawerAccess) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <Text style={styles.backButton}>← Back</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>💰 My Drawer</Text>
+        </View>
+        <View style={styles.noAccessContainer}>
+          <Icon name="lock" size={64} color="#ef4444" />
+          <Text style={styles.noAccessTitle}>Access Denied</Text>
+          <Text style={styles.noAccessText}>
+            You don't have permission to access the cash drawer.
+            Please contact your manager or shop owner.
+          </Text>
+          <TouchableOpacity 
+            style={styles.noAccessButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.noAccessButtonText}>Go Back</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -299,9 +438,15 @@ const CashierDrawerScreen = () => {
 
       <View style={styles.content}>
         {/* Status */}
-        <View style={styles.statusSection}>
-          <Text style={styles.statusText}>✅ Drawer is active and working correctly</Text>
-        </View>
+        {drawerStatus?.is_shop_closed ? (
+          <View style={[styles.statusSection, { borderColor: '#ef4444' }]}>
+            <Text style={[styles.statusText, { color: '#ef4444' }]}>🔒 Shop is closed - Drawer is empty for new day</Text>
+          </View>
+        ) : (
+          <View style={styles.statusSection}>
+            <Text style={styles.statusText}>✅ Drawer is active and working correctly</Text>
+          </View>
+        )}
 
         {!drawerStatus ? (
           <View style={styles.noDrawerContainer}>
@@ -400,13 +545,7 @@ const CashierDrawerScreen = () => {
                 </View>
               </View>
 
-              <View style={styles.overviewRow}>
-                <View style={styles.overviewItem}>
-                  <Text style={styles.overviewIcon}>⚡</Text>
-                  <Text style={styles.overviewLabel}>EOD Expected</Text>
-                  <Text style={styles.overviewValue}>{getFormattedEODDisplay()}</Text>
-                </View>
-              </View>
+
             </View>
 
             {/* Payment Methods Breakdown */}
@@ -469,23 +608,8 @@ const CashierDrawerScreen = () => {
               </View>
             </View>
 
-            {/* Over/Short */}
-            {(() => {
-              const status = getVarianceStatus();
-              const eod = getEODExpected();
-              return (
-                <View style={styles.sectionCard}>
-                  <View style={styles.sectionHeader}>
-                    <Icon name="check-circle" size={20} color={status.color} />
-                    <Text style={[styles.sectionTitle, { color: status.color }]}>{status.title}</Text>
-                  </View>
-                  <Text style={[styles.overByValue, { color: status.color }]}>{status.value}</Text>
-                  <Text style={styles.overBySubtext}>
-                    Expected: {getFormattedEODDisplay()} | Actual: {getFormattedCashDisplay()}
-                  </Text>
-                </View>
-              );
-            })()}
+
+
 
             {/* Cash Breakdown */}
             <View style={styles.sectionCard}>
@@ -570,11 +694,7 @@ const CashierDrawerScreen = () => {
                   <Text style={styles.performanceValue}>{getFormattedCashDisplay()}</Text>
                 </View>
                 
-                <View style={styles.performanceItem}>
-                  <Text style={styles.performanceIcon}>⚡</Text>
-                  <Text style={styles.performanceLabel}>Efficiency</Text>
-                  <Text style={[styles.performanceValue, { color: '#10b981' }]}>100.0%</Text>
-                </View>
+
               </View>
               
               <View style={styles.lastUpdatedRow}>
@@ -615,12 +735,7 @@ const CashierDrawerScreen = () => {
                 </View>
               </View>
               
-              <View style={styles.totalWalletRow}>
-                <Icon name="account-balance-wallet" size={18} />
-                <Text style={styles.totalWalletLabel}>TOTAL WALLET VALUE</Text>
-                <Text style={styles.totalWalletValue}>{formatCurrency(usd, 'USD')}</Text>
-                <Text style={styles.totalWalletSubtext}>Sales are automatically routed to the correct currency wallet based on payment method</Text>
-              </View>
+
             </View>
 
             {/* Main Currency Display - 3 Cards */}
@@ -764,6 +879,37 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     marginTop: 16,
     fontSize: 16,
+  },
+  noAccessContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  noAccessTitle: {
+    color: '#ef4444',
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginTop: 20,
+    marginBottom: 12,
+  },
+  noAccessText: {
+    color: '#9ca3af',
+    fontSize: 16,
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: 30,
+  },
+  noAccessButton: {
+    backgroundColor: '#ef4444',
+    paddingHorizontal: 30,
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  noAccessButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   content: {
     flex: 1,

@@ -2986,3 +2986,215 @@ class WalletAdjustmentView(APIView):
             return Response({
                 'error': f'Server error: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================================================
+# DRAWER ACCESS CONTROL API VIEWS
+# ============================================================================
+
+@method_decorator(csrf_exempt, name='dispatch')
+class GrantDrawerAccessView(APIView):
+    """Grant drawer access to a cashier (owner only)"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    
+    def post(self, request):
+        try:
+            shop = ShopConfiguration.objects.get()
+            
+            # Verify owner credentials
+            email = request.data.get('email')
+            password = request.data.get('password')
+            
+            if not email or not password:
+                return Response({"error": "Owner authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+            
+            if shop.email != email or not shop.validate_shop_owner_master_password(password):
+                return Response({"error": "Invalid owner credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+            
+            # Get cashier ID
+            cashier_id = request.data.get('cashier_id')
+            if not cashier_id:
+                return Response({"error": "Cashier ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+            
+            try:
+                cashier = Cashier.objects.get(id=cashier_id, shop=shop)
+            except Cashier.DoesNotExist:
+                return Response({"error": "Cashier not found"}, status=status.HTTP_404_NOT_FOUND)
+            
+            # Grant drawer access by updating CashFloat
+            today = timezone.now().date()
+            cash_float, created = CashFloat.objects.get_or_create(
+                shop=shop,
+                cashier=cashier,
+                date=today,
+                defaults={
+                    'float_amount': Decimal('0.00'),
+                    'float_amount_zig': Decimal('0.00'),
+                    'float_amount_rand': Decimal('0.00'),
+                    'current_cash': Decimal('0.00'),
+                    'current_card': Decimal('0.00'),
+                    'current_ecocash': Decimal('0.00'),
+                    'current_transfer': Decimal('0.00'),
+                    'current_total': Decimal('0.00'),
+                    'status': 'ACTIVE'
+                }
+            )
+            
+            # Grant access if not already granted
+            if cash_float.drawer_access_granted:
+                return Response({
+                    'success': True,
+                    'message': f'Drawer access was already granted to {cashier.name}',
+                    'cashier': {
+                        'id': cashier.id,
+                        'name': cashier.name,
+                        'drawer_access_granted': True
+                    }
+                })
+            
+            # Grant drawer access
+            cash_float.drawer_access_granted = True
+            cash_float.drawer_access_granted_at = timezone.now()
+            cash_float.drawer_access_granted_by = shop.name  # Shop owner granted it
+            cash_float.save()
+            
+            return Response({
+                'success': True,
+                'message': f'Drawer access granted to {cashier.name}',
+                'cashier': {
+                    'id': cashier.id,
+                    'name': cashier.name,
+                    'drawer_access_granted': True,
+                    'access_granted_at': cash_float.drawer_access_granted_at.isoformat()
+                }
+            })
+        except Exception as e:
+            return Response({
+                'error': f'Server error: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class RevokeDrawerAccessView(APIView):
+    """Revoke drawer access from a cashier (owner only)"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    
+    def post(self, request):
+        try:
+            shop = ShopConfiguration.objects.get()
+            
+            # Verify owner credentials
+            email = request.data.get('email')
+            password = request.data.get('password')
+            
+            if not email or not password:
+                return Response({"error": "Owner authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+            
+            if shop.email != email or not shop.validate_shop_owner_master_password(password):
+                return Response({"error": "Invalid owner credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+            
+            # Get cashier ID
+            cashier_id = request.data.get('cashier_id')
+            if not cashier_id:
+                return Response({"error": "Cashier ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+            
+            try:
+                cashier = Cashier.objects.get(id=cashier_id, shop=shop)
+            except Cashier.DoesNotExist:
+                return Response({"error": "Cashier not found"}, status=status.HTTP_404_NOT_FOUND)
+            
+            # Find and update CashFloat to revoke access
+            today = timezone.now().date()
+            try:
+                cash_float = CashFloat.objects.get(shop=shop, cashier=cashier, date=today)
+                
+                if not cash_float.drawer_access_granted:
+                    return Response({
+                        'success': True,
+                        'message': f'Drawer access was already revoked for {cashier.name}',
+                        'cashier': {
+                            'id': cashier.id,
+                            'name': cashier.name,
+                            'drawer_access_granted': False
+                        }
+                    })
+                
+                # Revoke drawer access
+                cash_float.drawer_access_granted = False
+                cash_float.drawer_access_revoked_at = timezone.now()
+                cash_float.save()
+                
+                return Response({
+                    'success': True,
+                    'message': f'Drawer access revoked from {cashier.name}',
+                    'cashier': {
+                        'id': cashier.id,
+                        'name': cashier.name,
+                        'drawer_access_granted': False,
+                        'access_revoked_at': cash_float.drawer_access_revoked_at.isoformat()
+                    }
+                })
+            except CashFloat.DoesNotExist:
+                # No cash float exists, but we can still record the revocation intent
+                return Response({
+                    'success': True,
+                    'message': f'Cashier {cashier.name} has no drawer - access considered revoked',
+                    'cashier': {
+                        'id': cashier.id,
+                        'name': cashier.name,
+                        'drawer_access_granted': False
+                    }
+                })
+        except Exception as e:
+            return Response({
+                'error': f'Server error: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class DrawerAccessStatusView(APIView):
+    """Check if a cashier has drawer access (for cashier drawer screen)"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    
+    def get(self, request):
+        try:
+            shop = ShopConfiguration.objects.get()
+            
+            cashier_id = request.query_params.get('cashier_id')
+            if not cashier_id:
+                return Response({"error": "Cashier ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+            
+            try:
+                cashier = Cashier.objects.get(id=cashier_id, shop=shop)
+            except Cashier.DoesNotExist:
+                return Response({
+                    'error': "Cashier not found",
+                    'drawer_access_granted': False
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Check drawer access from CashFloat
+            today = timezone.now().date()
+            try:
+                cash_float = CashFloat.objects.get(shop=shop, cashier=cashier, date=today)
+                has_access = cash_float.drawer_access_granted
+            except CashFloat.DoesNotExist:
+                # No cash float exists - access not granted
+                has_access = False
+            
+            return Response({
+                'success': True,
+                'cashier': {
+                    'id': cashier.id,
+                    'name': cashier.name,
+                    'drawer_access_granted': has_access
+                },
+                'can_access_drawer': has_access
+            })
+        except Exception as e:
+            return Response({
+                'error': f'Server error: {str(e)}',
+                'drawer_access_granted': False
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

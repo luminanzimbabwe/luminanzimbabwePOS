@@ -199,6 +199,7 @@ export const shopAPI = {
     actual_cash_counted: actualCashCounted
   }),
   resetAllDrawersAtEOD: () => api.post('/cash-float/reset-all/'),
+  emergencyResetAllDrawers: (confirmToken = 'EMERGENCY_RESET_CONFIRMED') => api.post('/cash-float/emergency-reset/', { confirm_token: confirmToken }),
   getAllDrawersStatus: () => api.get('/cash-float/all-status/'),
 
   getSalesHistory: (config = {}) => api.get('/sales-history/', config),
@@ -247,6 +248,19 @@ export const shopAPI = {
     return api.get(`/wallet/transactions/${queryParams}`);
   },
   createWalletAdjustment: (data) => api.post('/wallet/adjustment/', data),
+
+  // Drawer Access Control methods
+  grantDrawerAccess: (data) => api.post('/drawer-access/grant/', data),
+  revokeDrawerAccess: (data) => api.post('/drawer-access/revoke/', data),
+  getDrawerAccessStatus: (cashierId) => api.get(`/drawer-access/status/?cashier_id=${cashierId}`),
+  checkDrawerAccess: (cashierId) => api.post('/cash-float/drawer-access/check/', { cashier_id: cashierId }),
+  updateDrawerAccess: (cashierId, drawerAccess) => api.post('/cash-float/drawer-access/update/', { 
+    cashier_id: cashierId, 
+    drawer_access: drawerAccess 
+  }),
+  
+  // NEW: Today's drawer endpoint - fetches ONLY today's sales for drawer display
+  getCashierDrawerToday: (cashierId) => api.get(`/cash-float/drawer-today/?cashier_id=${cashierId}`),
 };
 
 export default api;

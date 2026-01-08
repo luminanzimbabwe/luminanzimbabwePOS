@@ -428,7 +428,7 @@ const OwnerDashboardScreen = () => {
             };
           }
           
-          // Calculate multi-currency breakdowns from drawer data
+                      // Calculate multi-currency breakdowns from drawer data
           if (Array.isArray(shop_status.drawers) && shop_status.drawers.length > 0) {
             const currencyBreakdown = shop_status.drawers.reduce((acc, drawer) => {
               // Expected amounts per currency
@@ -444,24 +444,34 @@ const OwnerDashboardScreen = () => {
               acc.current_usd = (acc.current_usd || 0) + (Number(breakdownByCurrency?.usd?.total || 0) || Number(drawer?.current_total_usd || 0));
               acc.current_rand = (acc.current_rand || 0) + (Number(breakdownByCurrency?.rand?.total || 0) || Number(drawer?.current_total_rand || 0));
               
+              // Transfer amounts per currency - extract from drawer transfer data
+              acc.transfer_zig = (acc.transfer_zig || 0) + (Number(drawer?.transfer_amount_zig || drawer?.transfer_zig || drawer?.transfer?.zig || 0));
+              acc.transfer_usd = (acc.transfer_usd || 0) + (Number(drawer?.transfer_amount_usd || drawer?.transfer_usd || drawer?.transfer?.usd || 0));
+              acc.transfer_rand = (acc.transfer_rand || 0) + (Number(drawer?.transfer_amount_rand || drawer?.transfer_rand || drawer?.transfer?.rand || 0));
+              
               return acc;
             }, {});
             
-            // Calculate variances per currency
+            // Calculate variances per currency (current - expected)
             const zigVariance = (currencyBreakdown.current_zig || 0) - (currencyBreakdown.expected_zig || 0);
             const usdVariance = (currencyBreakdown.current_usd || 0) - (currencyBreakdown.expected_usd || 0);
             const randVariance = (currencyBreakdown.current_rand || 0) - (currencyBreakdown.expected_rand || 0);
             
+            // Calculate adjusted variance EXCLUDING transfers (transfers are intentional money movements, not surplus/deficit)
+            const adjustedZigVariance = zigVariance - (currencyBreakdown.transfer_zig || 0);
+            const adjustedUsdVariance = usdVariance - (currencyBreakdown.transfer_usd || 0);
+            const adjustedRandVariance = randVariance - (currencyBreakdown.transfer_rand || 0);
+            
             shop_status.cash_flow = {
               ...shop_status.cash_flow,
               ...currencyBreakdown,
-              zig_variance: zigVariance,
-              usd_variance: usdVariance,
-              rand_variance: randVariance,
-              // Recalculate total from currency breakdown
+              zig_variance: adjustedZigVariance,
+              usd_variance: adjustedUsdVariance,
+              rand_variance: adjustedRandVariance,
+              // Recalculate total from currency breakdown (excluding transfers for variance)
               total_expected_cash: (currencyBreakdown.expected_zig || 0) + (currencyBreakdown.expected_usd || 0) + (currencyBreakdown.expected_rand || 0),
               total_current_cash: (currencyBreakdown.current_zig || 0) + (currencyBreakdown.current_usd || 0) + (currencyBreakdown.current_rand || 0),
-              variance: zigVariance + usdVariance + randVariance,
+              variance: adjustedZigVariance + adjustedUsdVariance + adjustedRandVariance,
             };
           }
         }
@@ -3305,6 +3315,237 @@ const styles = StyleSheet.create({
     marginVertical: 16,
     opacity: 0.5,
   },
+  
+  // Cash Handover Section Styles
+  cashHandoverSection: {
+    padding: 20,
+    paddingTop: 10,
+  },
+  cashHandoverHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 25,
+    position: 'relative',
+  },
+  cashHandoverTitle: {
+    color: '#00f5ff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginLeft: 12,
+    letterSpacing: 2,
+    textShadowColor: '#00f5ff',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
+  },
+  cashHandoverScanner: {
+    position: 'absolute',
+    top: '100%',
+    left: '50%',
+    transform: [{ translateX: -50 }],
+    width: 280,
+    height: 2,
+    backgroundColor: 'linear-gradient(90deg, #00f5ff, #00ff88, #00f5ff)',
+    borderRadius: 2,
+  },
+  handoverCurrencyCard: {
+    backgroundColor: 'rgba(0, 20, 20, 0.9)',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: 'rgba(0, 245, 255, 0.3)',
+    shadowColor: '#00f5ff',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+  },
+  handoverCurrencyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  currencyBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#00f5ff',
+  },
+  currencyBadgeText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  handoverCurrencyLabel: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 12,
+    letterSpacing: 1,
+  },
+  handoverRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  handoverItem: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    marginHorizontal: 4,
+  },
+  handoverItemLabel: {
+    color: '#888',
+    fontSize: 10,
+    fontWeight: 'bold',
+    letterSpacing: 2,
+    marginBottom: 8,
+    textTransform: 'uppercase',
+  },
+  handoverItemValue: {
+    color: '#ffffff',
+    fontSize: 20,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  handoverVarianceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  handoverVarianceLabel: {
+    color: '#888',
+    fontSize: 12,
+    fontWeight: 'bold',
+    letterSpacing: 1,
+  },
+  handoverVarianceValue: {
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  handoverTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 12,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  handoverTotalLabel: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: 'bold',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  handoverTotalValue: {
+    color: '#00ff88',
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: 1,
+    textShadowColor: '#00ff88',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 10,
+  },
+  handoverSummaryCard: {
+    backgroundColor: 'rgba(0, 255, 136, 0.08)',
+    borderRadius: 20,
+    padding: 24,
+    marginTop: 16,
+    borderWidth: 2,
+    borderColor: 'rgba(0, 255, 136, 0.4)',
+    shadowColor: '#00ff88',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+  },
+  handoverSummaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  handoverSummaryTitle: {
+    color: '#00ff88',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 12,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  handoverSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  handoverSummaryItem: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    marginHorizontal: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  handoverSummaryCurrency: {
+    color: '#888',
+    fontSize: 12,
+    fontWeight: 'bold',
+    letterSpacing: 2,
+    marginBottom: 8,
+    textTransform: 'uppercase',
+  },
+  handoverSummaryAmount: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  handoverGrandTotal: {
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(139, 92, 246, 0.5)',
+    shadowColor: '#8b5cf6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+  },
+  handoverGrandTotalLabel: {
+    color: '#8b5cf6',
+    fontSize: 12,
+    fontWeight: 'bold',
+    letterSpacing: 3,
+    marginBottom: 12,
+    textTransform: 'uppercase',
+  },
+  handoverGrandTotalValue: {
+    color: '#ffffff',
+    fontSize: 32,
+    fontWeight: '900',
+    letterSpacing: 1,
+    textShadowColor: '#8b5cf6',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 15,
+  },
+  
   metricMonitor: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -4245,11 +4486,15 @@ const styles = StyleSheet.create({
     padding: 20,
     borderWidth: 2,
     borderColor: '#00ff88',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
   },
   exchangeRateCard: {
     backgroundColor: 'rgba(0, 255, 136, 0.05)',
     borderRadius: 16,
     padding: 16,
+    width: '48%',
     marginBottom: 12,
     borderWidth: 1,
     borderColor: 'rgba(0, 255, 136, 0.3)',

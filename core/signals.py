@@ -4,8 +4,10 @@ from django.dispatch import receiver
 from core.models import Sale, CashFloat
 from django.utils import timezone
 from django.db.models import Sum
+from django.db import transaction
 from decimal import Decimal
 import logging
+import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +16,7 @@ def update_cash_float_on_sale(sender, instance, created, **kwargs):
     """
     Automatically update cash float drawer when a sale is created or updated
     ENHANCED: Now tracks currency-specific drawer amounts
+    CRITICAL FIX: Uses proper timezone-aware date filtering to only show today's sales
     """
     # Only process new sales or completed sales that haven't been processed yet
     if created or (instance.status == 'completed' and not hasattr(instance, '_cash_float_updated')):
@@ -25,8 +28,24 @@ def update_cash_float_on_sale(sender, instance, created, **kwargs):
             shop = instance.shop
             cashier = instance.cashier
             
+            # CRITICAL FIX: Use timezone-aware datetime range for proper date filtering
+            # This ensures we only get today's sales regardless of server timezone
+            today = timezone.localdate()  # Local date (Africa/Harare)
+            
+            # Create proper timezone-aware datetime range for the local day
+            # This ensures we capture all sales made during local business hours (00:00 to 23:59:59 local time)
+            day_start = timezone.make_aware(
+                datetime.datetime.combine(today, datetime.time.min),
+                timezone.get_current_timezone()
+            )
+            day_end = timezone.make_aware(
+                datetime.datetime.combine(today, datetime.time.max),
+                timezone.get_current_timezone()
+            )
+            
+            logger.info(f"Processing sale for drawer update - Local date: {today}, Range: {day_start} to {day_end}")
+            
             # Get or create the drawer for today
-            today = timezone.now().date()
             drawer, created_drawer = CashFloat.objects.get_or_create(
                 shop=shop,
                 cashier=cashier,
@@ -87,26 +106,24 @@ def update_cash_float_on_sale(sender, instance, created, **kwargs):
             # Add the sale to the drawer with currency tracking
             sale_amount = Decimal(str(instance.total_amount))
             payment_method = instance.payment_method
-            payment_currency = instance.payment_currency or 'USD'  # Use payment_currency to determine which bank
+            payment_currency = instance.payment_currency or 'USD'
             
             logger.info(f"Processing sale: ${sale_amount} {payment_method} in {payment_currency} by {cashier.name} (Sale ID: {instance.id})")
             
             # Ensure drawer is active
             if drawer.status != 'ACTIVE':
                 drawer.status = 'ACTIVE'
-                
-            # NOTE: Skipping add_sale() call to avoid double-counting
-            # Drawer will be updated by the comprehensive database recalculation below
-            logger.info(f"Will synchronize drawer with all sales data for accurate currency tracking")
             
-            # COMPREHENSIVE VERIFICATION: Recalculate totals from actual sales to prevent drift
-            # This ensures drawer always matches actual sales data including currency breakdowns
+            # CRITICAL FIX: Use proper timezone-aware datetime range for filtering
+            # This ensures we ONLY count sales from TODAY (local time), not old sales
             actual_sales_today = Sale.objects.filter(
                 shop=shop,
                 cashier=cashier,
-                created_at__date=today,
+                created_at__range=[day_start, day_end],
                 status='completed'
             )
+            
+            logger.info(f"Found {actual_sales_today.count()} completed sales for today ({today})")
             
             # Calculate actual totals from database by payment_currency and payment method
             # CRITICAL FIX: Use payment_currency to determine which bank the money went to
@@ -114,7 +131,6 @@ def update_cash_float_on_sale(sender, instance, created, **kwargs):
                 currency_sales = actual_sales_today.filter(payment_currency=currency_code)
                 
                 # Calculate by payment method for this currency
-                from django.db.models import Sum
                 cash_sales = currency_sales.filter(payment_method='cash').aggregate(
                     total=Sum('total_amount')
                 )['total'] or Decimal('0.00')
@@ -169,14 +185,12 @@ def update_cash_float_on_sale(sender, instance, created, **kwargs):
                     drawer.current_total_rand = total_sales
             
             # Update legacy fields for backward compatibility using PRIMARY CURRENCY
-            # This ensures legacy fields show the actual currency used in sales, not just USD
-            
             # Determine primary currency based on total sales
             usd_total = drawer.session_total_sales_usd
             zig_total = drawer.session_total_sales_zig
             rand_total = drawer.session_total_sales_rand
             
-            primary_currency = 'USD'  # Default fallback
+            primary_currency = 'USD'
             if zig_total > 0:
                 primary_currency = 'ZIG'
             elif rand_total > 0:
@@ -211,7 +225,7 @@ def update_cash_float_on_sale(sender, instance, created, **kwargs):
                 drawer.current_ecocash = drawer.current_ecocash_rand
                 drawer.current_transfer = drawer.current_transfer_rand
                 drawer.current_total = drawer.current_total_rand
-            else:  # USD
+            else:
                 drawer.session_cash_sales = drawer.session_cash_sales_usd
                 drawer.session_card_sales = drawer.session_card_sales_usd
                 drawer.session_ecocash_sales = drawer.session_ecocash_sales_usd
@@ -225,7 +239,6 @@ def update_cash_float_on_sale(sender, instance, created, **kwargs):
                 drawer.current_total = drawer.current_total_usd
             
             # Update expected cash at EOD (use primary currency's cash sales + float)
-            # This ensures EOD expectations match the actual currency used
             if primary_currency == 'ZIG':
                 drawer.expected_cash_at_eod = drawer.float_amount + drawer.session_cash_sales_zig
             elif primary_currency == 'RAND':
@@ -237,7 +250,7 @@ def update_cash_float_on_sale(sender, instance, created, **kwargs):
             drawer.last_activity = timezone.now()
             drawer.save()
             
-            logger.info(f"Drawer synchronized with actual sales by currency. Total USD: ${drawer.current_total_usd}, ZIG: {drawer.current_total_zig}, RAND: {drawer.current_total_rand}")
+            logger.info(f"Drawer synchronized with actual sales by currency for {today}. Total USD: ${drawer.current_total_usd}, ZIG: {drawer.current_total_zig}, RAND: {drawer.current_total_rand}")
             
         except Exception as e:
             logger.error(f"Error updating cash float for sale {instance.id}: {str(e)}")

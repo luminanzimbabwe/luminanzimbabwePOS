@@ -12,6 +12,7 @@ class StockTransferSerializer(serializers.ModelSerializer):
         model = StockTransfer
         fields = [
             'id',
+            'shop',
             'transfer_type',
             'status',
             'from_product',
@@ -25,7 +26,13 @@ class StockTransferSerializer(serializers.ModelSerializer):
             'to_line_code',
             'to_barcode',
             'conversion_ratio',
+            # Financial fields - all money values
+            'from_product_cost',
+            'to_product_cost',
             'cost_impact',
+            'net_inventory_value_change',
+            'shrinkage_quantity',
+            'shrinkage_value',
             'reason',
             'performed_by',
             'performed_by_name',
@@ -35,11 +42,17 @@ class StockTransferSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             'id',
+            'shop',
             'from_product_name',
             'to_product_name',
             'performed_by_name',
             'conversion_ratio',
+            'from_product_cost',
+            'to_product_cost',
             'cost_impact',
+            'net_inventory_value_change',
+            'shrinkage_quantity',
+            'shrinkage_value',
             'created_at',
             'completed_at'
         ]

@@ -11,10 +11,14 @@ import {
   Modal,
   Dimensions,
   TextInput,
+  PanResponder,
+  Animated,
+  RefreshControl,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { shopStorage } from '../services/storage';
 import { shopAPI } from '../services/api';
+import Icon from 'react-native-vector-icons/MaterialIcons';
 
 const { width, height } = Dimensions.get('window');
 
@@ -38,6 +42,38 @@ const CashierSalesScreen = () => {
   const [paymentFilter, setPaymentFilter] = useState('all'); // all, cash, card, transfer
   const [showAllSales, setShowAllSales] = useState(false);
   const ITEMS_PER_PAGE = 10;
+  
+  // Sidebar state
+  const [showSidebar, setShowSidebar] = useState(false);
+  const [sidebarX] = useState(new Animated.Value(-350));
+  
+  // Pan responder for swipe gestures
+  const panResponder = React.useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: (evt, gestureState) => {
+        return evt.nativeEvent.locationX < 50;
+      },
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        return evt.nativeEvent.locationX < 50;
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        if (gestureState.dx > 100) {
+          setShowSidebar(true);
+        } else if (gestureState.dx < -50) {
+          setShowSidebar(false);
+        }
+      },
+    })
+  ).current;
+  
+  // Sidebar animation
+  useEffect(() => {
+    Animated.timing(sidebarX, {
+      toValue: showSidebar ? 0 : -350,
+      duration: 300,
+      useNativeDriver: true,
+    }).start();
+  }, [showSidebar]);
 
   useEffect(() => {
     loadCashierSales();
@@ -481,32 +517,95 @@ const CashierSalesScreen = () => {
   return (
     <View style={styles.container}>
       <ScrollView 
-        style={[styles.mainContent, Platform.OS === 'web' && styles.webContainer]}
-        contentContainerStyle={Platform.OS === 'web' ? styles.webScrollContent : styles.scrollContentContainer}
+        style={[styles.webScrollView]}
+        contentContainerStyle={styles.webContentContainer}
         showsVerticalScrollIndicator={Platform.OS === 'web'}
         scrollEventThrottle={16}
         nestedScrollEnabled={Platform.OS === 'web'}
         removeClippedSubviews={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={loading}
+            onRefresh={loadCashierSales}
+          />
+        }
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Text style={styles.backButton}>← Back</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>📊 My Sales</Text>
-          <View style={styles.headerActions}>
-            <TouchableOpacity onPress={() => setShowFilters(!showFilters)}>
-              <Text style={styles.filterButton}>🔍</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={loadCashierSales}>
-              <Text style={styles.refreshButton}>↻</Text>
-            </TouchableOpacity>
+      {/* NEURAL CASHIER SALES INTERFACE - GEN 2080 */}
+      <View style={styles.neuralCashierHeader}>
+        <View style={styles.neuralHeaderBackground}>
+          <View style={styles.neuralHeaderContent}>
+            {/* Neural Title Section */}
+            <View style={styles.neuralTitleSection}>
+              <TouchableOpacity 
+                style={styles.neuralMenuButton} 
+                onPress={() => setShowSidebar(!showSidebar)}
+                {...panResponder.panHandlers}
+              >
+                <View style={styles.neuralButtonGlow}></View>
+                <Icon name="menu" size={20} color="#00ffff" />
+                <Text style={styles.neuralButtonText}>NEURAL</Text>
+              </TouchableOpacity>
+              
+              <View style={styles.neuralTitleContainer}>
+                <Text style={styles.neuralGeneration}>GEN 2080</Text>
+                <Text style={styles.neuralSubtitle}>🧠 SALES NEURAL INTERFACE</Text>
+                <Text style={styles.neuralCashierName}>👤 OPERATOR: {(cashierData?.cashier_info?.name || cashierData?.name || cashierData?.username || 'CASHIER').toUpperCase()}</Text>
+              </View>
+              
+              <TouchableOpacity 
+                style={styles.neuralRefreshButton} 
+                onPress={loadCashierSales}
+              >
+                <View style={styles.neuralButtonGlow}></View>
+                <Icon name="refresh" size={18} color="#00ffff" />
+                <Text style={styles.neuralRefreshText}>SYNC</Text>
+              </TouchableOpacity>
+            </View>
+            
+            {/* Neural Status Display */}
+            <View style={styles.neuralStatusGrid}>
+              <View style={styles.neuralStatusCard}>
+                <Text style={styles.neuralStatusLabel}>💰 TOTAL SALES</Text>
+                <Text style={styles.neuralStatusValue}>{summary?.totalSales || 0}</Text>
+              </View>
+              <View style={styles.neuralStatusCard}>
+                <Text style={styles.neuralStatusLabel}>💵 REVENUE</Text>
+                <Text style={styles.neuralStatusValue}>{formatCurrency(summary?.totalRevenue || 0)}</Text>
+              </View>
+              <View style={styles.neuralStatusCard}>
+                <Text style={styles.neuralStatusLabel}>📊 AVG SALE</Text>
+                <Text style={styles.neuralStatusValue}>{formatCurrency(summary?.averageSale || 0)}</Text>
+              </View>
+            </View>
+            
+            {/* Data Stream Bar */}
+            <View style={styles.dataStreamBar}>
+              <View style={styles.streamDot} />
+              <Text style={styles.streamText}>CASHIER SALES NEURAL • REAL-TIME DATA • GEN 2080</Text>
+              <View style={styles.streamDot} />
+            </View>
           </View>
         </View>
+      </View>
 
-        <View style={styles.content}>
-          {/* Summary Cards */}
-          {summary && (
+      {/* Modern Decorative Border */}
+      <View style={styles.vintageBorder}>
+        <Text style={styles.borderText}>✨ SALES TRACKING SYSTEM ✨</Text>
+        <Text style={styles.borderText}>Professional Transaction Management</Text>
+      </View>
+
+      {/* Inspirational Quote Section */}
+      <View style={styles.inspirationalQuoteSection}>
+        <Text style={styles.inspirationalQuoteText}>"For its like magic but powered by code logic and networks"</Text>
+        <Text style={styles.inspirationalQuoteAuthor}>- LuminaN Technology</Text>
+        <View style={styles.quoteDecoration}>
+          <Text style={styles.quoteDecoText}>⚡ ✨ 💫</Text>
+        </View>
+      </View>
+
+      <View style={styles.content}>
+        {/* Summary Cards */}
+        {summary && (
             <View style={styles.summarySection}>
               <Text style={styles.sectionTitle}>📈 MY SALES SUMMARY</Text>
               
@@ -755,6 +854,76 @@ const CashierSalesScreen = () => {
         }} />
       </ScrollView>
 
+      {/* Cashier Sidebar */}
+      {showSidebar && (
+        <>
+          <TouchableOpacity
+            style={styles.sidebarBackdrop}
+            activeOpacity={1}
+            onPress={() => setShowSidebar(false)}
+          />
+          <Animated.View
+            style={[
+              styles.sidebar,
+              { transform: [{ translateX: sidebarX }] }
+            ]}
+            {...panResponder.panHandlers}
+          >
+            <View style={styles.sidebarHeader}>
+              <View style={styles.sidebarTitleContainer}>
+                <Text style={styles.sidebarTitle}>💰 Cashier Tools</Text>
+                <Text style={styles.sidebarSubtitle}>Quick Access Menu</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.sidebarCloseButton}
+                onPress={() => setShowSidebar(false)}
+              >
+                <Text style={styles.sidebarCloseButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.sidebarFeaturesList} showsVerticalScrollIndicator={false}>
+              <View style={styles.sidebarFeaturesSection}>
+                <Text style={styles.sidebarSectionTitle}>🚀 QUICK ACCESS TOOLS</Text>
+                <TouchableOpacity 
+                  style={styles.sidebarFeatureItem}
+                  onPress={() => { setShowSidebar(false); navigation.navigate('CashierDashboard'); }}
+                >
+                  <View style={[styles.sidebarFeatureIcon, { backgroundColor: '#3b82f6' }]}>
+                    <Text style={styles.sidebarFeatureIconText}>🏠</Text>
+                  </View>
+                  <View style={styles.sidebarFeatureContent}>
+                    <Text style={styles.sidebarFeatureTitle}>📊 Dashboard</Text>
+                    <Text style={styles.sidebarFeatureDescription}>Back to main dashboard</Text>
+                  </View>
+                  <Text style={styles.sidebarFeatureArrow}>→</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.sidebarFeatureItem}
+                  onPress={() => { setShowSidebar(false); navigation.navigate('CashierSales'); }}
+                >
+                  <View style={[styles.sidebarFeatureIcon, { backgroundColor: '#10b981' }]}>
+                    <Text style={styles.sidebarFeatureIconText}>📊</Text>
+                  </View>
+                  <View style={styles.sidebarFeatureContent}>
+                    <Text style={styles.sidebarFeatureTitle}>📊 My Sales</Text>
+                    <Text style={styles.sidebarFeatureDescription}>View transaction history</Text>
+                  </View>
+                  <Text style={styles.sidebarFeatureArrow}>→</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+
+            <View style={styles.sidebarFooter}>
+              <Text style={styles.sidebarFooterText}>💡 Quick Tip</Text>
+              <Text style={styles.sidebarFooterDescription}>
+                Swipe from left edge to open menu on mobile.
+              </Text>
+            </View>
+          </Animated.View>
+        </>
+      )}
+
       {/* Receipt Modal */}
       <Modal
         animationType="slide"
@@ -863,42 +1032,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0a0a0a',
   },
-  mainContent: {
-    flex: 1,
-    ...Platform.select({
-      web: {
-        height: '100vh',
-        overflow: 'auto',
-        WebkitOverflowScrolling: 'auto',
-        scrollBehavior: 'smooth',
-      },
-    }),
-  },
-  webContainer: {
+  webScrollView: {
     ...Platform.select({
       web: {
         height: '100vh',
         maxHeight: '100vh',
-        overflow: 'auto',
-        WebkitOverflowScrolling: 'auto',
-        scrollBehavior: 'smooth',
       },
     }),
   },
-  scrollContentContainer: {
+  webContentContainer: {
     flexGrow: 1,
-    paddingBottom: Platform.OS === 'web' ? 100 : 0,
-    ...Platform.select({
-      web: {
-        minHeight: '100vh',
-        width: '100%',
-        flexGrow: 1,
-      },
-    }),
-  },
-  webScrollContent: {
-    flexGrow: 1,
-    paddingBottom: 20,
+    minHeight: '100vh',
+    paddingBottom: 100,
   },
   header: {
     flexDirection: 'row',
@@ -934,6 +1079,206 @@ const styles = StyleSheet.create({
     color: '#3b82f6',
     fontSize: 20,
     fontWeight: '600',
+  },
+  
+  // Neural Header Styles - GEN 2080
+  neuralCashierHeader: {
+    backgroundColor: '#0a0a0a',
+    padding: 16,
+    paddingTop: 16,
+    position: 'relative',
+    overflow: 'hidden',
+    borderBottomWidth: 2,
+    borderBottomColor: '#00ffff',
+  },
+  neuralHeaderBackground: {
+    backgroundColor: 'rgba(0, 20, 40, 0.95)',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: '#00ffff',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  neuralHeaderContent: {
+    position: 'relative',
+    zIndex: 2,
+  },
+  neuralTitleSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  neuralMenuButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 255, 255, 0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#00ffff',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  neuralButtonGlow: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 255, 255, 0.2)',
+    borderRadius: 8,
+  },
+  neuralButtonText: {
+    color: '#00ffff',
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginLeft: 6,
+    letterSpacing: 1,
+  },
+  neuralTitleContainer: {
+    flex: 1,
+    alignItems: 'center',
+    marginHorizontal: 12,
+  },
+  neuralGeneration: {
+    color: '#ff0080',
+    fontSize: 14,
+    fontWeight: 'bold',
+    letterSpacing: 2,
+  },
+  neuralSubtitle: {
+    color: '#00ffff',
+    fontSize: 10,
+    marginTop: 2,
+  },
+  neuralCashierName: {
+    color: '#ffffff',
+    fontSize: 11,
+    marginTop: 4,
+    fontWeight: '600',
+  },
+  neuralRefreshButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 255, 255, 0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#00ffff',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  neuralRefreshText: {
+    color: '#00ffff',
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginLeft: 6,
+    letterSpacing: 1,
+  },
+  neuralStatusGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  neuralStatusCard: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 8,
+    padding: 10,
+    marginHorizontal: 4,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 255, 0.3)',
+  },
+  neuralStatusLabel: {
+    color: '#00ffff',
+    fontSize: 9,
+    fontWeight: 'bold',
+    letterSpacing: 1,
+    marginBottom: 4,
+  },
+  neuralStatusValue: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  dataStreamBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 170, 0, 0.1)',
+    borderRadius: 6,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#ffaa00',
+  },
+  streamDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#ffaa00',
+    marginHorizontal: 8,
+  },
+  streamText: {
+    color: '#ffaa00',
+    fontSize: 9,
+    fontWeight: 'bold',
+    letterSpacing: 1,
+  },
+  
+  // Vintage Border
+  vintageBorder: {
+    backgroundColor: '#111111',
+    padding: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
+    alignItems: 'center',
+  },
+  borderText: {
+    color: '#9ca3af',
+    fontSize: 12,
+    fontWeight: '500',
+    textAlign: 'center',
+    marginVertical: 2,
+  },
+  
+  // Inspirational Quote Styles
+  inspirationalQuoteSection: {
+    backgroundColor: 'linear-gradient(135deg, #1e3a8a 0%, #3b82f6 50%, #06b6d4 100%)',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    marginHorizontal: 16,
+    marginVertical: 12,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#60a5fa',
+    alignItems: 'center',
+  },
+  inspirationalQuoteText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 4,
+    fontStyle: 'italic',
+  },
+  inspirationalQuoteAuthor: {
+    color: '#bfdbfe',
+    fontSize: 11,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  quoteDecoration: {
+    marginTop: 4,
+  },
+  quoteDecoText: {
+    fontSize: 12,
+    textAlign: 'center',
   },
   
   // Filter Section Styles
@@ -1466,6 +1811,130 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 14,
     fontWeight: '600',
+  },
+  
+  // Sidebar Styles
+  sidebarBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    zIndex: 1000,
+  },
+  sidebar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: 350,
+    height: '100%',
+    backgroundColor: '#111111',
+    zIndex: 1001,
+    elevation: 10,
+  },
+  sidebarHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 20,
+    paddingTop: 50,
+    backgroundColor: '#1a1a1a',
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  sidebarTitleContainer: {
+    flex: 1,
+  },
+  sidebarTitle: {
+    color: '#ffffff',
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  sidebarSubtitle: {
+    color: '#9ca3af',
+    fontSize: 14,
+  },
+  sidebarCloseButton: {
+    backgroundColor: '#374151',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sidebarCloseButtonText: {
+    color: '#ffffff',
+    fontSize: 18,
+  },
+  sidebarFeaturesList: {
+    flex: 1,
+    padding: 16,
+  },
+  sidebarFeaturesSection: {
+    marginBottom: 20,
+  },
+  sidebarSectionTitle: {
+    color: '#9ca3af',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 12,
+    letterSpacing: 1,
+  },
+  sidebarFeatureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  sidebarFeatureIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  sidebarFeatureIconText: {
+    fontSize: 20,
+  },
+  sidebarFeatureContent: {
+    flex: 1,
+  },
+  sidebarFeatureTitle: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  sidebarFeatureDescription: {
+    color: '#9ca3af',
+    fontSize: 12,
+  },
+  sidebarFeatureArrow: {
+    color: '#6b7280',
+    fontSize: 16,
+  },
+  sidebarFooter: {
+    padding: 20,
+    backgroundColor: '#1a1a1a',
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+  },
+  sidebarFooterText: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  sidebarFooterDescription: {
+    color: '#9ca3af',
+    fontSize: 12,
   },
 });
 
