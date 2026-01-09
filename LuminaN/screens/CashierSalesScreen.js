@@ -99,19 +99,11 @@ const CashierSalesScreen = () => {
 
       // Get current cashier's ID using the same approach as drawer system
       // Create comprehensive cashier identifier for matching (like drawer system)
-      const cashierIdentifiers = [
-        credentials?.name,
-        credentials?.username, 
-        credentials?.id,
-        credentials?.cashier_id,
-        credentials?.user_id,
-        credentials?.email,
-        credentials?.cashier_info?.id,
-        credentials?.cashier_info?.name
-      ].filter(Boolean);
-
-      // Use email as fallback if no proper ID is found
-      const currentCashierId = cashierIdentifiers[0] || credentials?.email || 'unknown';
+      const currentCashierId = credentials?.cashier_info?.id || 
+                               credentials?.id || 
+                               credentials?.cashier_id || 
+                               credentials?.user_id ||
+                               (credentials?.cashier_info?.id ? String(credentials.cashier_info.id) : null);
       
       // Enhanced cashier name extraction - use same source as drawer system
       // Get cashier name from multiple sources like drawer system does
@@ -127,57 +119,71 @@ const CashierSalesScreen = () => {
 
       console.log('🔍 CREDENTIALS STRUCTURE:', {
         credentials,
-        cashierIdentifiers,
+        cashierIdentifiers: [credentials?.cashier_info?.id, credentials?.id, credentials?.cashier_id],
         cashier_info: credentials?.cashier_info,
         name: credentials?.name,
-        username: credentials?.username
+        username: credentials?.username,
+        cashierIdExtracted: currentCashierId,
+        cashierNameExtracted: currentCashierName
       });
 
       console.log('🔍 LOADING CASHIER SALES:', {
         cashierId: currentCashierId,
         cashierName: currentCashierName,
-        cashierIdentifiers,
-        credentials: credentials
+        cashierIdType: typeof currentCashierId,
+        credentialsId: credentials?.id,
+        credentialsCashierId: credentials?.cashier_id,
+        cashierInfoId: credentials?.cashier_info?.id
       });
 
       let response;
       let cashierSales = [];
 
       try {
-        // Try enhanced sales endpoint with cashier filtering
-        console.log('📊 Fetching sales with cashier filter...');
+        // Try new ALL SALES HISTORY endpoint that preserves data forever
+        console.log('📊 Fetching ALL cashier sales history from permanent storage...');
         
-        // Use the enhanced sales endpoint that supports cashier_id filtering
-        // This will return only sales for the specific cashier
-        if (currentCashierId) {
-          console.log('📊 Trying enhanced sales endpoint with cashier_id:', currentCashierId);
+        // Send BOTH id and name to ensure matching works
+        // Make sure we pass the numeric ID if available
+        const cashierIdParam = currentCashierId ? (typeof currentCashierId === 'string' ? parseInt(currentCashierId, 10) || currentCashierId : currentCashierId) : null;
+        
+        console.log('🔍 API call params:', { cashierId: cashierIdParam, cashierName: currentCashierName });
+        
+        const response = await shopAPI.getAllCashierSales(
+          cashierIdParam, 
+          currentCashierName
+        );
+        
+        console.log('📊 API Response:', response.data);
+        
+        if (response.data && response.data.success) {
+          cashierSales = response.data.cashier_sales || [];
+          console.log('✅ All cashier sales history loaded:', cashierSales.length);
           
-          // Use the shopAPI.getSales() method but add cashier_id parameter
-          // We'll modify the request to include the cashier filter
-          const salesUrl = `/sales/?cashier_id=${currentCashierId}&status=completed&page_size=100`;
-          
-          // For now, let's use the fallback approach since the direct fetch has issues
-          throw new Error('Using fallback approach');
-        } else {
-          throw new Error('No cashier ID available for filtering');
-        }
-
-        if (response.ok) {
-          const data = await response.json();
-          console.log('✅ Enhanced sales endpoint response:', data);
-          
-          // Handle the enhanced sales response format
-          if (data.sales && Array.isArray(data.sales)) {
-            cashierSales = data.sales;
-          } else if (data.data && Array.isArray(data.data)) {
-            cashierSales = data.data;
+          // Use summary from server if available
+          if (response.data.summary) {
+            const serverSummary = response.data.summary;
+            const summaryData = {
+              totalSales: serverSummary.total_sales || 0,
+              totalRevenue: serverSummary.total_revenue || 0,
+              cashSales: serverSummary.cash_sales || 0,
+              cardSales: serverSummary.card_sales || 0,
+              transferSales: serverSummary.transfer_sales || 0,
+              cashRevenue: serverSummary.cash_revenue || 0,
+              cardRevenue: serverSummary.card_revenue || 0,
+              transferRevenue: serverSummary.transfer_revenue || 0,
+              averageSale: serverSummary.average_sale || 0
+            };
+            setSummary(summaryData);
           }
         } else {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          console.log('⚠️ API returned success: false or no data');
+          throw new Error('Invalid response from all sales endpoint');
         }
         
-      } catch (enhancedError) {
-        console.log('⚠️ Enhanced endpoint failed, trying fallback:', enhancedError);
+      } catch (allSalesError) {
+        console.log('⚠️ All sales endpoint failed:', allSalesError);
+        console.log('📊 Trying fallback with regular sales...');
         
         try {
           // Fallback: Get all sales and filter client-side
@@ -197,31 +203,22 @@ const CashierSalesScreen = () => {
             
             console.log('📋 All sales fetched for filtering:', allSales.length);
             
-            console.log('🔍 Filtering sales - current cashier:', { currentCashierId, currentCashierName });
-            console.log('🔍 Sample sale data:', allSales[0]);
-            
-            // Filter sales for current cashier using enhanced matching logic (like drawer system)
-            console.log('🔍 Filtering sales - current cashier:', { currentCashierId, currentCashierName });
-            console.log('🔍 Sample sale data:', allSales[0]);
-            
+            // Filter sales for current cashier using enhanced matching logic
             cashierSales = allSales.filter(sale => {
               if (!sale) return false;
               
-              // Strategy 1: Match by cashier_id (if available)
+              // Strategy 1: Match by cashier_id
               if (sale.cashier_id && currentCashierId && String(sale.cashier_id) === String(currentCashierId)) {
-                console.log('✅ MATCHED by cashier_id:', sale.cashier_id);
                 return true;
               }
               
-              // Strategy 2: Match by cashier_name (case-insensitive) - like drawer system
+              // Strategy 2: Match by cashier_name (case-insensitive)
               if (sale.cashier_name && currentCashierName && sale.cashier_name.toLowerCase() === currentCashierName.toLowerCase()) {
-                console.log('✅ MATCHED by cashier_name:', sale.cashier_name);
                 return true;
               }
               
               // Strategy 3: Match by name field
               if (sale.name && currentCashierName && sale.name.toLowerCase() === currentCashierName.toLowerCase()) {
-                console.log('✅ MATCHED by name:', sale.name);
                 return true;
               }
               
@@ -230,29 +227,17 @@ const CashierSalesScreen = () => {
                 const saleCashier = sale.cashier_name.toLowerCase();
                 const currentCashier = currentCashierName.toLowerCase();
                 
-                // Check if names are similar (e.g., 'isaacngirazi' vs 'isaac')
                 if (saleCashier.includes(currentCashier) || currentCashier.includes(saleCashier)) {
-                  console.log('✅ MATCHED by partial name:', { saleCashier, currentCashier });
                   return true;
                 }
                 
-                // Check if they share a common part (e.g., both contain 'isaac')
                 const saleParts = saleCashier.split(/[^a-zA-Z]/);
                 const currentParts = currentCashier.split(/[^a-zA-Z]/);
                 const commonPart = saleParts.find(part => part.length > 2 && currentParts.includes(part));
                 
-                if (commonPart) {
-                  console.log('✅ MATCHED by common name part:', { saleCashier, currentCashier, commonPart });
-                  return true;
-                }
+                if (commonPart) return true;
               }
               
-              console.log('❌ NO MATCH for sale:', { 
-                sale_cashier_name: sale.cashier_name, 
-                sale_name: sale.name, 
-                currentCashierName,
-                currentCashierId 
-              });
               return false;
             });
             
@@ -501,7 +486,7 @@ const CashierSalesScreen = () => {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
+          <TouchableOpacity onPress={() => navigation.replace('CashierDashboard')}>
             <Text style={styles.backButton}>← Back</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>📊 My Sales</Text>
@@ -530,77 +515,12 @@ const CashierSalesScreen = () => {
           />
         }
       >
-      {/* NEURAL CASHIER SALES INTERFACE - GEN 2080 */}
-      <View style={styles.neuralCashierHeader}>
-        <View style={styles.neuralHeaderBackground}>
-          <View style={styles.neuralHeaderContent}>
-            {/* Neural Title Section */}
-            <View style={styles.neuralTitleSection}>
-              <TouchableOpacity 
-                style={styles.neuralMenuButton} 
-                onPress={() => setShowSidebar(!showSidebar)}
-                {...panResponder.panHandlers}
-              >
-                <View style={styles.neuralButtonGlow}></View>
-                <Icon name="menu" size={20} color="#00ffff" />
-                <Text style={styles.neuralButtonText}>NEURAL</Text>
-              </TouchableOpacity>
-              
-              <View style={styles.neuralTitleContainer}>
-                <Text style={styles.neuralGeneration}>GEN 2080</Text>
-                <Text style={styles.neuralSubtitle}>🧠 SALES NEURAL INTERFACE</Text>
-                <Text style={styles.neuralCashierName}>👤 OPERATOR: {(cashierData?.cashier_info?.name || cashierData?.name || cashierData?.username || 'CASHIER').toUpperCase()}</Text>
-              </View>
-              
-              <TouchableOpacity 
-                style={styles.neuralRefreshButton} 
-                onPress={loadCashierSales}
-              >
-                <View style={styles.neuralButtonGlow}></View>
-                <Icon name="refresh" size={18} color="#00ffff" />
-                <Text style={styles.neuralRefreshText}>SYNC</Text>
-              </TouchableOpacity>
-            </View>
-            
-            {/* Neural Status Display */}
-            <View style={styles.neuralStatusGrid}>
-              <View style={styles.neuralStatusCard}>
-                <Text style={styles.neuralStatusLabel}>💰 TOTAL SALES</Text>
-                <Text style={styles.neuralStatusValue}>{summary?.totalSales || 0}</Text>
-              </View>
-              <View style={styles.neuralStatusCard}>
-                <Text style={styles.neuralStatusLabel}>💵 REVENUE</Text>
-                <Text style={styles.neuralStatusValue}>{formatCurrency(summary?.totalRevenue || 0)}</Text>
-              </View>
-              <View style={styles.neuralStatusCard}>
-                <Text style={styles.neuralStatusLabel}>📊 AVG SALE</Text>
-                <Text style={styles.neuralStatusValue}>{formatCurrency(summary?.averageSale || 0)}</Text>
-              </View>
-            </View>
-            
-            {/* Data Stream Bar */}
-            <View style={styles.dataStreamBar}>
-              <View style={styles.streamDot} />
-              <Text style={styles.streamText}>CASHIER SALES NEURAL • REAL-TIME DATA • GEN 2080</Text>
-              <View style={styles.streamDot} />
-            </View>
-          </View>
-        </View>
-      </View>
-
-      {/* Modern Decorative Border */}
-      <View style={styles.vintageBorder}>
-        <Text style={styles.borderText}>✨ SALES TRACKING SYSTEM ✨</Text>
-        <Text style={styles.borderText}>Professional Transaction Management</Text>
-      </View>
-
-      {/* Inspirational Quote Section */}
-      <View style={styles.inspirationalQuoteSection}>
-        <Text style={styles.inspirationalQuoteText}>"For its like magic but powered by code logic and networks"</Text>
-        <Text style={styles.inspirationalQuoteAuthor}>- LuminaN Technology</Text>
-        <View style={styles.quoteDecoration}>
-          <Text style={styles.quoteDecoText}>⚡ ✨ 💫</Text>
-        </View>
+      {/* Header with Back Button */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.replace('CashierDashboard')}>
+          <Text style={styles.backButton}>← Back</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>📊 My Sales</Text>
       </View>
 
       <View style={styles.content}>

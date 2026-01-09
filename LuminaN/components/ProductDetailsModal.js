@@ -39,6 +39,26 @@ const ProductDetailsModal = ({ visible, onClose, product }) => {
     return '#10b981';
   };
 
+  // Calculate profit margin from price and cost_price
+  const calculateProfitMargin = () => {
+    const sellingPrice = parseFloat(product.price) || 0;
+    const costPrice = parseFloat(product.cost_price) || 0;
+    if (costPrice <= 0) return null; // Cannot calculate if cost is 0
+    return ((sellingPrice - costPrice) / costPrice) * 100;
+  };
+
+  // Calculate profit per unit
+  const calculateProfitPerUnit = () => {
+    const sellingPrice = parseFloat(product.price) || 0;
+    const costPrice = parseFloat(product.cost_price) || 0;
+    return sellingPrice - costPrice;
+  };
+
+  const profitMargin = product.profit_margin || calculateProfitMargin();
+  const profitPerUnit = calculateProfitPerUnit();
+  const sellingPrice = parseFloat(product.price) || 0;
+  const costPrice = parseFloat(product.cost_price) || 0;
+
   return (
     <Modal
       visible={visible}
@@ -185,9 +205,22 @@ const ProductDetailsModal = ({ visible, onClose, product }) => {
                 <Text style={styles.infoLabel}>Profit Margin:</Text>
                 <Text style={[
                   styles.infoValue,
-                  product.profit_margin > 0 ? styles.profitPositive : styles.profitNegative
+                  profitMargin !== null && profitMargin > 0 ? styles.profitPositive : 
+                  profitMargin !== null && profitMargin < 0 ? styles.profitNegative : {}
                 ]}>
-                  {product.profit_margin ? `${product.profit_margin.toFixed(2)}%` : 'N/A'}
+                  {profitMargin !== null ? `${profitMargin.toFixed(2)}%` : 'N/A'}
+                </Text>
+              </View>
+              
+              {/* Net Margin (Profit per unit) */}
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Net Margin:</Text>
+                <Text style={[
+                  styles.infoValue,
+                  profitPerUnit > 0 ? styles.profitPositive : 
+                  profitPerUnit < 0 ? styles.profitNegative : {}
+                ]}>
+                  {formatCurrency(profitPerUnit)} per unit
                 </Text>
               </View>
             </View>

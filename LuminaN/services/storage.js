@@ -10,7 +10,8 @@ const STORAGE_KEYS = {
   CONFIRMED_ORDERS: 'confirmed_orders',
   CASHIER_RECEIVING_RECORDS: 'cashier_receiving_records',
   LICENSE_DATA: 'license_data',
-  LICENSE_SECURITY_DATA: 'license_security_data'
+  LICENSE_SECURITY_DATA: 'license_security_data',
+  BUSINESS_SETTINGS: 'business_settings'
 };
 
 /**
@@ -202,6 +203,45 @@ export const shopStorage = {
   async hasLicenseData() {
     const licenseData = await this.getLicenseData();
     return licenseData !== null;
+  },
+
+  // Business settings storage methods
+  async saveBusinessSettings(settings) {
+    try {
+      await AsyncStorage.setItem(STORAGE_KEYS.BUSINESS_SETTINGS, JSON.stringify({
+        ...settings,
+        savedAt: new Date().toISOString()
+      }));
+      console.log('✅ Business settings saved successfully');
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to save business settings:', error);
+      return false;
+    }
+  },
+
+  async getBusinessSettings() {
+    try {
+      const settingsJson = await AsyncStorage.getItem(STORAGE_KEYS.BUSINESS_SETTINGS);
+      if (settingsJson) {
+        return JSON.parse(settingsJson);
+      }
+      return null;
+    } catch (error) {
+      console.error('❌ Failed to get business settings:', error);
+      return null;
+    }
+  },
+
+  async clearBusinessSettings() {
+    try {
+      await AsyncStorage.removeItem(STORAGE_KEYS.BUSINESS_SETTINGS);
+      console.log('✅ Business settings cleared');
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to clear business settings:', error);
+      return false;
+    }
   },
 
   // Clear all app data including license

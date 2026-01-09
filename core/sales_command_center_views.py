@@ -122,12 +122,14 @@ class InfiniteSalesFeedView(APIView):
                 'item_count': sale.items.count(),
                 'items': [{
                     'product_name': item.product.name,
+                    'product_id': item.product.id,
                     'quantity': float(item.quantity),
                     'unit_price': float(item.unit_price),
                     'total_price': float(item.total_price),
                     'cost_price': float(item.product.cost_price),
                     'line_code': item.product.line_code,
-                    'barcode': item.product.barcode
+                    'barcode': item.product.barcode,
+                    'category': item.product.category
                 } for item in sale.items.all()]
             })
         

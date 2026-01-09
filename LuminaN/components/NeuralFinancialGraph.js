@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Dimensions,
-  Animated,
+  TouchableOpacity,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 
@@ -12,281 +12,203 @@ const { width } = Dimensions.get('window');
 
 /**
  * Simplified Neural Financial Matrix Component
- * Performance-optimized for smooth scrolling
+ * Uses real sales data passed from parent component
+ * Clean, simple bar chart visualization
+ * NO demo/mock data - shows real data or zeros
  */
-const NeuralFinancialGraph = ({ data }) => {
-  // Simple animation controllers only
-  const [animatedValues, setAnimatedValues] = useState({
-    salesLine: new Animated.Value(0),
-    expenseLine: new Animated.Value(0),
-    profitLine: new Animated.Value(0),
-  });
+const NeuralFinancialGraph = ({ data, onRefresh }) => {
+  // Use data passed from parent component first
+  const getSalesData = () => {
+    if (!data) {
+      console.log('⚠️ No data prop provided to NeuralFinancialGraph');
+      return [];
+    }
 
-  const [neuralData, setNeuralData] = useState([]);
-  const [isAnimating, setIsAnimating] = useState(false);
-  
-  // Simple animation ref
-  const animationRef = useRef(null);
-
-  // Simple data processing
-  useEffect(() => {
-    const hasRealData = data && (
-      (data.todaySales && data.todaySales > 0) ||
-      (data.weekSales && data.weekSales > 0) ||
-      (data.monthSales && data.monthSales > 0) ||
-      (data.totalRevenue && data.totalRevenue > 0) ||
-      (data.totalExpenses && data.totalExpenses > 0) ||
-      (data.totalProfit && data.totalProfit > 0)
-    );
+    const realData = data;
     
-    if (hasRealData) {
-      generateSimpleFinancialData(data);
-    } else {
-      setNeuralData([]);
+    console.log('📊 Using real sales data from props:', realData);
+    
+    // Check if we have real salesTrend data from backend
+    if (realData.salesTrend && Array.isArray(realData.salesTrend) && realData.salesTrend.length > 0) {
+      // Use the actual daily data from backend
+      return realData.salesTrend.slice(-7).map((day, index) => ({
+        day: day.day || day.date || `Day ${index + 1}`,
+        sales: day.sales || day.revenue || day.net_revenue || 0,
+        transactions: day.transactions || 0,
+        index,
+      }));
     }
     
-    startSimpleAnimations();
-  }, [data]);
-
-  // Simple financial data generation
-  const generateSimpleFinancialData = (realData) => {
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    
-    const totalRevenue = realData.totalRevenue || realData.monthSales || realData.weekSales * 4 || realData.todaySales * 30 || 0;
-    const totalExpenses = realData.totalExpenses || (totalRevenue * 0.72);
-    const totalProfit = realData.totalProfit || (totalRevenue - totalExpenses);
-    
-    const generatedData = months.map((month, index) => {
-      const seasonalMultiplier = 0.85 + (Math.sin((index / 12) * 2 * Math.PI) * 0.15);
-      const monthlyVariation = 0.8 + (Math.random() * 0.4);
-      const combinedMultiplier = seasonalMultiplier * monthlyVariation;
+    // No real trend data available - show zeros for all days
+    // This indicates no sales data was found in the backend
+    const today = new Date();
+    const chartData = [];
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(today);
+      date.setDate(date.getDate() - i);
       
-      const baseSales = (totalRevenue / 12) * combinedMultiplier;
-      const baseExpenses = (totalExpenses / 12) * combinedMultiplier;
-      const staffLunch = 800 / 12;
-      const waste = (totalRevenue * 0.015) / 12;
-      const profit = baseSales - baseExpenses;
-      
-      return {
-        month,
-        sales: Math.round(baseSales),
-        expenses: Math.round(baseExpenses),
-        profit: Math.round(profit),
-        staffLunch: Math.round(staffLunch),
-        waste: Math.round(waste),
-      };
-    });
+      chartData.push({
+        day: date.toLocaleDateString('en-US', { weekday: 'short' }),
+        sales: 0, // Zero - no real data
+        transactions: 0,
+        index: 6 - i,
+      });
+    }
     
-    setNeuralData(generatedData);
+    console.log('📊 No real trend data available, showing zeros');
+    return chartData;
   };
 
-  // Simple animation system
-  const startSimpleAnimations = () => {
-    setIsAnimating(true);
-    
-    const simpleAnimation = Animated.stagger(200, [
-      Animated.timing(animatedValues.salesLine, {
-        toValue: 1,
-        duration: 1200,
-        useNativeDriver: false,
-      }),
-      Animated.timing(animatedValues.expenseLine, {
-        toValue: 1,
-        duration: 1400,
-        useNativeDriver: false,
-      }),
-      Animated.timing(animatedValues.profitLine, {
-        toValue: 1,
-        duration: 1600,
-        useNativeDriver: false,
-      }),
-    ]);
-    
-    simpleAnimation.start(() => {
-      setIsAnimating(false);
-    });
-    
-    animationRef.current = simpleAnimation;
-  };
+  const salesData = getSalesData();
 
-  // Calculate totals
+  // Calculate totals from the chart data
   const calculateTotals = () => {
-    if (neuralData.length === 0) return { sales: 0, expenses: 0, profit: 0, staffLunch: 0, waste: 0 };
+    if (salesData.length === 0) {
+      return { totalSales: 0, totalTransactions: 0, avgTransaction: 0 };
+    }
     
-    return neuralData.reduce((acc, item) => ({
-      sales: acc.sales + item.sales,
-      expenses: acc.expenses + item.expenses,
-      profit: acc.profit + item.profit,
-      staffLunch: acc.staffLunch + item.staffLunch,
-      waste: acc.waste + item.waste,
-    }), { sales: 0, expenses: 0, profit: 0, staffLunch: 0, waste: 0 });
+    const totalSales = salesData.reduce((sum, item) => sum + item.sales, 0);
+    const totalTransactions = salesData.reduce((sum, item) => sum + item.transactions, 0);
+    
+    return {
+      totalSales,
+      totalTransactions,
+      avgTransaction: totalTransactions > 0 ? totalSales / totalTransactions : 0,
+    };
   };
 
   const totals = calculateTotals();
+  
+  // Find max value for scaling
+  const maxValue = salesData.length > 0 
+    ? Math.max(...salesData.map(item => item.sales)) 
+    : 1;
+  
+  // Create grid labels based on max value
+  const gridLabels = [];
+  const step = Math.ceil(maxValue / 4 / 100) * 100;
+  for (let i = 0; i <= 4; i++) {
+    gridLabels.push(i * step);
+  }
 
-  // Simple grid rendering
-  const renderGrid = () => {
-    const gridLines = [];
-    const maxValue = Math.max(...neuralData.map(item => Math.max(item.sales, item.expenses, item.profit))) || 1;
-    const gridHeight = 150;
-    
-    for (let i = 0; i <= 4; i++) {
-      const value = (maxValue / 4) * i;
-      const y = gridHeight - (gridHeight / 4) * i;
-      
-      gridLines.push(
-        <View key={i} style={[styles.gridLine, { top: y }]}>
-          <Text style={styles.gridLabel}>${Math.round(value).toLocaleString()}</Text>
+  // Check if we have any real data
+  const hasRealData = salesData.some(item => item.sales > 0);
+
+  // Bar chart rendering
+  const renderBarChart = () => {
+    if (salesData.length === 0) {
+      return (
+        <View style={styles.noDataContainer}>
+          <Icon name="trending-up" size={32} color="#666" />
+          <Text style={styles.noDataText}>No sales data available</Text>
         </View>
       );
     }
     
-    return gridLines;
-  };
-
-  // Simple data line rendering
-  const renderDataLine = (dataKey, color, animatedValue, style = {}) => {
-    if (neuralData.length === 0) return null;
-    
-    const maxValue = Math.max(...neuralData.map(item => Math.max(item.sales, item.expenses, item.profit))) || 1;
-    const gridHeight = 150;
-    const pointSpacing = (width - 60) / (neuralData.length - 1);
-    
-    const points = neuralData.map((item, index) => {
-      const value = item[dataKey];
-      const x = 30 + (pointSpacing * index);
-      const y = gridHeight - ((value / maxValue) * gridHeight);
-      
-      return { x, y, value };
-    });
-    
-    const pathData = points.map((point, index) => 
-      `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`
-    ).join(' ');
+    const chartHeight = 120;
+    const maxScale = maxValue || 1;
     
     return (
-      <View style={[styles.dataLineContainer, style]}>
-        <svg width={width} height={gridHeight} style={{ position: 'absolute' }}>
-          <path
-            d={pathData}
-            stroke={color}
-            strokeWidth="2"
-            fill="none"
-            opacity={0.8}
-          />
-          
-          {points.map((point, index) => (
-            <circle
-              key={index}
-              cx={point.x}
-              cy={point.y}
-              r="3"
-              fill={color}
-              opacity={animatedValue}
-            />
+      <View style={styles.barChartContainer}>
+        {/* Y-axis labels */}
+        <View style={styles.yAxisLabels}>
+          {gridLabels.map((value, index) => (
+            <View key={index} style={styles.yAxisLabel}>
+              <Text style={styles.yAxisText}>${value}</Text>
+            </View>
           ))}
-        </svg>
+        </View>
+        
+        {/* Bars */}
+        <View style={styles.barsContainer}>
+          {salesData.map((item, index) => {
+            const barHeight = Math.max(4, (item.sales / maxScale) * chartHeight);
+            const isPositive = item.sales > 0;
+            
+            return (
+              <View key={index} style={styles.barWrapper}>
+                <View style={styles.barLabel}>
+                  <Text style={styles.barLabelText}>{item.day}</Text>
+                </View>
+                <View style={styles.barTrack}>
+                  <View 
+                    style={[
+                      styles.bar, 
+                      { 
+                        height: barHeight,
+                        backgroundColor: isPositive ? '#00ff88' : '#ff4444',
+                      }
+                    ]}
+                  />
+                </View>
+                <View style={styles.barValue}>
+                  <Text style={styles.barValueText}>${item.sales.toLocaleString()}</Text>
+                </View>
+              </View>
+            );
+          })}
+        </View>
       </View>
     );
   };
 
-  // Simple neural nodes
-  const renderNeuralNodes = () => {
-    return neuralData.map((item, index) => {
-      const maxValue = Math.max(...neuralData.map(item => Math.max(item.sales, item.expenses, item.profit))) || 1;
-      const gridHeight = 150;
-      const pointSpacing = (width - 60) / (neuralData.length - 1);
-      const x = 30 + (pointSpacing * index);
-      
-      return (
-        <View key={index} style={[styles.neuralNode, { left: x - 5, top: 130 }]}>
-          <View style={styles.nodeCore} />
-          <Text style={styles.nodeLabel}>{item.month}</Text>
-        </View>
-      );
-    });
-  };
-
-  // Cleanup
-  useEffect(() => {
-    return () => {
-      if (animationRef.current) {
-        animationRef.current.stop();
-      }
-    };
-  }, []);
-
-  const getMaxValue = () => {
-    if (neuralData.length === 0) return 1;
-    return Math.max(...neuralData.map(item => 
-      Math.max(item.sales, item.expenses, item.profit)
-    ));
-  };
-
   return (
     <View style={styles.container}>
-      {/* Simple Header */}
+      {/* Header */}
       <View style={styles.header}>
         <View style={styles.brand}>
           <Icon name="psychology" size={20} color="#ff0080" />
           <Text style={styles.title}>NEURAL FINANCIAL MATRIX</Text>
         </View>
-      </View>
-      
-      {/* Simple Graph */}
-      <View style={styles.graphContainer}>
-        <View style={styles.graphArea}>
-          <View style={styles.gridContainer}>
-            {renderGrid()}
-          </View>
-          
-          {renderDataLine('sales', '#00ff88', animatedValues.salesLine)}
-          {renderDataLine('expenses', '#ff4444', animatedValues.expenseLine)}
-          {renderDataLine('profit', '#00f5ff', animatedValues.profitLine)}
-          
-          <View style={styles.nodesContainer}>
-            {renderNeuralNodes()}
-          </View>
-        </View>
         
-        {/* Simple Legend */}
-        <View style={styles.legend}>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendColor, { backgroundColor: '#00ff88' }]} />
-            <Text style={styles.legendText}>Sales Revenue</Text>
-            <Text style={styles.legendValue}>${totals.sales.toLocaleString()}</Text>
-          </View>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendColor, { backgroundColor: '#ff4444' }]} />
-            <Text style={styles.legendText}>Total Expenses</Text>
-            <Text style={styles.legendValue}>${totals.expenses.toLocaleString()}</Text>
-          </View>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendColor, { backgroundColor: '#00f5ff' }]} />
-            <Text style={styles.legendText}>Net Profit</Text>
-            <Text style={styles.legendValue}>${totals.profit.toLocaleString()}</Text>
-          </View>
+        {onRefresh && (
+          <TouchableOpacity 
+            style={styles.refreshButton}
+            onPress={onRefresh}
+          >
+            <Icon name="refresh" size={18} color="#00f5ff" />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Message if no real data */}
+      {!hasRealData && (
+        <View style={styles.noDataBanner}>
+          <Icon name="info" size={14} color="#ffaa00" />
+          <Text style={styles.noDataBannerText}>No sales data found - showing zeros</Text>
+        </View>
+      )}
+
+      {/* Simple Bar Chart */}
+      <View style={styles.chartContainer}>
+        {renderBarChart()}
+      </View>
+
+      {/* Legend */}
+      <View style={styles.legend}>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendColor, { backgroundColor: '#00ff88' }]} />
+          <Text style={styles.legendText}>Sales Revenue</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <Text style={styles.legendValue}>7-Day Total: ${totals.totalSales.toLocaleString()}</Text>
         </View>
       </View>
-      
+
       {/* Simple Metrics */}
       <View style={styles.metricsContainer}>
         <View style={styles.metricsGrid}>
           <View style={styles.metricCard}>
-            <Text style={styles.metricLabel}>REVENUE</Text>
-            <Text style={styles.metricValue}>${totals.sales.toLocaleString()}</Text>
+            <Text style={styles.metricLabel}>TOTAL SALES</Text>
+            <Text style={styles.metricValue}>${totals.totalSales.toLocaleString()}</Text>
           </View>
           <View style={styles.metricCard}>
-            <Text style={styles.metricLabel}>PROFIT</Text>
-            <Text style={[styles.metricValue, { color: totals.profit >= 0 ? '#00ff88' : '#ff4444' }]}>
-              ${totals.profit.toLocaleString()}
-            </Text>
+            <Text style={styles.metricLabel}>TRANSACTIONS</Text>
+            <Text style={styles.metricValue}>{totals.totalTransactions}</Text>
           </View>
           <View style={styles.metricCard}>
-            <Text style={styles.metricLabel}>MARGIN</Text>
-            <Text style={styles.metricValue}>
-              {totals.sales > 0 ? ((totals.profit / totals.sales) * 100).toFixed(1) : '0'}%
-            </Text>
+            <Text style={styles.metricLabel}>AVG SALE</Text>
+            <Text style={styles.metricValue}>${totals.avgTransaction.toFixed(2)}</Text>
           </View>
         </View>
       </View>
@@ -298,15 +220,17 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: 'rgba(0, 0, 0, 0.9)',
     borderRadius: 16,
-    padding: 20,
+    padding: 16,
     marginTop: 20,
     borderWidth: 2,
     borderColor: '#ff0080',
   },
   
   header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   
   brand: {
@@ -316,130 +240,158 @@ const styles = StyleSheet.create({
   
   title: {
     color: '#ff0080',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
     marginLeft: 8,
     letterSpacing: 1,
   },
   
-  graphContainer: {
+  refreshButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0, 245, 255, 0.1)',
+  },
+  
+  noDataContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  
+  noDataText: {
+    color: '#666',
+    fontSize: 12,
+    marginTop: 12,
+  },
+  
+  noDataBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 170, 0, 0.1)',
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 12,
+  },
+  
+  noDataBannerText: {
+    color: '#ffaa00',
+    fontSize: 10,
+    marginLeft: 8,
+  },
+  
+  chartContainer: {
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
     borderColor: '#00f5ff',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   
-  graphArea: {
+  barChartContainer: {
+    flexDirection: 'row',
     height: 160,
-    position: 'relative',
-    marginBottom: 16,
   },
   
-  gridContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+  yAxisLabels: {
+    width: 50,
+    justifyContent: 'space-between',
+    paddingVertical: 8,
   },
   
-  gridLine: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    height: 1,
-    backgroundColor: 'rgba(0, 245, 255, 0.3)',
+  yAxisLabel: {
+    height: 20,
+    justifyContent: 'center',
   },
   
-  gridLabel: {
-    position: 'absolute',
-    left: -40,
-    top: -8,
+  yAxisText: {
     color: '#00f5ff',
     fontSize: 9,
     fontWeight: 'bold',
   },
   
-  dataLineContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+  barsContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-around',
+    paddingHorizontal: 8,
   },
   
-  nodesContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 30,
-  },
-  
-  neuralNode: {
-    position: 'absolute',
-    width: 10,
-    height: 10,
+  barWrapper: {
     alignItems: 'center',
+    flex: 1,
   },
   
-  nodeCore: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#00f5ff',
+  barLabel: {
+    marginBottom: 4,
   },
   
-  nodeLabel: {
-    position: 'absolute',
-    top: 8,
-    left: -8,
+  barLabelText: {
     color: '#888',
+    fontSize: 8,
+    fontWeight: 'bold',
+  },
+  
+  barTrack: {
+    width: '70%',
+    height: 120,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 4,
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
+  },
+  
+  bar: {
+    borderRadius: 4,
+    minHeight: 4,
+  },
+  
+  barValue: {
+    marginTop: 4,
+  },
+  
+  barValueText: {
+    color: '#ffffff',
     fontSize: 7,
     fontWeight: 'bold',
-    width: 16,
-    textAlign: 'center',
   },
   
   legend: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
   },
   
   legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
-    width: '48%',
   },
   
   legendColor: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginRight: 8,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 6,
   },
   
   legendText: {
     color: '#ffffff',
     fontSize: 10,
     fontWeight: 'bold',
-    flex: 1,
   },
   
   legendValue: {
-    color: '#888',
-    fontSize: 9,
-    fontWeight: '600',
+    color: '#00ff88',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
   
   metricsContainer: {
     backgroundColor: 'rgba(0, 255, 136, 0.05)',
     borderRadius: 12,
-    padding: 16,
+    padding: 12,
     borderWidth: 1,
     borderColor: 'rgba(0, 255, 136, 0.3)',
   },
@@ -452,7 +404,7 @@ const styles = StyleSheet.create({
   metricCard: {
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     borderRadius: 8,
-    padding: 12,
+    padding: 10,
     width: '31%',
     alignItems: 'center',
   },

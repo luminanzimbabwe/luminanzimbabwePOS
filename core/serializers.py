@@ -12,7 +12,9 @@ class ShopConfigurationSerializer(serializers.ModelSerializer):
         model = ShopConfiguration
         fields = [
             'shop_id', 'register_id', 'name', 'address', 'business_type', 'industry', 'description',
-            'email', 'phone', 'base_currency', 'shop_owner_master_password', 'recovery_codes',
+            'email', 'phone', 'base_currency', 
+            'opening_time', 'closing_time', 'timezone', 'vat_rate',
+            'shop_owner_master_password', 'recovery_codes',
             'device_id', 'owner_id', 'api_key', 'version', 'checksum',
             'registration_time', 'is_active', 'last_login', 'registered_at'
         ]

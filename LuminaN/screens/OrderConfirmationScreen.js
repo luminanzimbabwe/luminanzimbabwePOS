@@ -464,147 +464,52 @@ const OrderConfirmationScreen = () => {
         throw new Error(`Cannot connect to backend server: ${connError.message}`);
       }
       
-      // Get current products from backend
-      console.log('📋 Fetching current products from backend...');
-      const productsRes = await shopAPI.getProducts();
-      const currentProducts = productsRes.data || [];
+      // Prepare the receiving data for the bulk inventory receive API
+      const receivingData = {
+        reference: order.reference || order.id,
+        invoiceNumber: order.invoiceNumber || '',
+        supplier: order.supplierName || 'Unknown Supplier',
+        receivingDate: order.receivingDate || new Date().toISOString().split('T')[0],
+        notes: order.notes || '',
+        items: order.receivingItems?.map((item, index) => ({
+          productId: item.product?.id,
+          quantity: parseFloat(item.quantity) || 0,
+          costPrice: item.costPrice || 0,
+          updateBaseCost: item.updateBaseCost || false
+        })) || [],
+        totals: order.totals || {}
+      };
       
-      console.log('📊 Current products count:', currentProducts.length);
-      console.log('📋 Sample product:', currentProducts[0]);
+      console.log('📤 Sending bulk inventory receive request:', receivingData);
       
-      // Update each product in the order
-      const updatePromises = order.receivingItems.map(async (item, index) => {
-        try {
-          console.log(`\n🔄 Processing item ${index + 1}/${order.receivingItems.length}:`, item.product?.name);
+      // Use the dedicated inventory receive API endpoint
+      const response = await shopAPI.receiveInventory(receivingData);
+      console.log('✅ Inventory receive API response:', response);
+      
+      if (response && response.data) {
+        const result = response.data;
+        if (result.success !== false) {
+          console.log('✅ Successfully updated inventory via API');
+          console.log('📦 Items received:', result.received_items?.length || 0);
           
-          const product = item.product;
-          const receivedQuantity = parseFloat(item.quantity) || 0;
-          const newCostPrice = item.costPrice || 0;
-          
-          // Find current product in backend data
-          const currentProduct = currentProducts.find(p => p.id === product.id);
-          
-          if (!currentProduct) {
-            console.warn(`⚠️ Product ${product.name} (ID: ${product.id}) not found in backend products`);
-            console.log('🔍 Available products:', currentProducts.map(p => ({ id: p.id, name: p.name })));
-            return { success: false, product: product.name, error: 'Product not found in backend' };
-          }
-          
-          const currentStock = parseFloat(currentProduct.stock_quantity) || 0;
-          const newStock = currentStock + receivedQuantity;
-          
-          console.log(`📦 ${product.name}:`);
-          console.log(`   Current stock: ${currentStock}`);
-          console.log(`   Received: ${receivedQuantity}`);
-          console.log(`   New stock: ${newStock}`);
-          
-          // Prepare update data with enhanced barcode and supplier tracking
-          const updateData = {
-            email: credentials.email,
-            password: credentials.shop_owner_master_password,
-            name: currentProduct.name,
-            description: currentProduct.description || '',
-            price: currentProduct.price || 0,
-            cost_price: item.updateBaseCost ? newCostPrice : currentProduct.cost_price || 0,
-            category: currentProduct.category || 'Other',
-            stock_quantity: newStock,
-            min_stock_level: currentProduct.min_stock_level || 5,
-            supplier: item.supplierName || currentProduct.supplier || '',
-            currency: currentProduct.currency || 'USD',
-            price_type: currentProduct.price_type || 'unit',
-            line_code: currentProduct.line_code,
-            // Enhanced barcode tracking
-            barcode: currentProduct.barcode || item.batchBarcode || '',
-            additional_barcodes: updateAdditionalBarcodes(currentProduct, item.batchBarcode)
+          return {
+            successful: result.received_items?.length || order.receivingItems?.length || 0,
+            failed: 0,
+            verified: result.received_items?.length || order.receivingItems?.length || 0
           };
-          
-          console.log(`📤 Enhanced update data for ${product.name}:`, updateData);
-          
-          console.log(`📤 Sending update request for ${product.name} (ID: ${product.id})`);
-          console.log('📤 Update data:', updateData);
-          
-          // Update product in backend
-          const response = await shopAPI.updateProduct(product.id, updateData);
-          
-          console.log(`✅ Backend response for ${product.name}:`, response.status, response.data);
-          console.log(`✅ Successfully updated ${product.name} - New stock: ${newStock}`);
-          
-          if (item.updateBaseCost) {
-            console.log(`💰 Updated cost price for ${product.name}: ${newCostPrice}`);
-          }
-          
-          return { success: true, product: product.name, newStock, updatedCost: item.updateBaseCost };
-          
-        } catch (error) {
-          console.error(`❌ Failed to update ${item.product?.name}:`, error);
-          console.error(`❌ Error details:`, {
-            message: error.message,
-            response: error.response?.data,
-            status: error.response?.status
-          });
-          return { success: false, product: item.product?.name, error: error.message };
-        }
-      });
-      
-      // Wait for all updates to complete
-      console.log('\n⏳ Waiting for all updates to complete...');
-      const results = await Promise.all(updatePromises);
-      
-      const successful = results.filter(r => r.success);
-      const failed = results.filter(r => !r.success);
-      
-      console.log('\n📊 Final Update Results:');
-      console.log(`   Total items: ${results.length}`);
-      console.log(`   Successful: ${successful.length}`);
-      console.log(`   Failed: ${failed.length}`);
-      
-      if (successful.length > 0) {
-        console.log('✅ Successfully updated:', successful.map(r => `${r.product} (stock: ${r.newStock})`));
-      }
-      
-      if (failed.length > 0) {
-        console.warn('⚠️ Failed updates:', failed);
-      }
-      
-      // Verify updates by reloading products and checking stock levels
-      let verifiedCount = 0;
-      if (successful.length > 0) {
-        console.log('🔄 Verifying updates by reloading products...');
-        try {
-          const verifyRes = await shopAPI.getProducts();
-          const updatedProducts = verifyRes.data || [];
-          
-          // Check if any of our updated products actually changed
-          verifiedCount = 0;
-          for (const item of order.receivingItems) {
-            const originalProduct = item.product;
-            const updatedProduct = updatedProducts.find(p => p.id === originalProduct.id);
-            
-            if (updatedProduct) {
-              const originalStock = parseFloat(originalProduct.stock_quantity) || 0;
-              const updatedStock = parseFloat(updatedProduct.stock_quantity) || 0;
-              const expectedStock = originalStock + parseFloat(item.quantity);
-              
-              console.log(`🔍 Verification for ${originalProduct.name}:`);
-              console.log(`   Original: ${originalStock}, Expected: ${expectedStock}, Actual: ${updatedStock}`);
-              
-              if (Math.abs(updatedStock - expectedStock) < 0.01) {
-                verifiedCount++;
-                console.log(`✅ ${originalProduct.name} stock correctly updated`);
-              } else {
-                console.warn(`⚠️ ${originalProduct.name} stock mismatch`);
-              }
-            }
-          }
-          
-          console.log(`🎯 Verification complete: ${verifiedCount}/${successful.length} products confirmed updated`);
-        } catch (verifyError) {
-          console.warn('⚠️ Could not verify updates:', verifyError.message);
+        } else {
+          console.warn('⚠️ API returned partial success:', result.errors);
+          return {
+            successful: result.received_items?.length || 0,
+            failed: result.errors?.length || 0,
+            verified: 0,
+            error: result.errors?.join(', ')
+          };
         }
       }
       
       console.log('✅ Product inventory update process completed!');
-      return { successful: successful.length, failed: failed.length, verified: verifiedCount || 0 };
+      return { successful: order.receivingItems?.length || 0, failed: 0, verified: order.receivingItems?.length || 0 };
       
     } catch (error) {
       console.error('❌ Critical error in inventory update:', error);

@@ -124,6 +124,8 @@ urlpatterns = [
     path('stock-valuation/', views.StockValuationView.as_view(), name='stock-valuation'),
     path('expenses/', views.ExpenseListView.as_view(), name='expense-list'),
     path('staff-lunch/', views.StaffLunchListView.as_view(), name='staff-lunch-list'),
+    path('staff-lunch/deduct-money/', views.StaffLunchDeductMoneyView.as_view(), name='staff-lunch-deduct-money'),
+    path('staff-lunch/deduct-product/', views.StaffLunchDeductProductView.as_view(), name='staff-lunch-deduct-product'),
     path('stock-takes/', views.StockTakeListView.as_view(), name='stock-take-list'),
     path('stock-takes/<int:stock_take_id>/', views.StockTakeDetailView.as_view(), name='stock-take-detail'),
     path('stock-takes/<int:stock_take_id>/items/', views.StockTakeItemListView.as_view(), name='stock-take-item-list'),
@@ -157,4 +159,20 @@ urlpatterns = [
     
     # DELETE TODAY'S SALES - Owner only endpoint to start fresh
     path('delete-today-sales/', views.DeleteTodaySalesView.as_view(), name='delete-today-sales'),
+    
+    # DELETE TODAY'S STAFF LUNCH RECORDS - for EOD process
+    path('delete-today-staff-lunch/', views.DeleteTodayStaffLunchView.as_view(), name='delete-today-staff-lunch'),
+    
+    # Inventory Receiving - for cashier and owner product receiving
+    path('inventory/receive/', views.InventoryReceiveView.as_view(), name='inventory-receive'),
+    path('inventory/receiving/history/', views.InventoryReceivingHistoryView.as_view(), name='inventory-receiving-history'),
+    
+    # ALL SALES HISTORY - Never affected by EOD deletion - for Owner Dashboard
+    path('all-sales-history/', views.AllSalesHistoryView.as_view(), name='all-sales-history'),
+    
+    # ALL CASHIER SALES HISTORY - Never affected by EOD deletion - for Cashier My Sales screen
+    path('all-cashier-sales/', views.AllCashierSalesHistoryView.as_view(), name='all-cashier-sales'),
+    
+    # Business Settings endpoint - for managing business hours, timezone, and VAT
+    path('business-settings/', views.BusinessSettingsView.as_view(), name='business-settings'),
 ]

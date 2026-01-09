@@ -435,17 +435,20 @@ const CashierProductReceivingScreen = () => {
     setSaving(true);
     
     try {
-      // Always attempt to save receiving
-      console.log('💾 Attempting to save receiving...');
+      // Save receiving locally (pending owner approval)
+      console.log('💾 Saving receiving locally (pending approval)...');
       const saveResult = await saveReceivingLocally();
       
       if (saveResult === false) {
-        console.log('⚠️ Storage save had issues, but continuing...');
-      } else {
-        console.log('✅ Receiving saved successfully!');
+        console.log('❌ Storage save failed');
+        Alert.alert('Error', 'Failed to save receiving record. Please try again.');
+        setSaving(false);
+        return;
       }
       
-      // Show success modal
+      console.log('✅ Receiving saved! Waiting for owner approval.');
+      
+      // Show success modal - stock will be updated after owner approval
       console.log('🎉 Showing success modal...');
       setShowSuccessModal(true);
       

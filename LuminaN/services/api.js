@@ -76,11 +76,9 @@ export const shopAPI = {
   getProducts: () => api.get('/products/'),
   addProduct: (data) => api.post('/products/', data),
   updateProduct: (productId, data) => api.patch(`/products/${productId}/`, data),
-  deleteProduct: (productId, authData) => api.delete(`/products/${productId}/`, {
-    headers: {
-      'Authorization': `Basic ${btoa(`${authData.email}:${authData.password}`)}`
-    }
-  }),
+  deleteProduct: (productId, data) => api.delete(`/products/${productId}/`, { data }),
+  delistProduct: (productId, data) => api.put(`/products/${productId}/`, data),
+  relistProduct: (productId, data) => api.post(`/products/${productId}/`, data),
   getProductsByCategory: (category) => api.get(`/products/bulk/?category=${encodeURIComponent(category)}`),
   lookupBarcode: (barcode) => api.get(`/products/barcode-lookup/?barcode=${encodeURIComponent(barcode)}`),
   
@@ -237,6 +235,12 @@ export const shopAPI = {
     const queryParams = params ? `?${params}` : '';
     return api.get(`/staff-lunch/${queryParams}`);
   },
+  
+  // Money Lunch - Deduct from drawer
+  deductMoneyFromDrawer: (data) => api.post('/staff-lunch/deduct-money/', data),
+  
+  // Product Lunch - Deduct from stock
+  deductProductFromStock: (data) => api.post('/staff-lunch/deduct-product/', data),
 
   // Exchange Rate Management methods
   getExchangeRates: () => api.get('/exchange-rates/'),
@@ -277,6 +281,26 @@ export const shopAPI = {
   
   // DELETE TODAY'S SALES - Owner only endpoint to start fresh
   deleteTodaySales: (data = {}, config = {}) => api.post('/delete-today-sales/', data, config),
+  
+  // DELETE TODAY'S STAFF LUNCH RECORDS - for EOD process
+  deleteTodayStaffLunch: (data = {}, config = {}) => api.post('/delete-today-staff-lunch/', data, config),
+
+  // ALL SALES HISTORY - Never affected by EOD deletion
+  getAllSalesHistory: (config = {}) => api.get('/all-sales-history/', config),
+
+  // ALL CASHIER SALES HISTORY - Never affected by EOD deletion - for Cashier My Sales screen
+  getAllCashierSales: (cashierId = null, cashierIdentifier = null, config = {}) => {
+    let url = '/all-cashier-sales/';
+    const params = [];
+    if (cashierId) params.push(`cashier_id=${cashierId}`);
+    if (cashierIdentifier) params.push(`cashier_identifier=${encodeURIComponent(cashierIdentifier)}`);
+    if (params.length > 0) url += `?${params.join('&')}`;
+    return api.get(url, config);
+  },
+  
+  // Business Settings methods - for managing business hours, timezone, and VAT
+  getBusinessSettings: (config = {}) => api.get('/business-settings/', config),
+  updateBusinessSettings: (data, config = {}) => api.patch('/business-settings/', data, config),
 };
 
 // Export apiService as alias for shopAPI for backwards compatibility

@@ -81,6 +81,9 @@ const OwnerDashboardScreen = () => {
     recentActivity: []
   });
   
+  // Approved staff count
+  const [approvedStaffCount, setApprovedStaffCount] = useState(0);
+  
   // Business expenses and costs states
   const [businessExpenses, setBusinessExpenses] = useState([]);
   const [expensesLoading, setExpensesLoading] = useState(false);
@@ -137,6 +140,7 @@ const OwnerDashboardScreen = () => {
     loadBusinessExpenses();
     loadWasteData();
     loadExchangeRates();
+    loadApprovedStaffCount();
     checkLicenseStatus();
 
     // Poll shop status and drawer status every 30 seconds for near-real-time updates
@@ -148,6 +152,7 @@ const OwnerDashboardScreen = () => {
       loadBusinessExpenses().catch(() => {}); // Silent fail to prevent navigation issues
       loadWasteData().catch(() => {}); // Silent fail to prevent navigation issues
       loadExchangeRates().catch(() => {}); // Silent fail to prevent navigation issues
+      loadApprovedStaffCount().catch(() => {}); // Silent fail to prevent navigation issues
     }, 30000);
 
     // Dynamic mock data updaters for impressive live-like content
@@ -537,36 +542,43 @@ const OwnerDashboardScreen = () => {
       console.log('📊 Fetching real sales data from analytics endpoint...');
       
       try {
-        // Use the same comprehensive analytics approach as SalesDashboardScreen
+        // Use the correct analytics endpoint
         const response = await shopAPI.getAnonymousEndpoint('/analytics/');
         const apiData = response.data;
         console.log('✅ Real analytics data fetched successfully:', apiData);
         
         // Apply the same data transformation logic as SalesDashboardScreen
-        const grossRevenue = apiData.revenue_analytics?.total_revenue || 0;
+        // Handle different response formats
+        const grossRevenue = apiData.revenue_analytics?.total_revenue || apiData.total_revenue || apiData.total_sales || 0;
         const netRevenue = grossRevenue; // No refunds in owner dashboard for now
+        
+        // Get daily breakdown from various possible response formats
+        const dailyBreakdown = apiData.revenue_analytics?.daily_breakdown || apiData.daily_breakdown || apiData.sales_trend || [];
         
         // Transform analytics data to match our sales metrics format with REAL business data
         const transformedSalesData = {
           todaySales: netRevenue,
-          todayTransactions: apiData.revenue_analytics?.total_transactions || 0,
+          todayTransactions: apiData.revenue_analytics?.total_transactions || apiData.total_transactions || 0,
           weekSales: netRevenue, // Use actual period data
-          weekTransactions: apiData.revenue_analytics?.total_transactions || 0,
+          weekTransactions: apiData.revenue_analytics?.total_transactions || apiData.total_transactions || 0,
           monthSales: netRevenue,
-          monthTransactions: apiData.revenue_analytics?.total_transactions || 0,
-          averageTransactionValue: apiData.revenue_analytics?.average_transaction_value || (apiData.revenue_analytics?.total_transactions > 0 ? netRevenue / apiData.revenue_analytics.total_transactions : 0),
+          monthTransactions: apiData.revenue_analytics?.total_transactions || apiData.total_transactions || 0,
+          averageTransactionValue: apiData.revenue_analytics?.average_transaction_value || (apiData.revenue_analytics?.total_transactions > 0 ? netRevenue / apiData.revenue_analytics.total_transactions : (apiData.total_transactions > 0 ? netRevenue / apiData.total_transactions : 0)),
           topSellingProducts: (apiData.top_products || []).slice(0, 5).map(product => ({
-            name: product.name,
-            sales: product.total_revenue || 0
+            name: product.name || product.product_name,
+            sales: product.total_revenue || product.revenue || 0
           })),
-          salesTrend: (apiData.revenue_analytics?.daily_breakdown || []).slice(-7).map(day => ({
-            day: new Date(day.date).toLocaleDateString(),
-            sales: day.net_revenue || day.revenue || 0
+          // Use real daily breakdown for the 7-day chart
+          salesTrend: dailyBreakdown.slice(-7).map((day, index) => ({
+            day: new Date(day.date || day.day).toLocaleDateString('en-US', { weekday: 'short' }),
+            sales: day.net_revenue || day.revenue || day.sales || 0,
+            transactions: day.transactions || 0,
+            index,
           })),
           // Add comprehensive financial data for NeuralFinancialGraph
-          totalRevenue: apiData.revenue_analytics?.total_revenue || 0,
-          totalExpenses: (apiData.revenue_analytics?.total_revenue || 0) * 0.72, // Realistic 72% expense ratio
-          totalProfit: (apiData.revenue_analytics?.total_revenue || 0) * 0.28, // 28% profit margin
+          totalRevenue: grossRevenue,
+          totalExpenses: apiData.total_expenses || (grossRevenue * 0.72),
+          totalProfit: apiData.total_profit || (grossRevenue * 0.28),
           shrinkageAnalysis: apiData.shrinkage_analysis || {},
           categoryContribution: apiData.category_contribution || [],
           paymentAnalysis: apiData.payment_analysis || [],
@@ -807,6 +819,18 @@ const OwnerDashboardScreen = () => {
       });
     } finally {
       setStaffLunchLoading(false);
+    }
+  };
+
+  const loadApprovedStaffCount = async () => {
+    try {
+      const response = await shopAPI.getApprovedStaff({});
+      const staff = response.data?.staff || response.data || [];
+      setApprovedStaffCount(Array.isArray(staff) ? staff.length : 0);
+      console.log('📊 Loaded approved staff count:', staff.length);
+    } catch (error) {
+      console.error('Failed to load approved staff count:', error);
+      setApprovedStaffCount(0);
     }
   };
 
@@ -1085,6 +1109,7 @@ const OwnerDashboardScreen = () => {
               loadBusinessExpenses().catch(() => {}); // Silent fail to prevent navigation issues
               loadWasteData().catch(() => {}); // Silent fail to prevent navigation issues
               loadExchangeRates().catch(() => {}); // Silent fail to prevent navigation issues
+              loadApprovedStaffCount().catch(() => {}); // Silent fail to prevent navigation issues
             }}
           >
             <View style={styles.refreshGlowEffect} />
@@ -1925,7 +1950,12 @@ const OwnerDashboardScreen = () => {
       <NeuralFinancialGraph data={salesMetrics} />
 
       {/* Revolutionary Holographic Business Intelligence Scanner */}
-      <HolographicBusinessScanner data={salesMetrics} />
+      <HolographicBusinessScanner 
+        data={salesMetrics}
+        activeTerminals={shopStatus?.active_cashiers?.length || drawerStatus?.active_drawers || 0}
+        activeStaff={approvedStaffCount}
+        todayLunches={staffLunchMetrics.todayLunches}
+      />
 
       {/* Exchange Rates Neural Interface */}
       <View style={styles.exchangeRatesSection}>

@@ -171,19 +171,20 @@ const StaffLunchScreen = () => {
     try {
       setHistoryLoading(true);
       
-      // Build query parameters
+      // Build query parameters - by default we get today's lunches from the backend
       const params = new URLSearchParams();
       
-      if (historyFilters.staff_name.trim()) {
-        params.append('staff_name', historyFilters.staff_name.trim());
-      }
-      
+      // Only add date filters if explicitly set by user
       if (historyFilters.date_from.trim()) {
         params.append('date_from', historyFilters.date_from.trim());
       }
       
       if (historyFilters.date_to.trim()) {
         params.append('date_to', historyFilters.date_to.trim());
+      }
+      
+      if (historyFilters.staff_name.trim()) {
+        params.append('staff_name', historyFilters.staff_name.trim());
       }
       
       if (historyFilters.search.trim()) {
@@ -253,7 +254,8 @@ const StaffLunchScreen = () => {
       date_to: '',
       search: ''
     });
-    loadStaffLunchHistory();
+    // Don't reload - let the default today's filter take effect
+    // The backend now defaults to today's lunches
   };
 
   const formatCurrency = (amount) => {
@@ -396,41 +398,46 @@ const StaffLunchScreen = () => {
     try {
       setLoading(true);
 
-      const lunchData = {
+      const commonData = {
         staff_name: staffName.trim(),
-        lunch_type: lunchType,
         reason: lunchReason.trim(),
         cashier_name: cashierData?.cashier_info?.name || cashierData?.name || 'Unknown Cashier',
         timestamp: new Date().toISOString(),
       };
 
-      if (lunchType === 'stock') {
-        lunchData.products = selectedProducts.map(product => ({
-          product_id: product.id.toString(),
-          product_name: product.name,
-          quantity: product.price_type === 'unit' ? product.quantity.toString() : (product.quantity || 0).toString(),
-          unit_price: product.price.toString(),
-          total_value: (product.price * (product.price_type === 'unit' ? product.quantity : (product.quantity || 0))).toString()
-        }));
-        lunchData.total_value = getTotalStockValue().toString();
+      console.log('Processing staff lunch:', commonData);
+
+      let response;
+
+      if (lunchType === 'cash') {
+        // Money lunch - deduct from drawer using dedicated endpoint
+        response = await shopAPI.deductMoneyFromDrawer({
+          ...commonData,
+          amount: parseFloat(cashAmount),
+        });
       } else {
-        lunchData.cash_amount = parseFloat(cashAmount).toString();
+        // Product lunch - deduct from stock using dedicated endpoint
+        response = await shopAPI.deductProductFromStock({
+          ...commonData,
+          products: selectedProducts.map(product => ({
+            product_id: product.id.toString(),
+            product_name: product.name,
+            quantity: product.price_type === 'unit' ? product.quantity : (product.quantity || 0),
+            unit_price: product.price,
+          })),
+          total_value: getTotalStockValue(),
+        });
       }
 
-      console.log('Processing staff lunch:', lunchData);
-
-      // Call the API to process staff lunch
-      const response = await shopAPI.createStaffLunch(lunchData);
-
-      if (response.data) {
+      if (response.data && response.data.success) {
         // Show success modal
         setResultModalData({
           type: 'success',
           title: '✅ Staff Lunch Recorded Successfully!',
-          message: `${lunchType === 'stock' ? 'Stock items' : 'Cash amount'} worth ${formatCurrency(lunchType === 'stock' ? getTotalStockValue() : parseFloat(cashAmount))} has been recorded for ${staffName}`,
-          details: lunchType === 'stock' 
-            ? `Products deducted from inventory and staff lunch record created.`
-            : `Cash amount recorded as staff lunch expense.`
+          message: `${lunchType === 'cash' ? 'Cash amount' : 'Products'} worth ${formatCurrency(lunchType === 'cash' ? parseFloat(cashAmount) : getTotalStockValue())} has been deducted from ${lunchType === 'cash' ? 'drawer' : 'inventory'} for ${staffName}`,
+          details: lunchType === 'cash' 
+            ? `Cash amount deducted from drawer and staff lunch record created.`
+            : `Products deducted from inventory and staff lunch record created.`
         });
         setShowResultModal(true);
 
@@ -553,7 +560,7 @@ const StaffLunchScreen = () => {
       >
         {/* History Header */}
         <View style={styles.historyHeader}>
-          <Text style={styles.historyTitle}>📋 Staff Lunch History</Text>
+          <Text style={styles.historyTitle}>📋 Today's Staff Lunches</Text>
           <View style={styles.historyHeaderButtons}>
             <TouchableOpacity 
               style={[styles.refreshHistoryButton, historyLoading && styles.refreshButtonDisabled]}
@@ -575,7 +582,10 @@ const StaffLunchScreen = () => {
 
         {/* History Filters */}
         <View style={styles.historyFilters}>
-          <Text style={styles.historyFiltersTitle}>Filter History</Text>
+          <Text style={styles.historyFiltersTitle}>🔍 Filter by Date/Staff</Text>
+          <Text style={{color: '#9ca3af', fontSize: 12, marginBottom: 12}}>
+            💡 Showing today's lunches by default. Use date filters to view other days.
+          </Text>
           
           <View style={styles.filterRow}>
             <View style={styles.filterGroup}>
@@ -649,13 +659,13 @@ const StaffLunchScreen = () => {
           {historyLoading ? (
             <View style={styles.historyLoading}>
               <ActivityIndicator size="large" color="#10b981" />
-              <Text style={styles.historyLoadingText}>Loading history...</Text>
+              <Text style={styles.historyLoadingText}>Loading today's staff lunches...</Text>
             </View>
           ) : lunchHistory.length === 0 ? (
             <View style={styles.historyEmpty}>
-              <Text style={styles.historyEmptyText}>No staff lunch records found</Text>
+              <Text style={styles.historyEmptyText}>No staff lunch records for today</Text>
               <Text style={styles.historyEmptySubtext}>
-                Staff lunch history will appear here after you record some lunches
+                Use date filters to view staff lunches from other days
               </Text>
             </View>
           ) : (

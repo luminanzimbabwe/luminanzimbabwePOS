@@ -16,6 +16,40 @@ import { shopAPI } from '../services/api';
 import { shopStorage } from '../services/storage';
 import { ROUTES } from '../constants/navigation';
 
+// Custom Success Modal Component
+const SuccessModal = ({ visible, title, subtitle, buttonText, onContinue }) => {
+  if (!visible) return null;
+
+  return (
+    <Modal
+      visible={visible}
+      transparent={true}
+      animationType="fade"
+      onRequestClose={onContinue}
+    >
+      <View style={styles.successModalOverlay}>
+        <View style={styles.successModalContainer}>
+          {/* Checkmark Circle */}
+          <View style={styles.successCheckmarkCircle}>
+            <Text style={styles.successCheckmark}>✓</Text>
+          </View>
+          
+          {/* Title */}
+          <Text style={styles.successTitle}>{title}</Text>
+          
+          {/* Subtitle */}
+          <Text style={styles.successSubtitle}>{subtitle}</Text>
+          
+          {/* Continue Button */}
+          <TouchableOpacity style={styles.successButton} onPress={onContinue}>
+            <Text style={styles.successButtonText}>{buttonText}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
 const WasteScreen = () => {
   const navigation = useNavigation();
   
@@ -51,6 +85,10 @@ const WasteScreen = () => {
   const [showSummary, setShowSummary] = useState(false);
   const [showBatchForm, setShowBatchForm] = useState(false);
   const [showBatchItems, setShowBatchItems] = useState(false);
+  
+  // Success Screen state
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [successData, setSuccessData] = useState(null);
 
   useEffect(() => {
     loadShopCredentials();
@@ -265,21 +303,20 @@ const WasteScreen = () => {
       });
       
       if (response.data.success) {
-        Alert.alert(
-          'Success',
-          `Waste recorded successfully!\n\nProduct: ${response.data.waste.product_name}\nQuantity: ${response.data.waste.quantity}\nValue: ${formatCurrency(response.data.waste.waste_value)}\nNew Stock: ${response.data.waste.new_stock}`,
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                resetSingleForm();
-                setShowForm(false);
-                loadWastes();
-                loadWasteSummary();
-              }
-            }
-          ]
-        );
+        // Show success screen with checkmark
+        setSuccessData({
+          title: '✓ Waste Recorded',
+          subtitle: `${response.data.waste.product_name}\nQuantity: ${response.data.waste.quantity} units\nValue: ${formatCurrency(response.data.waste.waste_value)}\nNew Stock: ${response.data.waste.new_stock}`,
+          buttonText: 'Continue',
+          onContinue: () => {
+            setShowSuccess(false);
+            resetSingleForm();
+            setShowForm(false);
+            loadWastes();
+            loadWasteSummary();
+          }
+        });
+        setShowSuccess(true);
       } else {
         Alert.alert('Failed', response.data.error || 'Unknown error');
       }
@@ -305,10 +342,19 @@ const WasteScreen = () => {
       });
       
       if (response.data.success) {
-        setCurrentBatch(response.data.batch);
-        setBatchItems([]);
-        Alert.alert('Success', `Waste batch ${response.data.batch.batch_number} created successfully!`);
-        loadWasteBatches();
+        // Show success screen with checkmark
+        setSuccessData({
+          title: '✓ Batch Created',
+          subtitle: `Batch ${response.data.batch.batch_number} created successfully!\n\nReady to add products to this batch.`,
+          buttonText: 'Continue',
+          onContinue: () => {
+            setShowSuccess(false);
+            setCurrentBatch(response.data.batch);
+            setBatchItems([]);
+            loadWasteBatches();
+          }
+        });
+        setShowSuccess(true);
       } else {
         Alert.alert('Failed', response.data.error || 'Unknown error');
       }
@@ -373,24 +419,25 @@ const WasteScreen = () => {
           waste_value: response.data.item.waste_value,
           created_at: new Date().toISOString()
         };
-        setBatchItems([...batchItems, newItem]);
         
-        // Update current batch totals
-        setCurrentBatch({
-          ...currentBatch,
-          total_waste_value: response.data.batch.total_waste_value,
-          total_waste_quantity: response.data.batch.total_waste_quantity,
-          item_count: response.data.batch.item_count
+        // Show success screen with checkmark
+        setSuccessData({
+          title: '✓ Added to Batch',
+          subtitle: `${batchProduct.name} has been added to batch ${currentBatch.batch_number}`,
+          buttonText: 'Continue',
+          onContinue: () => {
+            setShowSuccess(false);
+            // Add item to batch items state
+            setBatchItems([...batchItems, newItem]);
+            // Update current batch totals
+            setCurrentBatch(response.data.batch);
+            // Clear form fields for next product
+            setBatchIdentifier('');
+            setBatchProduct(null);
+            setBatchQuantity('');
+          }
         });
-        
-        Alert.alert('Success', `${batchProduct.name} added to batch!`);
-        
-        // Clear form fields for next product
-        setBatchIdentifier('');
-        setBatchProduct(null);
-        setBatchQuantity('');
-        
-        console.log('✅ Form cleared for next product');
+        setShowSuccess(true);
       } else {
         Alert.alert('Failed', response.data.error || 'Unknown error');
       }
@@ -426,22 +473,21 @@ const WasteScreen = () => {
       });
       
       if (response.data.success) {
-        Alert.alert(
-          'Success',
-          `Waste batch ${response.data.batch.batch_number} completed successfully!\n\nTotal Value: ${formatCurrency(response.data.batch.total_waste_value)}\nTotal Items: ${response.data.batch.item_count}`,
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                resetBatch();
-                setShowBatchForm(false);
-                loadWastes();
-                loadWasteSummary();
-                loadWasteBatches();
-              }
-            }
-          ]
-        );
+        // Show success screen with checkmark
+        setSuccessData({
+          title: '✓ Batch Completed',
+          subtitle: `Batch ${response.data.batch.batch_number} completed!\n\nTotal Value: ${formatCurrency(response.data.batch.total_waste_value)}\nTotal Items: ${response.data.batch.item_count}`,
+          buttonText: 'Done',
+          onContinue: () => {
+            setShowSuccess(false);
+            resetBatch();
+            setShowBatchForm(false);
+            loadWastes();
+            loadWasteSummary();
+            loadWasteBatches();
+          }
+        });
+        setShowSuccess(true);
       } else {
         Alert.alert('Failed', response.data.error || 'Unknown error');
       }
@@ -1152,6 +1198,17 @@ const WasteScreen = () => {
         {wasteMode === 'single' ? renderWastesList() : renderWasteBatchesList()}
       </ScrollView>
       
+      {/* Custom Success Modal */}
+      {showSuccess && successData && (
+        <SuccessModal
+          visible={showSuccess}
+          title={successData.title}
+          subtitle={successData.subtitle}
+          buttonText={successData.buttonText}
+          onContinue={successData.onContinue}
+        />
+      )}
+      
       {/* Modals rendered outside ScrollView */}
       {renderSingleWasteForm()}
       {renderBatchWasteForm()}
@@ -1801,6 +1858,75 @@ const styles = StyleSheet.create({
   },
   completeBatchButtonText: {
     color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  
+  // Success Modal Styles
+  successModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  successModalContainer: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 20,
+    padding: 32,
+    width: '85%',
+    maxWidth: 400,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#10b981',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  successCheckmarkCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+    borderWidth: 3,
+    borderColor: '#10b981',
+  },
+  successCheckmark: {
+    color: '#10b981',
+    fontSize: 40,
+    fontWeight: 'bold',
+  },
+  successTitle: {
+    color: '#ffffff',
+    fontSize: 24,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  successSubtitle: {
+    color: '#cccccc',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 24,
+  },
+  successButton: {
+    backgroundColor: '#10b981',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 40,
+    minWidth: 150,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#10b981',
+  },
+  successButtonText: {
+    color: '#ffffff',
     fontSize: 16,
     fontWeight: 'bold',
   },

@@ -108,6 +108,11 @@ const ProductManagementScreen = () => {
   const [bulkUpdateType, setBulkUpdateType] = useState('price');
   const [bulkUpdateValue, setBulkUpdateValue] = useState('');
 
+  // Product Action Confirmation Modal states
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [confirmAction, setConfirmAction] = useState(null); // 'delete' | 'delist' | 'relist'
+  const [confirmProduct, setConfirmProduct] = useState(null);
+
   // Success/Error Screen states
   const [showSuccessScreen, setShowSuccessScreen] = useState(false);
   const [successScreenData, setSuccessScreenData] = useState(null);
@@ -517,6 +522,50 @@ const ProductManagementScreen = () => {
     setSelectedProducts([]);
   };
 
+  // Product Action Confirmation Modal functions
+  const showDeleteConfirmation = (product) => {
+    setConfirmAction('delete');
+    setConfirmProduct(product);
+    setShowConfirmModal(true);
+  };
+
+  const showDelistConfirmation = (product) => {
+    setConfirmAction('delist');
+    setConfirmProduct(product);
+    setShowConfirmModal(true);
+  };
+
+  const showRelistConfirmation = (product) => {
+    setConfirmAction('relist');
+    setConfirmProduct(product);
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmAction = async () => {
+    if (!confirmProduct) return;
+    
+    try {
+      if (confirmAction === 'delete') {
+        await shopAPI.deleteProduct(confirmProduct.id, {});
+        Alert.alert('Success', `"${confirmProduct.name}" has been permanently deleted.`);
+      } else if (confirmAction === 'delist') {
+        await shopAPI.delistProduct(confirmProduct.id, {});
+        Alert.alert('Success', `"${confirmProduct.name}" has been delisted successfully. It will no longer appear in sales screens.`);
+      } else if (confirmAction === 'relist') {
+        await shopAPI.relistProduct(confirmProduct.id, {});
+        Alert.alert('Success', `"${confirmProduct.name}" has been relisted successfully. It is now available for sale.`);
+      }
+      loadProducts();
+    } catch (error) {
+      console.error(`❌ ${confirmAction} failed:`, error);
+      Alert.alert('Error', `Failed to ${confirmAction} product: ${error.message || 'Please try again.'}`);
+    } finally {
+      setShowConfirmModal(false);
+      setConfirmProduct(null);
+      setConfirmAction(null);
+    }
+  };
+
 
 
   const handleBulkUpdate = () => {
@@ -554,113 +603,17 @@ const ProductManagementScreen = () => {
   // Delete and Delist functions
   const handleDeleteProduct = async (product) => {
     console.log('🗑️ handleDeleteProduct called with:', product);
-    console.log('🔍 About to show alert...');
-    
-    Alert.alert(
-      'Delete Product',
-      `Are you sure you want to PERMANENTLY DELETE "${product.name}"? This action cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Delete Permanently', 
-          style: 'destructive',
-          onPress: async () => {
-            console.log('🗑️ Delete confirmed for:', product.id, product.name);
-            console.log('🔐 Checking shopCredentials...', shopCredentials);
-            
-            if (!shopCredentials) {
-              console.error('❌ shopCredentials is null/undefined');
-              Alert.alert('Error', 'Authentication credentials not found. Please log in again.');
-              return;
-            }
-            
-            try {
-              console.log('🔐 Using credentials:', { email: shopCredentials.email, hasPassword: !!shopCredentials.shop_owner_master_password });
-              
-              const response = await shopAPI.deleteProduct(product.id, {
-                email: shopCredentials.email,
-                password: shopCredentials.shop_owner_master_password
-              });
-              
-              console.log('✅ Product deleted successfully:', response);
-              Alert.alert('Success', `"${product.name}" has been permanently deleted.`);
-              loadProducts();
-            } catch (error) {
-              console.error('❌ Delete failed with full error:', error);
-              console.error('❌ Error response:', error.response);
-              console.error('❌ Error message:', error.message);
-              Alert.alert('Error', `Failed to delete product: ${error.message || 'Please try again.'}`);
-            }
-          }
-        }
-      ]
-    );
+    showDeleteConfirmation(product);
   };
 
   const handleDelistProduct = async (product) => {
     console.log('⏸️ handleDelistProduct called with:', product);
-    console.log('🔍 About to show alert...');
-    
-    Alert.alert(
-      'Delist Product',
-      `Are you sure you want to DELIST "${product.name}"? This will hide it from the main list but keep it in the system.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Delist Product', 
-          onPress: async () => {
-            console.log('⏸️ Delist confirmed for:', product.id, product.name);
-            console.log('🔐 Checking shopCredentials...', shopCredentials);
-            
-            if (!shopCredentials) {
-              console.error('❌ shopCredentials is null/undefined');
-              Alert.alert('Error', 'Authentication credentials not found. Please log in again.');
-              return;
-            }
-            
-            try {
-              console.log('🔐 Using credentials:', { email: shopCredentials.email, hasPassword: !!shopCredentials.shop_owner_master_password });
-              console.log('📤 Sending delist data:', { is_active: false });
-              
-              const response = await shopAPI.updateProduct(product.id, {
-                email: shopCredentials.email,
-                password: shopCredentials.shop_owner_master_password,
-                is_active: false
-              });
-              
-              console.log('✅ Product delisted successfully:', response);
-              Alert.alert('Success', `"${product.name}" has been delisted successfully.`);
-              loadProducts();
-            } catch (error) {
-              console.error('❌ Delist failed with full error:', error);
-              console.error('❌ Error response:', error.response);
-              console.error('❌ Error message:', error.message);
-              Alert.alert('Error', `Failed to delist product: ${error.message || 'Please try again.'}`);
-            }
-          }
-        }
-      ]
-    );
+    showDelistConfirmation(product);
   };
 
   const handleRelistProduct = async (product) => {
     console.log('▶️ handleRelistProduct called with:', product);
-    try {
-      console.log('▶️ Relisting product:', product.id, product.name);
-      
-      await shopAPI.updateProduct(product.id, {
-        email: shopCredentials.email,
-        password: shopCredentials.shop_owner_master_password,
-        is_active: true
-      });
-      
-      console.log('✅ Product relisted successfully');
-      Alert.alert('Success', `"${product.name}" has been relisted successfully.`);
-      loadProducts();
-    } catch (error) {
-      console.error('❌ Relist failed:', error);
-      Alert.alert('Error', `Failed to relist product: ${error.message || 'Please try again.'}`);
-    }
+    showRelistConfirmation(product);
   };
 
   const handleBulkDelete = () => {
@@ -683,10 +636,7 @@ const ProductManagementScreen = () => {
               
               // Delete each selected product
               for (const productId of selectedProducts) {
-                await shopAPI.deleteProduct(productId, {
-                  email: shopCredentials.email,
-                  password: shopCredentials.shop_owner_master_password
-                });
+                await shopAPI.deleteProduct(productId, {});
               }
               
               console.log('✅ Bulk delete completed');
@@ -712,7 +662,7 @@ const ProductManagementScreen = () => {
 
     Alert.alert(
       'Bulk Delist Products',
-      `Are you sure you want to DELIST ${selectedProducts.length} selected products? This will hide them from the main list.`,
+      `Are you sure you want to DELIST ${selectedProducts.length} selected products? This will hide them from the main list and prevent them from being sold.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { 
@@ -723,15 +673,11 @@ const ProductManagementScreen = () => {
               
               // Delist each selected product
               for (const productId of selectedProducts) {
-                await shopAPI.updateProduct(productId, {
-                  email: shopCredentials.email,
-                  password: shopCredentials.shop_owner_master_password,
-                  is_active: false
-                });
+                await shopAPI.delistProduct(productId, {});
               }
               
               console.log('✅ Bulk delist completed');
-              Alert.alert('Success', `${selectedProducts.length} products delisted successfully.`);
+              Alert.alert('Success', `${selectedProducts.length} products delisted successfully. They will no longer appear in sales screens.`);
               setSelectedProducts([]);
               setBulkMode(false);
               loadProducts();
@@ -753,7 +699,7 @@ const ProductManagementScreen = () => {
 
     Alert.alert(
       'Bulk Relist Products',
-      `Are you sure you want to RELIST ${selectedProducts.length} selected products? This will make them visible in the main list.`,
+      `Are you sure you want to RELIST ${selectedProducts.length} selected products? This will make them visible in the main list and available for sale.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { 
@@ -764,15 +710,11 @@ const ProductManagementScreen = () => {
               
               // Relist each selected product
               for (const productId of selectedProducts) {
-                await shopAPI.updateProduct(productId, {
-                  email: shopCredentials.email,
-                  password: shopCredentials.shop_owner_master_password,
-                  is_active: true
-                });
+                await shopAPI.relistProduct(productId, {});
               }
               
               console.log('✅ Bulk relist completed');
-              Alert.alert('Success', `${selectedProducts.length} products relisted successfully.`);
+              Alert.alert('Success', `${selectedProducts.length} products relisted successfully. They are now available for sale.`);
               setSelectedProducts([]);
               setBulkMode(false);
               loadProducts();
@@ -1333,9 +1275,15 @@ const ProductManagementScreen = () => {
                 </Text>
                 <Text style={styles.cell}>{formatNumber(parseFloat(product.min_stock_level) || 5)}</Text>
                 <View style={[styles.cell, styles.cellStatus]}>
-                  <View style={[styles.statusIndicator, getStockStatusStyle(product)]}>
-                    <Text style={styles.statusText}>{getStockStatusText(product)}</Text>
-                  </View>
+                  {product.is_active === false ? (
+                    <View style={[styles.statusIndicator, styles.delistedStatus]}>
+                      <Text style={styles.statusText}>DELISTED</Text>
+                    </View>
+                  ) : (
+                    <View style={[styles.statusIndicator, getStockStatusStyle(product)]}>
+                      <Text style={styles.statusText}>{getStockStatusText(product)}</Text>
+                    </View>
+                  )}
                 </View>
                 <View style={[styles.cell, styles.cellActions]}>
                   <TouchableOpacity 
@@ -1353,21 +1301,21 @@ const ProductManagementScreen = () => {
                   {(product.is_active !== false) ? (
                     <TouchableOpacity 
                       style={[styles.actionButton, { backgroundColor: '#f59e0b' }]}
-                      onPress={() => handleDelistProduct(product)}
+                      onPress={() => showDelistConfirmation(product)}
                     >
                       <Text style={styles.actionButtonText}>⏸️</Text>
                     </TouchableOpacity>
                   ) : (
                     <TouchableOpacity 
                       style={[styles.actionButton, { backgroundColor: '#10b981' }]}
-                      onPress={() => handleRelistProduct(product)}
+                      onPress={() => showRelistConfirmation(product)}
                     >
                       <Text style={styles.actionButtonText}>▶️</Text>
                     </TouchableOpacity>
                   )}
                   <TouchableOpacity 
                     style={[styles.actionButton, { backgroundColor: '#dc2626' }]}
-                    onPress={() => handleDeleteProduct(product)}
+                    onPress={() => showDeleteConfirmation(product)}
                   >
                     <Text style={styles.actionButtonText}>🗑️</Text>
                   </TouchableOpacity>
@@ -2012,6 +1960,89 @@ const ProductManagementScreen = () => {
           </View>
         </View>
       </Modal>
+
+      {/* Product Action Confirmation Modal */}
+      <Modal
+        visible={showConfirmModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowConfirmModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.confirmModalContainer}>
+            {/* Warning Icon */}
+            <View style={styles.confirmIconContainer}>
+              <Text style={styles.confirmIcon}>
+                {confirmAction === 'delete' ? '🗑️' : confirmAction === 'delist' ? '⏸️' : '▶️'}
+              </Text>
+            </View>
+            
+            {/* Title */}
+            <Text style={styles.confirmTitle}>
+              {confirmAction === 'delete' ? 'Delete Product' : confirmAction === 'delist' ? 'Delist Product' : 'Relist Product'}
+            </Text>
+            
+            {/* Message */}
+            <Text style={styles.confirmMessage}>
+              {confirmAction === 'delete' && `Are you sure you want to PERMANENTLY DELETE "${confirmProduct?.name}"? This action cannot be undone.`}
+              {confirmAction === 'delist' && `Are you sure you want to DELIST "${confirmProduct?.name}"? This will hide it from the main list, remove it from sales screens, and prevent it from being sold.`}
+              {confirmAction === 'relist' && `Are you sure you want to RELIST "${confirmProduct?.name}"? This will make it visible in the main list and available for sale.`}
+            </Text>
+            
+            {/* Product Details */}
+            {confirmProduct && (
+              <View style={styles.confirmProductDetails}>
+                <Text style={styles.confirmProductName}>{confirmProduct.name}</Text>
+                <Text style={styles.confirmProductInfo}>
+                  {confirmProduct.category || 'Unknown Category'} • ${confirmProduct.price || '0.00'}
+                </Text>
+              </View>
+            )}
+            
+            {/* Warning for delete */}
+            {confirmAction === 'delete' && (
+              <View style={styles.confirmWarning}>
+                <Text style={styles.confirmWarningText}>⚠️ This will permanently remove this product from your inventory.</Text>
+              </View>
+            )}
+            
+            {/* Warning for delist */}
+            {confirmAction === 'delist' && (
+              <View style={styles.confirmWarning}>
+                <Text style={styles.confirmWarningText}>⚠️ Customers will no longer be able to purchase this product.</Text>
+              </View>
+            )}
+            
+            {/* Buttons */}
+            <View style={styles.confirmButtonContainer}>
+              <TouchableOpacity 
+                style={styles.confirmCancelButton}
+                onPress={() => {
+                  setShowConfirmModal(false);
+                  setConfirmProduct(null);
+                  setConfirmAction(null);
+                }}
+              >
+                <Text style={styles.confirmCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[
+                  styles.confirmActionButton,
+                  confirmAction === 'delete' && styles.confirmDeleteButton,
+                  confirmAction === 'delist' && styles.confirmDelistButton,
+                  confirmAction === 'relist' && styles.confirmRelistButton
+                ]}
+                onPress={handleConfirmAction}
+              >
+                <Text style={styles.confirmActionButtonText}>
+                  {confirmAction === 'delete' ? 'Delete Permanently' : confirmAction === 'delist' ? 'Delist Product' : 'Relist Product'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </Animated.View>
   );
 };
@@ -2326,6 +2357,11 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 4,
     minWidth: 40,
+  },
+  delistedStatus: {
+    backgroundColor: 'rgba(220, 38, 38, 0.3)',
+    borderWidth: 1,
+    borderColor: '#dc2626',
   },
   statusText: {
     fontSize: 9,
@@ -2812,6 +2848,114 @@ const styles = StyleSheet.create({
     color: '#ccc',
     fontSize: 14,
     flex: 1,
+  },
+
+  // Confirmation Modal Styles
+  confirmModalContainer: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 16,
+    padding: 24,
+    width: '90%',
+    maxWidth: 400,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  confirmIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#2a2a2a',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  confirmIcon: {
+    fontSize: 40,
+  },
+  confirmTitle: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  confirmMessage: {
+    color: '#ccc',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 16,
+    lineHeight: 22,
+  },
+  confirmProductDetails: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 8,
+    padding: 16,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  confirmProductName: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  confirmProductInfo: {
+    color: '#999',
+    fontSize: 14,
+  },
+  confirmWarning: {
+    backgroundColor: 'rgba(220, 38, 38, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    width: '100%',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#dc2626',
+  },
+  confirmWarningText: {
+    color: '#dc2626',
+    fontSize: 14,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  confirmButtonContainer: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 12,
+  },
+  confirmCancelButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 8,
+    backgroundColor: '#333',
+    alignItems: 'center',
+  },
+  confirmCancelButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  confirmActionButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  confirmActionButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  confirmDeleteButton: {
+    backgroundColor: '#dc2626',
+  },
+  confirmDelistButton: {
+    backgroundColor: '#f59e0b',
+  },
+  confirmRelistButton: {
+    backgroundColor: '#10b981',
   },
 });
 

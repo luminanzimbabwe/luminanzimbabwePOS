@@ -453,17 +453,9 @@ class ProductDetailView(APIView):
             }, status=status.HTTP_200_OK)
 
     def delete(self, request, product_id):
-        # Check if user is owner (for delete operations)
-        email = request.data.get('email')
-        password = request.data.get('password')
-
-        if not email or not password:
-            return Response({"error": "Owner authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
-
+        """Delete a product permanently - no authentication required (screen is protected)"""
         try:
-            shop = ShopConfiguration.objects.get(email=email)
-            if not shop.validate_shop_owner_master_password(password):
-                return Response({"error": "Invalid owner credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+            shop = ShopConfiguration.objects.get()
         except ShopConfiguration.DoesNotExist:
             return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -475,6 +467,51 @@ class ProductDetailView(APIView):
                 "success": True,
                 "message": f"Product '{product_name}' permanently deleted successfully"
             }, status=status.HTTP_200_OK)
+        except Product.DoesNotExist:
+            return Response({"error": "Product not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    def put(self, request, product_id):
+        """Delist a product (set is_active=False) - no authentication required (screen is protected)"""
+        try:
+            shop = ShopConfiguration.objects.get()
+        except ShopConfiguration.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            product = Product.objects.get(id=product_id, shop=shop)
+            product_name = product.name
+            product.is_active = False
+            product.save()
+            return Response({
+                "success": True,
+                "message": f"Product '{product_name}' has been delisted. It will no longer appear in sales and cannot be sold."
+            }, status=status.HTTP_200_OK)
+        except Product.DoesNotExist:
+            return Response({"error": "Product not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    def post(self, request, product_id):
+        """Relist a product (set is_active=True) - no authentication required (screen is protected)"""
+        try:
+            shop = ShopConfiguration.objects.get()
+        except ShopConfiguration.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            product = Product.objects.get(id=product_id, shop=shop)
+            product_name = product.name
+            was_inactive = not product.is_active
+            product.is_active = True
+            product.save()
+            if was_inactive:
+                return Response({
+                    "success": True,
+                    "message": f"Product '{product_name}' has been relisted and is now available for sale."
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    "success": True,
+                    "message": f"Product '{product_name}' is already active."
+                }, status=status.HTTP_200_OK)
         except Product.DoesNotExist:
             return Response({"error": "Product not found"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -564,6 +601,10 @@ class SaleListView(APIView):
                     product = Product.objects.get(id=product_id, shop=shop)
                 except Product.DoesNotExist:
                     return Response({"error": f"Product {product_id} not found"}, status=status.HTTP_400_BAD_REQUEST)
+
+                # Check if product is active (not delisted)
+                if not product.is_active:
+                    return Response({"error": f"Cannot sell {product.name} - this product has been delisted and is no longer available for sale"}, status=status.HTTP_400_BAD_REQUEST)
 
                 if product.price <= 0:
                     return Response({"error": f"Cannot sell {product.name} - price is zero"}, status=status.HTTP_400_BAD_REQUEST)
@@ -1125,7 +1166,20 @@ class StaffLunchListView(APIView):
     authentication_classes = []
     def get(self, request):
         shop = ShopConfiguration.objects.get()
-        lunches = StaffLunch.objects.filter(shop=shop).select_related('product', 'recorded_by').order_by('-created_at')
+        
+        # DEFAULT: Only show today's staff lunches (shop day aware)
+        # Get current shop day for session-aware filtering
+        today = timezone.now().date()
+        current_shop_day = ShopDay.get_open_shop_day(shop)
+        
+        # Build base queryset - filter by today's date by default
+        lunches = StaffLunch.objects.filter(
+            shop=shop, 
+            created_at__date=today
+        ).select_related('product', 'recorded_by').order_by('-created_at')
+        
+        # Check if explicit date filters are provided
+        explicit_date_filter = False
         
         # Add filtering capabilities
         staff_name = request.query_params.get('staff_name', '').strip()
@@ -1133,6 +1187,12 @@ class StaffLunchListView(APIView):
         date_to = request.query_params.get('date_to', '').strip()
         cashier_id = request.query_params.get('cashier_id', '').strip()
         search = request.query_params.get('search', '').strip()
+        
+        # If any date filters are explicitly provided, override default date filtering
+        if date_from or date_to:
+            explicit_date_filter = True
+            # Start fresh without date restriction
+            lunches = StaffLunch.objects.filter(shop=shop).select_related('product', 'recorded_by').order_by('-created_at')
         
         # Filter by staff name (from notes field)
         if staff_name:
@@ -1190,10 +1250,11 @@ class StaffLunchListView(APIView):
                 'filtered_count': lunches.count(),
                 'filters_applied': {
                     'staff_name': staff_name,
-                    'date_from': date_from,
-                    'date_to': date_to,
+                    'date_from': date_from if explicit_date_filter else str(today),
+                    'date_to': date_to if explicit_date_filter else str(today),
                     'cashier_id': cashier_id,
-                    'search': search
+                    'search': search,
+                    'default_filter': not explicit_date_filter
                 }
             }
         }
@@ -1388,6 +1449,252 @@ class StaffLunchListView(APIView):
         
         else:
             return Response({"error": f"Invalid lunch type: {lunch_type}. Must be 'stock' or 'cash'"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class StaffLunchDeductMoneyView(APIView):
+    """Deduce money from drawer for staff lunch (Money Lunch)"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    
+    def post(self, request):
+        shop = ShopConfiguration.objects.get()
+        
+        # Extract fields
+        staff_name = request.data.get('staff_name')
+        amount = request.data.get('amount')
+        reason = request.data.get('reason', '')
+        cashier_name = request.data.get('cashier_name', '')
+        notes = request.data.get('notes', '')
+        
+        # Validate required fields
+        if not staff_name:
+            return Response({"error": "Staff name is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not amount:
+            return Response({"error": "Amount is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            amount = Decimal(str(amount))
+        except (ValueError, TypeError):
+            return Response({"error": "Invalid amount format"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if amount <= 0:
+            return Response({"error": "Amount must be positive"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            # Get or create cash float for today
+            from .models import CashFloat
+            today = timezone.now().date()
+            
+            # Try to find an active cashier for drawer deduction
+            cashier = None
+            if cashier_name:
+                cashier = Cashier.objects.filter(shop=shop, name__icontains=cashier_name).first()
+            
+            # Get or create cash float
+            if cashier:
+                cash_float, created = CashFloat.objects.get_or_create(
+                    shop=shop,
+                    cashier=cashier,
+                    date=today,
+                    defaults={
+                        'float_amount': Decimal('0.00'),
+                        'current_cash': Decimal('0.00'),
+                        'status': 'ACTIVE'
+                    }
+                )
+            else:
+                # No specific cashier - just get first active cash float or create one
+                cash_float = CashFloat.objects.filter(shop=shop, date=today, status='ACTIVE').first()
+                if not cash_float:
+                    # Create a new cash float record
+                    first_cashier = Cashier.objects.filter(shop=shop, status='active').first()
+                    if first_cashier:
+                        cash_float = CashFloat.objects.create(
+                            shop=shop,
+                            cashier=first_cashier,
+                            date=today,
+                            float_amount=Decimal('0.00'),
+                            current_cash=Decimal('0.00'),
+                            status='ACTIVE'
+                        )
+                    else:
+                        # No cashiers exist, create a shop-level record
+                        cash_float = CashFloat.objects.create(
+                            shop=shop,
+                            cashier=None,
+                            date=today,
+                            float_amount=Decimal('0.00'),
+                            current_cash=Decimal('0.00'),
+                            status='ACTIVE'
+                        )
+            
+            # Deduct amount from drawer (real money)
+            cash_float.current_cash -= amount
+            cash_float.current_cash_usd -= amount
+            cash_float.current_total_usd -= amount
+            cash_float.current_total = cash_float.current_cash + cash_float.current_card + cash_float.current_ecocash + cash_float.current_transfer
+            
+            # Also reduce expected cash at EOD (staff lunch is intentional deduction)
+            # This ensures EOD variance doesn't show a false shortage
+            cash_float.expected_cash_at_eod -= amount
+            cash_float.expected_cash_usd -= amount
+            
+            cash_float.save()
+            
+            # Also deduct from currency wallet (track as STAFF_LUNCH withdrawal)
+            try:
+                wallet, _ = CurrencyWallet.objects.get_or_create(shop=shop)
+                balance_before = wallet.balance_usd
+                wallet.balance_usd -= amount
+                wallet.total_transactions += 1
+                wallet.save()
+                
+                # Create wallet transaction record for audit trail
+                CurrencyTransaction.objects.create(
+                    shop=shop,
+                    wallet=wallet,
+                    transaction_type='WITHDRAWAL',
+                    currency='USD',
+                    amount=amount,
+                    reference_type='StaffLunch',
+                    reference_id=staff_lunch.id if 'staff_lunch' in dir() else None,
+                    description=f'Staff Lunch - {staff_name}: {reason}',
+                    balance_after=wallet.balance_usd,
+                    performed_by=cashier
+                )
+                
+                print(f"✅ WALLET WITHDRAWAL: ${float(amount):.2f} deducted from wallet for staff lunch (balance: {wallet.balance_usd})")
+            except Exception as wallet_error:
+                print(f"⚠️ WARNING: Failed to update wallet for staff lunch: {wallet_error}")
+            
+            # Create expense record for tracking staff lunch as a business expense
+            expense = Expense.objects.create(
+                shop=shop,
+                expense_type='other',
+                description=f'Staff Lunch - {staff_name}: {reason}',
+                amount=amount,
+                currency='USD',
+                recorded_by=cashier
+            )
+            
+            return Response({
+                "success": True,
+                "message": f"Money lunch recorded. ${float(amount):.2f} deducted from drawer and wallet for {staff_name}",
+                "staff_name": staff_name,
+                "amount": float(amount),
+                "drawer_balance": float(cash_float.current_cash),
+                "wallet_balance": float(wallet.balance_usd) if 'wallet' in dir() else None
+            }, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            return Response({"error": f"Failed to process money lunch: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class StaffLunchDeductProductView(APIView):
+    """Deduce products from stock for staff lunch (Product Lunch)"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    
+    def post(self, request):
+        shop = ShopConfiguration.objects.get()
+        
+        # Extract fields
+        staff_name = request.data.get('staff_name')
+        products = request.data.get('products', [])
+        total_value = request.data.get('total_value', 0)
+        reason = request.data.get('reason', '')
+        cashier_name = request.data.get('cashier_name', '')
+        notes = request.data.get('notes', '')
+        
+        # Validate required fields
+        if not staff_name:
+            return Response({"error": "Staff name is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not products or len(products) == 0:
+            return Response({"error": "At least one product is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            recorded_time = timezone.now()
+            created_lunches = []
+            
+            # Process each product
+            for product_data in products:
+                product_id = product_data.get('product_id')
+                product_name = product_data.get('product_name', 'Unknown')
+                quantity = product_data.get('quantity', 1)
+                unit_price = product_data.get('unit_price', 0)
+                
+                if not product_id:
+                    continue
+                
+                try:
+                    quantity = float(quantity)
+                    unit_price = float(unit_price)
+                except (ValueError, TypeError):
+                    continue
+                
+                if quantity <= 0:
+                    continue
+                
+                try:
+                    product = Product.objects.get(id=product_id, shop=shop)
+                except Product.DoesNotExist:
+                    continue
+                
+                # Reduce product stock
+                product.stock_quantity = product.stock_quantity - Decimal(str(quantity))
+                product.save()
+                
+                # Create staff lunch record
+                staff_lunch = StaffLunch.objects.create(
+                    shop=shop,
+                    product=product,
+                    quantity=int(quantity),
+                    total_cost=Decimal(str(unit_price * quantity)),
+                    notes=f"PRODUCT LUNCH - Staff: {staff_name}, Reason: {reason}, Notes: {notes}, Time: {recorded_time.strftime('%Y-%m-%d %H:%M:%S')}",
+                    created_at=recorded_time
+                )
+                
+                created_lunches.append({
+                    'product_id': product.id,
+                    'product_name': product.name,
+                    'quantity': quantity,
+                    'total_cost': float(staff_lunch.total_cost)
+                })
+            
+            # Set recorded_by if cashier can be found
+            if cashier_name:
+                try:
+                    cashier = Cashier.objects.filter(shop=shop, name__icontains=cashier_name).first()
+                    if cashier:
+                        for lunch_data in created_lunches:
+                            try:
+                                lunch = StaffLunch.objects.get(
+                                    shop=shop,
+                                    product_id=lunch_data['product_id'],
+                                    created_at__gte=timezone.now() - timezone.timedelta(seconds=10)
+                                )
+                                lunch.recorded_by = cashier
+                                lunch.save()
+                            except StaffLunch.DoesNotExist:
+                                pass
+                except Exception:
+                    pass
+            
+            return Response({
+                "success": True,
+                "message": f"Product lunch recorded for {staff_name}",
+                "staff_name": staff_name,
+                "total_value": float(total_value),
+                "products": created_lunches,
+                "reason": reason
+            }, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            return Response({"error": f"Failed to process product lunch: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @method_decorator(csrf_exempt, name='dispatch')
 class StockTakeListView(APIView):
@@ -2314,9 +2621,10 @@ class BarcodeLookupView(APIView):
         except ShopConfiguration.DoesNotExist:
             return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
         
-        # Search for product by barcode, line code, or additional barcodes
+        # Search for product by barcode, line code, or additional barcodes (only active products)
         product = Product.objects.filter(
-            shop=shop
+            shop=shop,
+            is_active=True  # Only return active products - delisted products cannot be found
         ).filter(
             models.Q(barcode=barcode) | 
             models.Q(line_code=barcode) |
@@ -3257,6 +3565,449 @@ class RevokeDrawerAccessView(APIView):
 
 
 @method_decorator(csrf_exempt, name='dispatch')
+class AllSalesHistoryView(APIView):
+    """Get ALL sales history - never affected by EOD deletion - for Owner Dashboard"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    
+    def get(self, request):
+        try:
+            shop = ShopConfiguration.objects.get()
+        except ShopConfiguration.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Get all sales regardless of shop day status
+        sales = Sale.objects.filter(
+            shop=shop,
+            status='completed'
+        ).order_by('-created_at')
+        
+        # Serialize sales with full details
+        sales_data = []
+        for sale in sales:
+            sale_data = {
+                'id': sale.id,
+                'receipt_number': f'R{sale.id:03d}',
+                'created_at': sale.created_at.isoformat(),
+                'cashier_name': sale.cashier.name if sale.cashier else 'Unknown',
+                'payment_method': sale.payment_method,
+                'customer_name': sale.customer_name or '',
+                'total_amount': float(sale.total_amount),
+                'currency': sale.currency,
+                'payment_currency': sale.payment_currency,
+                'wallet_account': sale.wallet_account,
+                'status': sale.status,
+                'items': []
+            }
+            
+            # Add sale items with product details
+            for item in sale.items.all():
+                sale_data['items'].append({
+                    'product_id': item.product.id if item.product else None,
+                    'product_name': item.product.name if item.product else 'Unknown Product',
+                    'quantity': float(item.quantity),
+                    'unit_price': float(item.unit_price),
+                    'total_price': float(item.total_price),
+                    'refunded': item.refunded,
+                    'refund_reason': item.refund_reason or ''
+                })
+            
+            sales_data.append(sale_data)
+        
+        # Calculate summary statistics
+        total_revenue = sum(sale.total_amount for sale in sales)
+        total_transactions = sales.count()
+        avg_transaction = total_revenue / total_transactions if total_transactions > 0 else 0
+        
+        # Group by date for daily breakdown
+        from collections import defaultdict
+        daily_sales = defaultdict(lambda: {'revenue': 0, 'transactions': 0})
+        for sale in sales:
+            date_key = sale.created_at.date().isoformat()
+            daily_sales[date_key]['revenue'] += float(sale.total_amount)
+            daily_sales[date_key]['transactions'] += 1
+        
+        daily_breakdown = [
+            {
+                'date': date,
+                'revenue': f"{data['revenue']:.2f}",
+                'transactions': data['transactions']
+            }
+            for date, data in sorted(daily_sales.items(), reverse=True)
+        ]
+        
+        # Group by payment method
+        payment_methods = defaultdict(float)
+        for sale in sales:
+            payment_methods[sale.payment_method] += float(sale.total_amount)
+        
+        # Convert total_revenue to float for percentage calculation
+        total_revenue_float = float(total_revenue)
+        
+        payment_analysis = [
+            {
+                'payment_method': method,
+                'total_revenue': amount,
+                'percentage': (amount / total_revenue_float * 100) if total_revenue_float > 0 else 0
+            }
+            for method, amount in payment_methods.items()
+        ]
+        
+        # Group by currency
+        currencies = defaultdict(float)
+        for sale in sales:
+            currency_key = sale.payment_currency or sale.currency
+            currencies[currency_key] += float(sale.total_amount)
+        
+        currency_breakdown = [
+            {
+                'currency': currency,
+                'total_revenue': amount,
+                'transaction_count': Sale.objects.filter(
+                    shop=shop,
+                    status='completed'
+                ).filter(
+                    models.Q(payment_currency=currency) | models.Q(currency=currency)
+                ).count()
+            }
+            for currency, amount in currencies.items()
+        ]
+        
+        return Response({
+            'success': True,
+            'all_sales': sales_data,
+            'summary': {
+                'total_revenue': float(total_revenue),
+                'total_transactions': total_transactions,
+                'average_transaction': float(avg_transaction),
+                'date_range': {
+                    'earliest': sales.last().created_at.isoformat() if sales.exists() else None,
+                    'latest': sales.first().created_at.isoformat() if sales.exists() else None
+                }
+            },
+            'daily_breakdown': daily_breakdown,
+            'payment_analysis': payment_analysis,
+            'currency_breakdown': currency_breakdown
+        })
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class AllSalesHistoryView(APIView):
+    """Get ALL sales history - never affected by EOD deletion - for Owner Dashboard"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    
+    def get(self, request):
+        try:
+            shop = ShopConfiguration.objects.get()
+        except ShopConfiguration.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Get all sales regardless of shop day status
+        sales = Sale.objects.filter(
+            shop=shop,
+            status='completed'
+        ).order_by('-created_at')
+        
+        # Serialize sales with full details
+        sales_data = []
+        for sale in sales:
+            sale_data = {
+                'id': sale.id,
+                'receipt_number': f'R{sale.id:03d}',
+                'created_at': sale.created_at.isoformat(),
+                'cashier_id': sale.cashier.id if sale.cashier else None,
+                'cashier_name': sale.cashier.name if sale.cashier else 'Unknown',
+                'payment_method': sale.payment_method,
+                'customer_name': sale.customer_name or '',
+                'total_amount': float(sale.total_amount),
+                'currency': sale.currency,
+                'payment_currency': sale.payment_currency,
+                'wallet_account': sale.wallet_account,
+                'status': sale.status,
+                'items': []
+            }
+            
+            # Add sale items with product details
+            for item in sale.items.all():
+                sale_data['items'].append({
+                    'product_id': item.product.id if item.product else None,
+                    'product_name': item.product.name if item.product else 'Unknown Product',
+                    'category': item.product.category if item.product else '',
+                    'quantity': float(item.quantity),
+                    'unit_price': float(item.unit_price),
+                    'total_price': float(item.total_price),
+                    'refunded': item.refunded,
+                    'refund_reason': item.refund_reason or ''
+                })
+            
+            sales_data.append(sale_data)
+        
+        # Calculate summary statistics
+        total_revenue = sum(sale.total_amount for sale in sales)
+        total_transactions = sales.count()
+        avg_transaction = total_revenue / total_transactions if total_transactions > 0 else 0
+        
+        # Group by date for daily breakdown
+        from collections import defaultdict
+        daily_sales = defaultdict(lambda: {'revenue': 0, 'transactions': 0})
+        for sale in sales:
+            date_key = sale.created_at.date().isoformat()
+            daily_sales[date_key]['revenue'] += float(sale.total_amount)
+            daily_sales[date_key]['transactions'] += 1
+        
+        daily_breakdown = [
+            {
+                'date': date,
+                'revenue': f"{data['revenue']:.2f}",
+                'transactions': data['transactions']
+            }
+            for date, data in sorted(daily_sales.items(), reverse=True)
+        ]
+        
+        # Group by payment method
+        payment_methods = defaultdict(float)
+        for sale in sales:
+            payment_methods[sale.payment_method] += float(sale.total_amount)
+        
+        # Convert total_revenue to float for percentage calculation
+        total_revenue_float = float(total_revenue)
+        
+        payment_analysis = [
+            {
+                'payment_method': method,
+                'total_revenue': amount,
+                'percentage': (amount / total_revenue_float * 100) if total_revenue_float > 0 else 0
+            }
+            for method, amount in payment_methods.items()
+        ]
+        
+        # Group by currency
+        currencies = defaultdict(float)
+        for sale in sales:
+            currency_key = sale.payment_currency or sale.currency
+            currencies[currency_key] += float(sale.total_amount)
+        
+        currency_breakdown = [
+            {
+                'currency': currency,
+                'total_revenue': amount,
+                'transaction_count': Sale.objects.filter(
+                    shop=shop,
+                    status='completed'
+                ).filter(
+                    models.Q(payment_currency=currency) | models.Q(currency=currency)
+                ).count()
+            }
+            for currency, amount in currencies.items()
+        ]
+        
+        return Response({
+            'success': True,
+            'all_sales': sales_data,
+            'summary': {
+                'total_revenue': float(total_revenue),
+                'total_transactions': total_transactions,
+                'average_transaction': float(avg_transaction),
+                'date_range': {
+                    'earliest': sales.last().created_at.isoformat() if sales.exists() else None,
+                    'latest': sales.first().created_at.isoformat() if sales.exists() else None
+                }
+            },
+            'daily_breakdown': daily_breakdown,
+            'payment_analysis': payment_analysis,
+            'currency_breakdown': currency_breakdown
+        })
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class AllCashierSalesHistoryView(APIView):
+    """Get ALL sales history for a specific cashier - never affected by EOD deletion"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    
+    def get(self, request):
+        try:
+            shop = ShopConfiguration.objects.get()
+        except ShopConfiguration.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Get cashier_id from query params
+        cashier_id = request.query_params.get('cashier_id')
+        cashier_identifier = request.query_params.get('cashier_identifier')  # Can be name or ID
+        
+        print(f"🔍 AllCashierSalesHistoryView: cashier_id={cashier_id}, cashier_identifier={cashier_identifier}")
+        
+        # Try to find the cashier by multiple methods
+        cashier = None
+        
+        if cashier_id:
+            try:
+                # Try to find by numeric ID first
+                cashier = Cashier.objects.get(id=int(cashier_id), shop=shop)
+                print(f"✅ Found cashier by ID: {cashier.name}")
+            except (Cashier.DoesNotExist, ValueError):
+                # Try to find by name/email as identifier
+                try:
+                    cashier = Cashier.objects.get(shop=shop, name__iexact=str(cashier_id))
+                    print(f"✅ Found cashier by name: {cashier.name}")
+                except Cashier.DoesNotExist:
+                    try:
+                        cashier = Cashier.objects.get(shop=shop, email__iexact=str(cashier_id))
+                        print(f"✅ Found cashier by email: {cashier.name}")
+                    except Cashier.DoesNotExist:
+                        print(f"❌ Cashier not found by ID: {cashier_id}")
+        
+        # If cashier_identifier provided and cashier still not found
+        if not cashier and cashier_identifier:
+            try:
+                # Use icontains for case-insensitive partial matching (more flexible)
+                cashier = Cashier.objects.get(shop=shop, name__icontains=str(cashier_identifier))
+                print(f"✅ Found cashier by identifier (icontains): {cashier.name}")
+            except Cashier.DoesNotExist:
+                print(f"❌ Cashier not found by identifier: {cashier_identifier}")
+            except Cashier.MultipleObjectsReturned:
+                # If multiple cashiers match, try to find the best match
+                cashiers = Cashier.objects.filter(shop=shop, name__icontains=str(cashier_identifier))
+                # Try to match exactly with case-insensitive
+                exact_match = cashiers.filter(name__iexact=str(cashier_identifier)).first()
+                if exact_match:
+                    cashier = exact_match
+                    print(f"✅ Found exact match among multiples: {cashier.name}")
+                else:
+                    # Return the first one as fallback
+                    cashier = cashiers.first()
+                    print(f"⚠️ Multiple cashiers matched, using first: {cashier.name if cashier else 'None'}")
+        
+        # Build the sales query
+        sales_query = Sale.objects.filter(
+            shop=shop,
+            status='completed'
+        ).order_by('-created_at')
+        
+        if cashier:
+            sales_query = sales_query.filter(cashier=cashier)
+            print(f"📊 Filtering sales by cashier ID: {cashier.id}, name: {cashier.name}")
+        elif cashier_identifier:
+            # If no cashier found, try to filter by cashier_name in the sale data using icontains
+            sales_query = sales_query.filter(
+                models.Q(cashier__name__icontains=cashier_identifier)
+            )
+            print(f"📊 Filtering sales by cashier_name (icontains): {cashier_identifier}")
+        else:
+            # If no cashier info provided, return ALL sales
+            print(f"📊 No cashier specified, returning ALL sales")
+        
+        sales = sales_query
+        print(f"📊 Found {sales.count()} sales")
+        
+        # Print sample sale cashier info to debug
+        if sales.exists():
+            sample_sale = sales.first()
+            print(f"📊 Sample sale cashier: {sample_sale.cashier}, cashier_name: {sample_sale.cashier.name if sample_sale.cashier else 'None'}")
+        
+        # Serialize sales with full details
+        sales_data = []
+        for sale in sales:
+            sale_data = {
+                'id': sale.id,
+                'receipt_number': f'R{sale.id:03d}',
+                'created_at': sale.created_at.isoformat(),
+                'cashier_name': sale.cashier.name if sale.cashier else 'Unknown',
+                'cashier_id': sale.cashier.id if sale.cashier else None,
+                'payment_method': sale.payment_method,
+                'customer_name': sale.customer_name or '',
+                'total_amount': float(sale.total_amount),
+                'currency': sale.currency,
+                'payment_currency': sale.payment_currency,
+                'wallet_account': sale.wallet_account,
+                'status': sale.status,
+                'items': []
+            }
+            
+            # Add sale items with product details
+            for item in sale.items.all():
+                sale_data['items'].append({
+                    'product_id': item.product.id if item.product else None,
+                    'product_name': item.product.name if item.product else 'Unknown Product',
+                    'category': item.product.category if item.product else '',
+                    'quantity': float(item.quantity),
+                    'unit_price': float(item.unit_price),
+                    'total_price': float(item.total_price),
+                    'refunded': item.refunded,
+                    'refund_reason': item.refund_reason or ''
+                })
+            
+            sales_data.append(sale_data)
+        
+        # Calculate summary statistics
+        total_revenue = sum(sale.total_amount for sale in sales)
+        total_transactions = sales.count()
+        avg_transaction = total_revenue / total_transactions if total_transactions > 0 else 0
+        
+        # Payment method breakdown
+        cash_sales = sales.filter(payment_method='cash')
+        card_sales = sales.filter(payment_method='card')
+        transfer_sales = sales.filter(payment_method='transfer')
+        
+        summary = {
+            'cashier_name': cashier.name if cashier else (cashier_identifier or 'All Sales'),
+            'cashier_id': cashier.id if cashier else None,
+            'total_sales': total_transactions,
+            'total_revenue': float(total_revenue),
+            'average_sale': float(avg_transaction),
+            'cash_sales': cash_sales.count(),
+            'cash_revenue': float(cash_sales.aggregate(total=Sum('total_amount'))['total'] or 0),
+            'card_sales': card_sales.count(),
+            'card_revenue': float(card_sales.aggregate(total=Sum('total_amount'))['total'] or 0),
+            'transfer_sales': transfer_sales.count(),
+            'transfer_revenue': float(transfer_sales.aggregate(total=Sum('total_amount'))['total'] or 0),
+            'date_range': {
+                'earliest': sales.last().created_at.isoformat() if sales.exists() else None,
+                'latest': sales.first().created_at.isoformat() if sales.exists() else None
+            }
+        }
+        
+        return Response({
+            'success': True,
+            'cashier_sales': sales_data,
+            'summary': summary
+        })
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class DeleteTodayStaffLunchView(APIView):
+    """Delete all today's staff lunch records (OWNER ONLY - no auth required)"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    
+    def post(self, request):
+        try:
+            shop = ShopConfiguration.objects.get()
+            
+            # NO AUTHENTICATION REQUIRED - the EOD screen is already protected
+            
+            today = timezone.now().date()
+            
+            # Get all staff lunch records for today
+            today_lunches = StaffLunch.objects.filter(shop=shop, created_at__date=today)
+            deleted_count = today_lunches.count()
+            
+            # Delete all staff lunch records for today
+            today_lunches.delete()
+            
+            return Response({
+                "success": True,
+                "message": f"Successfully deleted {deleted_count} staff lunch records for today ({today})",
+                "deleted_count": deleted_count,
+                "date": str(today)
+            }, status=status.HTTP_200_OK)
+            
+        except ShopConfiguration.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": f"Failed to delete staff lunch records: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+@method_decorator(csrf_exempt, name='dispatch')
 class DeleteTodaySalesView(APIView):
     """Delete all today's sales and reset all drawers to start fresh (OWNER ONLY - no auth required)"""
     permission_classes = [AllowAny]
@@ -3422,3 +4173,277 @@ class DrawerAccessStatusView(APIView):
                 'error': f'Server error: {str(e)}',
                 'drawer_access_granted': False
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class InventoryReceiveView(APIView):
+    """Receive inventory from supplier - updates product stock and creates inventory log"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    
+    def post(self, request):
+        try:
+            shop = ShopConfiguration.objects.get()
+        except ShopConfiguration.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Get receiving data from request
+        reference = request.data.get('reference', '')
+        invoice_number = request.data.get('invoiceNumber', '')
+        supplier = request.data.get('supplier', 'Unknown Supplier')
+        receiving_date = request.data.get('receivingDate', timezone.now().date().isoformat())
+        notes = request.data.get('notes', '')
+        items = request.data.get('items', [])
+        totals = request.data.get('totals', {})
+        
+        if not items:
+            return Response({"error": "No items to receive"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get cashier from request (optional for receiving)
+        cashier_id = request.data.get('cashier_id')
+        cashier = None
+        if cashier_id:
+            try:
+                cashier = Cashier.objects.get(id=cashier_id, shop=shop)
+            except Cashier.DoesNotExist:
+                pass
+        
+        # Process each item
+        received_items = []
+        errors = []
+        
+        with transaction.atomic():
+            for item_data in items:
+                product_id = item_data.get('productId')
+                quantity = item_data.get('quantity', 0)
+                cost_price = item_data.get('costPrice', 0)
+                
+                if not product_id or quantity <= 0:
+                    errors.append(f"Invalid item data: {item_data}")
+                    continue
+                
+                try:
+                    product = Product.objects.get(id=product_id, shop=shop)
+                    
+                    # Store previous quantity
+                    previous_quantity = product.stock_quantity
+                    
+                    # Update stock quantity
+                    product.stock_quantity = product.stock_quantity + Decimal(str(quantity))
+                    
+                    # Update cost price if requested
+                    if item_data.get('updateBaseCost', False):
+                        product.cost_price = Decimal(str(cost_price))
+                    
+                    product.save()
+                    
+                    # Create inventory log
+                    InventoryLog.objects.create(
+                        shop=shop,
+                        product=product,
+                        reason_code='RECEIVING',
+                        quantity_change=Decimal(str(quantity)),
+                        previous_quantity=previous_quantity,
+                        new_quantity=product.stock_quantity,
+                        performed_by=cashier,
+                        reference_number=reference or f'REC-{timezone.now().strftime("%Y%m%d%H%M%S")}',
+                        notes=f'Received from {supplier}. Invoice: {invoice_number}. {notes}'.strip()
+                    )
+                    
+                    received_items.append({
+                        'product_id': product.id,
+                        'product_name': product.name,
+                        'quantity': quantity,
+                        'previous_quantity': float(previous_quantity),
+                        'new_quantity': float(product.stock_quantity)
+                    })
+                    
+                except Product.DoesNotExist:
+                    errors.append(f"Product with ID {product_id} not found")
+                except Exception as e:
+                    errors.append(f"Error processing product {product_id}: {str(e)}")
+        
+        if errors:
+            return Response({
+                "success": False,
+                "message": "Some items failed to process",
+                "errors": errors,
+                "received_items": received_items
+            }, status=status.HTTP_207_MULTI_STATUS)
+        
+        return Response({
+            "success": True,
+            "message": f"Successfully received {len(received_items)} items",
+            "reference": reference,
+            "supplier": supplier,
+            "invoice_number": invoice_number,
+            "receiving_date": receiving_date,
+            "totals": totals,
+            "received_items": received_items
+        }, status=status.HTTP_201_CREATED)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class InventoryReceivingHistoryView(APIView):
+    """Get inventory receiving history"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    
+    def get(self, request):
+        try:
+            shop = ShopConfiguration.objects.get()
+        except ShopConfiguration.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Get all inventory logs for receiving
+        receiving_logs = InventoryLog.objects.filter(
+            shop=shop,
+            reason_code='RECEIVING'
+        ).order_by('-created_at')
+        
+        # Group by reference number
+        history_by_reference = {}
+        for log in receiving_logs:
+            ref = log.reference_number or 'UNKNOWN'
+            if ref not in history_by_reference:
+                history_by_reference[ref] = {
+                    'reference': ref,
+                    'date': log.created_at.date().isoformat(),
+                    'supplier': 'Unknown',
+                    'items': [],
+                    'total_quantity': 0,
+                    'total_value': 0
+                }
+            
+            history_by_reference[ref]['items'].append({
+                'product_name': log.product.name,
+                'quantity_change': float(log.quantity_change),
+                'previous_quantity': float(log.previous_quantity),
+                'new_quantity': float(log.new_quantity),
+                'performed_by': log.performed_by.name if log.performed_by else 'Unknown'
+            })
+            history_by_reference[ref]['total_quantity'] += float(log.quantity_change)
+        
+        history_data = list(history_by_reference.values())
+        
+        return Response({
+            "success": True,
+            "total_receiving_records": len(history_data),
+            "history": history_data
+        })
+
+
+# ============================================================================
+# BUSINESS SETTINGS API VIEWS
+# ============================================================================
+
+@method_decorator(csrf_exempt, name='dispatch')
+class BusinessSettingsView(APIView):
+    """Get and update business settings (business hours, timezone, VAT)"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    
+    def get(self, request):
+        """Get current business settings"""
+        try:
+            shop = ShopConfiguration.objects.get()
+        except ShopConfiguration.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        return Response({
+            "success": True,
+            "settings": {
+                "base_currency": shop.base_currency,
+                "opening_time": shop.opening_time.strftime('%H:%M') if shop.opening_time else '08:00',
+                "closing_time": shop.closing_time.strftime('%H:%M') if shop.closing_time else '20:00',
+                "timezone": shop.timezone or 'Africa/Harare',
+                "vat_rate": float(shop.vat_rate) if shop.vat_rate else 15.0,
+                "business_hours_display": f"{shop.opening_time.strftime('%I:%M %p') if shop.opening_time else '8:00 AM'} - {shop.closing_time.strftime('%I:%M %p') if shop.closing_time else '8:00 PM'}"
+            }
+        })
+    
+    def patch(self, request):
+        """Update business settings (no authentication required - local updates work regardless)"""
+        try:
+            shop = ShopConfiguration.objects.get()
+        except ShopConfiguration.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # No authentication required - allow anyone to update business settings
+        # The SettingsScreen already saves locally even if API fails
+        
+        # Update settings
+        updated_fields = []
+        
+        if 'opening_time' in request.data:
+            # Handle time format - can be "08:00" or "08:00:00"
+            opening_time_str = request.data['opening_time']
+            try:
+                from datetime import time
+                if ':' in opening_time_str:
+                    parts = opening_time_str.split(':')
+                    hour = int(parts[0])
+                    minute = int(parts[1]) if len(parts) > 1 else 0
+                    shop.opening_time = time(hour, minute)
+                    updated_fields.append('opening_time')
+            except (ValueError, IndexError):
+                return Response({"error": "Invalid opening_time format. Use HH:MM format."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if 'closing_time' in request.data:
+            # Handle time format - can be "20:00" or "20:00:00"
+            closing_time_str = request.data['closing_time']
+            try:
+                from datetime import time
+                if ':' in closing_time_str:
+                    parts = closing_time_str.split(':')
+                    hour = int(parts[0])
+                    minute = int(parts[1]) if len(parts) > 1 else 0
+                    shop.closing_time = time(hour, minute)
+                    updated_fields.append('closing_time')
+            except (ValueError, IndexError):
+                return Response({"error": "Invalid closing_time format. Use HH:MM format."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if 'timezone' in request.data:
+            # Validate timezone
+            import pytz
+            try:
+                tz = pytz.timezone(request.data['timezone'])
+                shop.timezone = request.data['timezone']
+                updated_fields.append('timezone')
+            except pytz.exceptions.UnknownTimeZoneError:
+                return Response({"error": "Invalid timezone. Use a valid timezone like 'Africa/Harare'."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if 'vat_rate' in request.data:
+            try:
+                vat_rate = float(request.data['vat_rate'])
+                if vat_rate < 0 or vat_rate > 100:
+                    return Response({"error": "VAT rate must be between 0 and 100"}, status=status.HTTP_400_BAD_REQUEST)
+                shop.vat_rate = vat_rate
+                updated_fields.append('vat_rate')
+            except (ValueError, TypeError):
+                return Response({"error": "Invalid VAT rate format"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if 'base_currency' in request.data:
+            valid_currencies = ['USD', 'ZIG', 'RAND']
+            if request.data['base_currency'] not in valid_currencies:
+                return Response({"error": f"Invalid currency. Must be one of: {', '.join(valid_currencies)}"}, status=status.HTTP_400_BAD_REQUEST)
+            shop.base_currency = request.data['base_currency']
+            updated_fields.append('base_currency')
+        
+        if updated_fields:
+            shop.save()
+            
+        return Response({
+            "success": True,
+            "message": "Business settings updated successfully",
+            "settings": {
+                "base_currency": shop.base_currency,
+                "opening_time": shop.opening_time.strftime('%H:%M') if shop.opening_time else '08:00',
+                "closing_time": shop.closing_time.strftime('%H:%M') if shop.closing_time else '20:00',
+                "timezone": shop.timezone or 'Africa/Harare',
+                "vat_rate": float(shop.vat_rate) if shop.vat_rate else 15.0,
+                "business_hours_display": f"{shop.opening_time.strftime('%I:%M %p') if shop.opening_time else '8:00 AM'} - {shop.closing_time.strftime('%I:%M %p') if shop.closing_time else '8:00 PM'}"
+            },
+            "updated_fields": updated_fields
+        })
+

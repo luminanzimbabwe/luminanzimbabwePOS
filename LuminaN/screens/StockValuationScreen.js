@@ -46,6 +46,9 @@ const StockValuationScreen = () => {
     shrinkageRate: 0
   });
   
+  // Store negative stock products list for display
+  const [negativeStockProducts, setNegativeStockProducts] = useState([]);
+  
   // Product Details Modal State
   const [showProductModal, setShowProductModal] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
@@ -156,8 +159,8 @@ const StockValuationScreen = () => {
         setProducts(processedProducts);
         calculateTotals(processedProducts);
         
-        // Load financial impacts after products are loaded
-        await loadFinancialImpacts();
+        // Load financial impacts after products are loaded - pass products directly
+        await loadFinancialImpacts(processedProducts);
       } else {
         setProducts([]);
         calculateTotals([]);
@@ -173,9 +176,13 @@ const StockValuationScreen = () => {
     }
   };
 
-  const loadFinancialImpacts = async () => {
+  const loadFinancialImpacts = async (productsList) => {
     try {
       console.log('💰 Loading financial impacts...');
+      
+      // Use passed products list or fallback to state
+      const productsToUse = productsList || products || [];
+      console.log('💰 Products to analyze:', productsToUse.length);
       
       // Load wastages data
       const wasteSummaryResponse = await shopAPI.getWasteSummary();
@@ -199,7 +206,19 @@ const StockValuationScreen = () => {
       console.log('💰 Calculated wastages impact:', wastagesImpact);
       
       // Calculate negative stock impact (products with negative quantities)
-      const negativeStocks = products.filter(product => product.stockUnits < 0);
+      const negativeStocks = productsToUse.filter(product => product.stockUnits < 0);
+      console.log('💰 Found negative stock products:', negativeStocks.length);
+      
+      // Show debug info for negative stocks
+      if (negativeStocks.length > 0) {
+        console.log('💰 Negative stock products:', negativeStocks.map(p => ({
+          id: p.id,
+          name: p.name,
+          stockUnits: p.stockUnits,
+          unitCost: p.unitCost
+        })));
+      }
+      
       const negativeStockImpact = {
         totalCost: negativeStocks.reduce((sum, product) => 
           sum + (Math.abs(product.stockUnits) * parseFloat(product.unitCost)), 0
@@ -207,6 +226,17 @@ const StockValuationScreen = () => {
         totalUnits: negativeStocks.reduce((sum, product) => sum + Math.abs(product.stockUnits), 0),
         products: negativeStocks.length
       };
+      
+      // Save negative stock products for display
+      setNegativeStockProducts(negativeStocks.map(p => ({
+        id: p.id,
+        name: p.name,
+        stockUnits: p.stockUnits,
+        unitCost: parseFloat(p.unitCost),
+        impactCost: Math.abs(p.stockUnits) * parseFloat(p.unitCost)
+      })));
+      
+      console.log('💰 Calculated negative stock impact:', negativeStockImpact);
       
       // Calculate shrinkage rate
       const totalPotentialStockValue = products.reduce((sum, product) => 
@@ -472,6 +502,33 @@ const StockValuationScreen = () => {
             </Text>
           </View>
         </View>
+
+        {/* Negative Stock Products List */}
+        {negativeStockProducts.length > 0 && (
+          <View style={styles.negativeStockListCard}>
+            <Text style={styles.negativeStockListTitle}>📋 Over-Sold Products List</Text>
+            <View style={styles.negativeStockListHeader}>
+              <Text style={[styles.negativeStockCell, styles.nsColID]}>ID</Text>
+              <Text style={[styles.negativeStockCell, styles.nsColName]}>Product Name</Text>
+              <Text style={[styles.negativeStockCell, styles.nsColStock]}>Stock</Text>
+              <Text style={[styles.negativeStockCell, styles.nsColCost]}>Unit Cost</Text>
+              <Text style={[styles.negativeStockCell, styles.nsColImpact]}>Impact Cost</Text>
+            </View>
+            {negativeStockProducts.map((product, index) => (
+              <View key={product.id || index} style={styles.negativeStockRow}>
+                <Text style={[styles.negativeStockCell, styles.nsColID]}>{product.id}</Text>
+                <Text style={[styles.negativeStockCell, styles.nsColName]} numberOfLines={1}>{product.name}</Text>
+                <Text style={[styles.negativeStockCell, styles.nsColStock, { color: '#dc2626' }]}>
+                  {product.stockUnits.toFixed(2)}
+                </Text>
+                <Text style={[styles.negativeStockCell, styles.nsColCost]}>{formatCurrency(product.unitCost)}</Text>
+                <Text style={[styles.negativeStockCell, styles.nsColImpact, { color: '#dc2626' }]}>
+                  {formatCurrency(product.impactCost)}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Adjusted Profit Metrics */}
         <View style={styles.adjustedProfitCard}>
@@ -1097,6 +1154,46 @@ const styles = StyleSheet.create({
     backgroundColor: '#22c55e',
     marginVertical: 8,
   },
+  
+  // Negative Stock Products List Styles
+  negativeStockListCard: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#dc2626',
+  },
+  negativeStockListTitle: {
+    color: '#dc2626',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  negativeStockListHeader: {
+    flexDirection: 'row',
+    backgroundColor: '#3a1a1a',
+    borderBottomWidth: 1,
+    borderBottomColor: '#dc2626',
+    paddingVertical: 8,
+  },
+  negativeStockRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#444',
+    paddingVertical: 8,
+  },
+  negativeStockCell: {
+    fontSize: 12,
+    padding: 4,
+    color: '#ffffff',
+    textAlign: 'center',
+  },
+  nsColID: { minWidth: 40, maxWidth: 40 },
+  nsColName: { minWidth: 150, maxWidth: 150 },
+  nsColStock: { minWidth: 70, maxWidth: 70 },
+  nsColCost: { minWidth: 80, maxWidth: 80 },
+  nsColImpact: { minWidth: 100, maxWidth: 100 },
   
   // View Details Button Styles
   viewDetailsButton: {

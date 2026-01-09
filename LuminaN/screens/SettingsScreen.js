@@ -9,7 +9,9 @@ import {
   Alert,
   Dimensions,
   Vibration,
-  Platform
+  Platform,
+  TextInput,
+  Modal
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { shopStorage } from '../services/storage';
@@ -27,50 +29,153 @@ const SettingsScreen = () => {
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
   const [selectedCurrency, setSelectedCurrency] = useState('USD');
   const [isUpdatingCurrency, setIsUpdatingCurrency] = useState(false);
+  
+  // Business settings state
+  const [businessSettings, setBusinessSettings] = useState({
+    opening_time: '08:00',
+    closing_time: '20:00',
+    timezone: 'Africa/Harare',
+    vat_rate: 15.0,
+    business_hours_display: '8:00 AM - 8:00 PM'
+  });
+  const [isUpdatingBusinessSettings, setIsUpdatingBusinessSettings] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(null); // 'opening' or 'closing' or null
+  const [showTimezonePicker, setShowTimezonePicker] = useState(false);
+  const [showOpeningTimePicker, setShowOpeningTimePicker] = useState(false);
+  const [showClosingTimePicker, setShowClosingTimePicker] = useState(false);
+  const [showVatPicker, setShowVatPicker] = useState(false);
+  const [customTimezoneInput, setCustomTimezoneInput] = useState('');
 
   useEffect(() => {
     loadShopData();
+    loadBusinessSettings();
   }, []);
+
+  // Load business settings from API
+  const loadBusinessSettings = async () => {
+    try {
+      const response = await shopAPI.getBusinessSettings();
+      if (response.data && response.data.success) {
+        const settings = response.data.settings;
+        
+        // Calculate business_hours_display locally to ensure it's current
+        setBusinessSettings({
+          ...settings,
+          business_hours_display: settings.business_hours_display || 
+            `${formatTimeDisplay(settings.opening_time)} - ${formatTimeDisplay(settings.closing_time)}`
+        });
+      }
+    } catch (error) {
+      console.error('Failed to load business settings:', error);
+    }
+  };
+
+  // Update business settings - NO AUTH, direct local update
+  const updateBusinessSetting = async (field, value) => {
+    try {
+      setIsUpdatingBusinessSettings(true);
+      
+      // Update locally immediately - also update business_hours_display when times change
+      setBusinessSettings(prev => {
+        const updated = {
+          ...prev,
+          [field]: value
+        };
+        
+        // Update business_hours_display when opening_time or closing_time changes
+        if (field === 'opening_time' || field === 'closing_time') {
+          updated.business_hours_display = `${formatTimeDisplay(updated.opening_time)} - ${formatTimeDisplay(updated.closing_time)}`;
+        }
+        
+        // Save to local storage
+        shopStorage.saveBusinessSettings(updated);
+        
+        return updated;
+      });
+      
+      // Try to save to API (optional, doesn't block user)
+      try {
+        await shopAPI.updateBusinessSettings({ [field]: value });
+      } catch (apiError) {
+        console.log('API save failed, but local update worked:', apiError);
+      }
+      
+      Alert.alert('Success', `${field.replace('_', ' ')} updated to ${value}`);
+      Vibration.vibrate(100);
+    } catch (error) {
+      console.error('Error updating business setting:', error);
+      Alert.alert('Error', 'Failed to update setting.');
+    } finally {
+      setIsUpdatingBusinessSettings(false);
+      setShowTimePicker(null);
+    }
+  };
+
+  // Timezone options
+  const timezoneOptions = [
+    { value: 'Africa/Harare', label: '🕐 Africa/Harare (UTC+2)' },
+    { value: 'Africa/Johannesburg', label: '🌍 Africa/Johannesburg (UTC+2)' },
+    { value: 'Africa/Lusaka', label: '🇿🇲 Africa/Lusaka (UTC+2)' },
+    { value: 'Africa/Maputo', label: '🇲🇿 Africa/Maputo (UTC+2)' },
+    { value: 'Africa/Nairobi', label: '🇰🇪 Africa/Nairobi (UTC+3)' },
+    { value: 'Africa/Dar_es_Salaam', label: '🇹🇿 Africa/Dar es Salaam (UTC+3)' },
+    { value: 'Europe/London', label: '🇬🇧 Europe/London (UTC+0)' },
+    { value: 'America/New_York', label: '🇺🇸 America/New York (UTC-5)' },
+    { value: 'Asia/Dubai', label: '🇦🇪 Asia/Dubai (UTC+4)' },
+  ];
+
+  // Show timezone picker with custom option
+  const showTimezoneSelection = () => {
+    setCustomTimezoneInput(businessSettings.timezone || 'Africa/Harare');
+    setShowTimezonePicker(true);
+  };
+
+  // Handle custom timezone save
+  const handleCustomTimezoneSave = () => {
+    if (customTimezoneInput && customTimezoneInput.trim()) {
+      updateBusinessSetting('timezone', customTimezoneInput.trim());
+    }
+    setShowTimezonePicker(false);
+  };
+
+  // Format time for display
+  const formatTimeDisplay = (timeStr) => {
+    if (!timeStr) return '8:00 AM';
+    const [hours, minutes] = timeStr.split(':');
+    const hour = parseInt(hours);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const hour12 = hour % 12 || 12;
+    return `${hour12}:${minutes} ${ampm}`;
+  };
 
   const updateBaseCurrency = async (newCurrency) => {
     try {
       setIsUpdatingCurrency(true);
-
-      // Get owner credentials from storage
-      const credentials = await shopStorage.getCredentials();
-      if (!credentials || !credentials.email) {
-        Alert.alert('Error', 'Owner credentials not found. Please login again.');
-        return;
-      }
-
-      // Call the shop update API
-      const response = await shopAPI.updateShop({
-        email: credentials.email,
-        password: credentials.master_password,
+      
+      // Update locally immediately
+      setShopData(prev => ({
+        ...prev,
+        base_currency: newCurrency
+      }));
+      
+      // Update storage
+      await shopStorage.saveCredentials({
+        ...shopData,
         base_currency: newCurrency
       });
-
-      if (response.success) {
-        // Update local state
-        setShopData(prev => ({
-          ...prev,
-          base_currency: newCurrency
-        }));
-
-        // Update storage
-        await shopStorage.saveCredentials({
-          ...credentials,
-          base_currency: newCurrency
-        });
-
-        Alert.alert('Success', `Base currency updated to ${newCurrency}`);
-        Vibration.vibrate(100);
-      } else {
-        Alert.alert('Error', response.error || 'Failed to update base currency');
+      
+      // Try to save to API (optional, doesn't block user)
+      try {
+        await shopAPI.updateShop({ base_currency: newCurrency });
+      } catch (apiError) {
+        console.log('API save failed, but local update worked:', apiError);
       }
+      
+      Alert.alert('Success', `Base currency updated to ${newCurrency}`);
+      Vibration.vibrate(100);
     } catch (error) {
       console.error('Error updating base currency:', error);
-      Alert.alert('Error', 'Failed to update base currency. Please try again.');
+      Alert.alert('Error', 'Failed to update base currency.');
     } finally {
       setIsUpdatingCurrency(false);
     }
@@ -789,7 +894,7 @@ const SettingsScreen = () => {
             <View style={styles.settingRow}>
               <Text style={styles.settingLabel}>💱 Base Currency</Text>
               <Text style={styles.settingValue}>
-                {shopData.base_currency || 'USD'} (15% VAT)
+                {shopData?.base_currency || 'USD'} (15% VAT)
               </Text>
               <TouchableOpacity
                 style={[styles.settingAction, isUpdatingCurrency && { opacity: 0.6 }]}
@@ -801,18 +906,72 @@ const SettingsScreen = () => {
                 </Text>
               </TouchableOpacity>
             </View>
+            
+            {/* Business Hours - Opens Time Picker */}
             <View style={styles.settingRow}>
               <Text style={styles.settingLabel}>⏰ Business Hours</Text>
-              <Text style={styles.settingValue}>8:00 AM - 8:00 PM</Text>
-              <TouchableOpacity style={styles.settingAction}>
-                <Text style={styles.settingActionText}>Set</Text>
+              <Text style={styles.settingValue}>
+                {businessSettings.business_hours_display || `${formatTimeDisplay(businessSettings.opening_time)} - ${formatTimeDisplay(businessSettings.closing_time)}`}
+              </Text>
+              <TouchableOpacity
+                style={[styles.settingAction, isUpdatingBusinessSettings && { opacity: 0.6 }]}
+                onPress={() => setShowOpeningTimePicker(true)}
+                disabled={isUpdatingBusinessSettings}
+              >
+                <Text style={styles.settingActionText}>
+                  {isUpdatingBusinessSettings ? 'Updating...' : 'Set'}
+                </Text>
               </TouchableOpacity>
             </View>
+            
+            {/* Closing Time */}
+            <View style={styles.settingRow}>
+              <Text style={styles.settingLabel}>🌙 Closing Time</Text>
+              <Text style={styles.settingValue}>
+                {formatTimeDisplay(businessSettings.closing_time)}
+              </Text>
+              <TouchableOpacity
+                style={[styles.settingAction, isUpdatingBusinessSettings && { opacity: 0.6 }]}
+                onPress={() => setShowClosingTimePicker(true)}
+                disabled={isUpdatingBusinessSettings}
+              >
+                <Text style={styles.settingActionText}>
+                  {isUpdatingBusinessSettings ? 'Updating...' : 'Set'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            
+            {/* Time Zone */}
             <View style={styles.settingRow}>
               <Text style={styles.settingLabel}>🌍 Time Zone</Text>
-              <Text style={styles.settingValue}>Africa/Johannesburg</Text>
-              <TouchableOpacity style={styles.settingAction}>
-                <Text style={styles.settingActionText}>Change</Text>
+              <Text style={styles.settingValue}>
+                {businessSettings.timezone || 'Africa/Harare'}
+              </Text>
+              <TouchableOpacity
+                style={[styles.settingAction, isUpdatingBusinessSettings && { opacity: 0.6 }]}
+                onPress={showTimezoneSelection}
+                disabled={isUpdatingBusinessSettings}
+              >
+                <Text style={styles.settingActionText}>
+                  {isUpdatingBusinessSettings ? 'Updating...' : 'Change'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            
+            {/* VAT Rate */}
+            <View style={styles.settingRow}>
+              <Text style={styles.settingLabel}>💰 VAT Rate</Text>
+              <Text style={styles.settingValue}>
+                {businessSettings.vat_rate || 15}%
+              </Text>
+              <TouchableOpacity
+                style={[styles.settingAction, isUpdatingBusinessSettings && { opacity: 0.6 }]}
+                onPress={() => setShowVatPicker(true)}
+                disabled={isUpdatingBusinessSettings}
+              >
+                <Text style={styles.settingActionText}>
+                  {isUpdatingBusinessSettings ? 'Updating...' : 'Edit'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1125,6 +1284,311 @@ const SettingsScreen = () => {
         height: Platform.OS === 'web' ? 100 : 20,
         minHeight: Platform.OS === 'web' ? 100 : 0
       }} />
+      
+      {/* Timezone Picker Modal */}
+      <Modal
+        visible={showTimezonePicker}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowTimezonePicker(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>🌍 Custom Timezone</Text>
+              <TouchableOpacity 
+                style={styles.modalCloseButton}
+                onPress={() => setShowTimezonePicker(false)}
+              >
+                <Text style={styles.modalCloseButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <Text style={styles.modalSubtitle}>
+              Enter your timezone (e.g., Africa/Harare, Europe/London):
+            </Text>
+            
+            <TextInput
+              style={styles.timezoneInput}
+              value={customTimezoneInput}
+              onChangeText={setCustomTimezoneInput}
+              placeholder="Africa/Harare"
+              placeholderTextColor="#64748b"
+              autoFocus
+            />
+            
+            <Text style={styles.timezoneHint}>
+              Common timezones: Africa/Harare, Africa/Johannesburg, Europe/London, America/New_York, Asia/Dubai
+            </Text>
+            
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalCancelButton]}
+                onPress={() => setShowTimezonePicker(false)}
+              >
+                <Text style={styles.modalCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalSaveButton]}
+                onPress={handleCustomTimezoneSave}
+              >
+                <Text style={styles.modalSaveButtonText}>Set Timezone</Text>
+              </TouchableOpacity>
+            </View>
+            
+            {/* Quick timezone options */}
+            <View style={styles.quickTimezones}>
+              <Text style={styles.quickTimezonesLabel}>Quick select:</Text>
+              <View style={styles.quickTimezoneButtons}>
+                {timezoneOptions.slice(0, 4).map((tz) => (
+                  <TouchableOpacity
+                    key={tz.value}
+                    style={styles.quickTimezoneButton}
+                    onPress={() => {
+                      setCustomTimezoneInput(tz.value);
+                    }}
+                  >
+                    <Text style={styles.quickTimezoneButtonText}>{tz.value}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      
+      {/* Opening Time Picker Modal */}
+      <Modal
+        visible={showOpeningTimePicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowOpeningTimePicker(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>🕐 Set Opening Time</Text>
+              <TouchableOpacity 
+                style={styles.modalCloseButton}
+                onPress={() => setShowOpeningTimePicker(false)}
+              >
+                <Text style={styles.modalCloseButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <Text style={styles.modalSubtitle}>
+              Choose when your shop opens:
+            </Text>
+            
+            <View style={styles.timePickerGrid}>
+              {Array.from({ length: 16 }, (_, i) => {
+                const hour = i + 5; // 5 AM to 8 PM
+                const hourStr = hour.toString().padStart(2, '0');
+                const timeValue = `${hourStr}:00`;
+                const timeValue30 = `${hourStr}:30`;
+                const displayHour = hour > 12 ? hour - 12 : (hour === 12 ? 12 : hour);
+                const ampm = hour >= 12 ? 'PM' : 'AM';
+                
+                return (
+                  <View key={hour} style={styles.timePickerRow}>
+                    <TouchableOpacity
+                      style={[
+                        styles.timePickerButton,
+                        businessSettings.opening_time === timeValue && styles.timePickerButtonActive
+                      ]}
+                      onPress={() => {
+                        updateBusinessSetting('opening_time', timeValue);
+                        setShowOpeningTimePicker(false);
+                      }}
+                    >
+                      <Text style={[
+                        styles.timePickerButtonText,
+                        businessSettings.opening_time === timeValue && styles.timePickerButtonTextActive
+                      ]}>
+                        {displayHour}:00 {ampm}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.timePickerButton,
+                        businessSettings.opening_time === timeValue30 && styles.timePickerButtonActive
+                      ]}
+                      onPress={() => {
+                        updateBusinessSetting('opening_time', timeValue30);
+                        setShowOpeningTimePicker(false);
+                      }}
+                    >
+                      <Text style={[
+                        styles.timePickerButtonText,
+                        businessSettings.opening_time === timeValue30 && styles.timePickerButtonTextActive
+                      ]}>
+                        {displayHour}:30 {ampm}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </View>
+            
+            <TouchableOpacity
+              style={[styles.modalButton, styles.modalCancelButton, { marginTop: 16 }]}
+              onPress={() => setShowOpeningTimePicker(false)}
+            >
+              <Text style={styles.modalCancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+      
+      {/* Closing Time Picker Modal */}
+      <Modal
+        visible={showClosingTimePicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowClosingTimePicker(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>🌙 Set Closing Time</Text>
+              <TouchableOpacity 
+                style={styles.modalCloseButton}
+                onPress={() => setShowClosingTimePicker(false)}
+              >
+                <Text style={styles.modalCloseButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <Text style={styles.modalSubtitle}>
+              Choose when your shop closes:
+            </Text>
+            
+            <View style={styles.timePickerGrid}>
+              {Array.from({ length: 20 }, (_, i) => {
+                const hour = i + 12; // 12 PM to 7 AM next day
+                const hourStr = hour.toString().padStart(2, '0');
+                const timeValue = `${hourStr}:00`;
+                const timeValue30 = `${hourStr}:30`;
+                const displayHour = hour > 12 ? hour - 12 : (hour === 12 ? 12 : hour);
+                const ampm = hour >= 12 ? 'PM' : 'AM';
+                
+                return (
+                  <View key={hour} style={styles.timePickerRow}>
+                    <TouchableOpacity
+                      style={[
+                        styles.timePickerButton,
+                        businessSettings.closing_time === timeValue && styles.timePickerButtonActive
+                      ]}
+                      onPress={() => {
+                        updateBusinessSetting('closing_time', timeValue);
+                        setShowClosingTimePicker(false);
+                      }}
+                    >
+                      <Text style={[
+                        styles.timePickerButtonText,
+                        businessSettings.closing_time === timeValue && styles.timePickerButtonTextActive
+                      ]}>
+                        {displayHour}:00 {ampm}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.timePickerButton,
+                        businessSettings.closing_time === timeValue30 && styles.timePickerButtonActive
+                      ]}
+                      onPress={() => {
+                        updateBusinessSetting('closing_time', timeValue30);
+                        setShowClosingTimePicker(false);
+                      }}
+                    >
+                      <Text style={[
+                        styles.timePickerButtonText,
+                        businessSettings.closing_time === timeValue30 && styles.timePickerButtonTextActive
+                      ]}>
+                        {displayHour}:30 {ampm}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </View>
+            
+            <TouchableOpacity
+              style={[styles.modalButton, styles.modalCancelButton, { marginTop: 16 }]}
+              onPress={() => setShowClosingTimePicker(false)}
+            >
+              <Text style={styles.modalCancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+      
+      {/* VAT Rate Picker Modal */}
+      <Modal
+        visible={showVatPicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowVatPicker(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>💰 Set VAT Rate</Text>
+              <TouchableOpacity 
+                style={styles.modalCloseButton}
+                onPress={() => setShowVatPicker(false)}
+              >
+                <Text style={styles.modalCloseButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <Text style={styles.modalSubtitle}>
+              Choose your VAT percentage:
+            </Text>
+            
+            <View style={styles.vatPickerGrid}>
+              {[
+                { label: '0% (No VAT)', value: 0 },
+                { label: '5% (Reduced)', value: 5 },
+                { label: '10% (Custom)', value: 10 },
+                { label: '12.5% (UK Standard)', value: 12.5 },
+                { label: '15% (Common)', value: 15 },
+                { label: '17.5% (UK Higher)', value: 17.5 },
+                { label: '20% (High)', value: 20 },
+                { label: '25% (Highest)', value: 25 },
+                { label: '30% (Maximum)', value: 30 },
+              ].map((rate) => (
+                <TouchableOpacity
+                  key={rate.value}
+                  style={[
+                    styles.vatPickerButton,
+                    businessSettings.vat_rate === rate.value && styles.vatPickerButtonActive
+                  ]}
+                  onPress={() => {
+                    updateBusinessSetting('vat_rate', rate.value);
+                    setShowVatPicker(false);
+                  }}
+                >
+                  <Text style={[
+                    styles.vatPickerButtonText,
+                    businessSettings.vat_rate === rate.value && styles.vatPickerButtonTextActive
+                  ]}>
+                    {rate.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            
+            <TouchableOpacity
+              style={[styles.modalButton, styles.modalCancelButton, { marginTop: 16 }]}
+              onPress={() => setShowVatPicker(false)}
+            >
+              <Text style={styles.modalCancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
       
       {/* Enterprise App Footer */}
       <View style={styles.ultimateAppFooter}>
@@ -2228,6 +2692,195 @@ const styles = StyleSheet.create({
     fontSize: 9,
     textAlign: 'center',
     marginTop: 4,
+  },
+  
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    padding: 20,
+    width: '100%',
+    maxWidth: 400,
+    borderWidth: 1,
+    borderColor: '#334155',
+    boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+  modalCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCloseButtonText: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#94a3b8',
+    marginBottom: 16,
+  },
+  timezoneInput: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    color: '#ffffff',
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#334155',
+    marginBottom: 12,
+  },
+  timezoneHint: {
+    fontSize: 11,
+    color: '#64748b',
+    marginBottom: 16,
+    fontStyle: 'italic',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+    marginTop: 16,
+  },
+  modalButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    minWidth: 100,
+    alignItems: 'center',
+  },
+  modalCancelButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  modalCancelButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalSaveButton: {
+    backgroundColor: '#3b82f6',
+  },
+  modalSaveButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  quickTimezones: {
+    marginTop: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  quickTimezonesLabel: {
+    fontSize: 12,
+    color: '#64748b',
+    marginBottom: 12,
+  },
+  quickTimezoneButtons: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  quickTimezoneButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(59, 130, 246, 0.2)',
+  },
+  quickTimezoneButtonText: {
+    color: '#3b82f6',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  
+  // Time Picker Modal Styles
+  timePickerGrid: {
+    maxHeight: 400,
+    overflow: 'scroll',
+  },
+  timePickerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  timePickerButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 8,
+    marginHorizontal: 4,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  timePickerButtonActive: {
+    backgroundColor: 'rgba(59, 130, 246, 0.3)',
+    borderColor: '#3b82f6',
+  },
+  timePickerButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  timePickerButtonTextActive: {
+    color: '#3b82f6',
+    fontWeight: '600',
+  },
+  
+  // VAT Picker Modal Styles
+  vatPickerGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  vatPickerButton: {
+    width: '47%',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  vatPickerButtonActive: {
+    backgroundColor: 'rgba(59, 130, 246, 0.3)',
+    borderColor: '#3b82f6',
+  },
+  vatPickerButtonText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  vatPickerButtonTextActive: {
+    color: '#3b82f6',
+    fontWeight: '600',
   },
 });
 

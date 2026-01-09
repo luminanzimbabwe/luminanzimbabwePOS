@@ -30,6 +30,26 @@ class ShopConfiguration(models.Model):
     email = models.EmailField(unique=True)
     phone = models.CharField(max_length=20)
     base_currency = models.CharField(max_length=4, choices=BASE_CURRENCY_CHOICES, default='USD', help_text="Primary currency for the shop")
+    
+    # Business Hours Configuration
+    opening_time = models.TimeField(default='08:00:00', help_text="Shop opening time (e.g., 08:00 for 8:00 AM)")
+    closing_time = models.TimeField(default='20:00:00', help_text="Shop closing time (e.g., 20:00 for 8:00 PM)")
+    
+    # Time Zone Configuration
+    timezone = models.CharField(
+        max_length=50, 
+        default='Africa/Harare', 
+        help_text="Business timezone for scheduling and reports"
+    )
+    
+    # VAT/Tax Configuration
+    vat_rate = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=15.00,
+        help_text="VAT rate as percentage (default 15%)"
+    )
+    
     password = models.CharField(max_length=255)  # hashed
     registered_at = models.DateTimeField(auto_now_add=True)
     
@@ -510,7 +530,7 @@ class ShopDay(models.Model):
         return self
     
     def close_shop(self, closed_by=None, notes=''):
-        """Close the shop for business and delete all sales for this day"""
+        """Close the shop for business and delete all sales and staff lunches for this day"""
         from django.db import transaction
         
         if self.status != 'OPEN':
@@ -528,6 +548,11 @@ class ShopDay(models.Model):
                 # This ensures when shop reopens, no old sales appear
                 deleted_count, _ = Sale.objects.filter(shop_day=self).delete()
                 print(f"🗑️ DELETED {deleted_count} sales for shop day {self.date}")
+                
+                # CRITICAL: DELETE ALL STAFF LUNCHES FOR THE SHOP
+                # This clears all staff lunch records so the system starts fresh
+                staff_lunch_count, _ = StaffLunch.objects.filter(shop=self.shop).delete()
+                print(f"🗑️ DELETED {staff_lunch_count} staff lunch records for shop {self.shop.name}")
                 
                 # At close of day, mark/clear all today's cash floats so the next day starts fresh.
                 self._clear_drawers()
@@ -607,24 +632,61 @@ class ShopDay(models.Model):
     
     @classmethod
     def get_current_day(cls, shop):
-        """Get or create today's shop day"""
+        """Get or create today's shop day.
+        
+        CRITICAL FIX: If the previous day's shop was OPEN, inherit that status.
+        This ensures the shop NEVER auto-closes - only the owner can close it.
+        """
+        from datetime import timedelta
         today = timezone.now().date()
-        shop_day, created = cls.objects.get_or_create(
-            shop=shop,
-            date=today,
-            defaults={'status': 'CLOSED'}
-        )
-        return shop_day
+        
+        # Try to get existing shop day for today
+        try:
+            shop_day = cls.objects.get(shop=shop, date=today)
+            return shop_day
+        except cls.DoesNotExist:
+            # New day - check if previous day was open to inherit status
+            previous_day = today - timedelta(days=1)
+            try:
+                previous_shop_day = cls.objects.get(shop=shop, date=previous_day)
+                # Inherit status from previous day - if it was open, stay open!
+                initial_status = previous_shop_day.status if previous_shop_day.status == 'OPEN' else 'CLOSED'
+            except cls.DoesNotExist:
+                # No previous day - start as CLOSED (new shop)
+                initial_status = 'CLOSED'
+            
+            # Create new shop day with inherited status
+            shop_day = cls.objects.create(
+                shop=shop,
+                date=today,
+                status=initial_status
+            )
+            return shop_day
     
     @classmethod
     def is_shop_open(cls, shop):
-        """Check if shop is currently open"""
+        """Check if shop is currently open.
+        
+        Returns True if:
+        - Today's shop day exists and is open, OR
+        - No shop day exists for today (use get_current_day to inherit status)
+        
+        This ensures the shop stays open until explicitly closed by the owner.
+        """
         today = timezone.now().date()
+        
+        # First try to get today's shop day
         try:
             shop_day = cls.objects.get(shop=shop, date=today)
             return shop_day.is_open
         except cls.DoesNotExist:
-            return False
+            # No shop day for today - use get_current_day to inherit status
+            shop_day = cls.get_current_day(shop)
+            return shop_day.is_open
+        except cls.MultipleObjectsReturned:
+            # Handle multiple shop days - take the first one
+            shop_day = cls.objects.filter(shop=shop, date=today).first()
+            return shop_day.is_open if shop_day else False
     
     @classmethod
     def get_open_shop_day(cls, shop):
@@ -3312,18 +3374,9 @@ def get_all_drawers_session(request):
         # Check if shop is open - handle multiple objects returned
         # CRITICAL: If shop is CLOSED, return empty drawers (no sales data)
         # This ensures when shop reopens next day, no old sales appear
-        try:
-            shop_day = ShopDay.objects.get(shop=shop, date=today)
-            is_shop_open = shop_day.is_open
-        except ShopDay.MultipleObjectsReturned:
-            # Take the first one if multiple exist
-            shop_day = ShopDay.objects.filter(shop=shop, date=today).first()
-            is_shop_open = shop_day.is_open if shop_day else False
-        except ShopDay.DoesNotExist:
-            # No shop day record - treat as shop is CLOSED
-            # Return empty drawers so the next day starts fresh with no sales
-            is_shop_open = False
-            shop_day = None
+        # FIXED: Use ShopDay.get_current_day to inherit open status from previous day
+        shop_day = ShopDay.get_current_day(shop)
+        is_shop_open = shop_day.is_open
         
         # CRITICAL FIX: If shop is CLOSED, return empty drawers with no sales data
         # This ensures when shop reopens the next day, no old sales are retrieved
@@ -3790,9 +3843,10 @@ def get_shop_status(request):
         today = timezone.now().date()
         
         try:
-            shop_day = ShopDay.objects.get(shop=shop, date=today)
+            # Use get_current_day to inherit open status from previous day
+            shop_day = ShopDay.get_current_day(shop)
             is_open = shop_day.is_open
-        except ShopDay.DoesNotExist:
+        except Exception:
             is_open = False
         
         return Response({
@@ -3843,16 +3897,9 @@ def get_cashier_drawer_session(request):
             timezone.get_current_timezone()
         )
         
-        # Check if shop is open - handle multiple objects returned
-        try:
-            shop_day = ShopDay.objects.get(shop=shop, date=today)
-            is_shop_open = shop_day.is_open
-        except ShopDay.MultipleObjectsReturned:
-            shop_day = ShopDay.objects.filter(shop=shop, date=today).first()
-            is_shop_open = shop_day.is_open if shop_day else False
-        except ShopDay.DoesNotExist:
-            is_shop_open = False
-            shop_day = None
+        # Check if shop is open - use get_current_day to inherit status from previous day
+        shop_day = ShopDay.get_current_day(shop)
+        is_shop_open = shop_day.is_open
         
         # Get all active cashiers for the shop
         cashiers = Cashier.objects.filter(shop=shop, status='active')

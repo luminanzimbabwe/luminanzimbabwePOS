@@ -15,6 +15,7 @@ import {
   PanResponder,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
 import { shopStorage } from '../services/storage';
 import { shopAPI } from '../services/api';
 import { ROUTES } from '../constants/navigation';
@@ -299,6 +300,93 @@ const CashierDashboardScreen = () => {
     }, 5000);
     return () => clearInterval(interval);
   }, [cashierData, drawerWasResetAtEOD]);
+
+  // Fetch business settings when component loads
+  useEffect(() => {
+    fetchBusinessSettings();
+  }, []);
+
+  // Refresh business settings when screen comes into focus (e.g., after returning from SettingsScreen)
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('🔄 Screen focused - refreshing business settings...');
+      fetchBusinessSettings();
+      
+      // Optional: Return cleanup function if needed
+      return () => {
+        console.log('🔄 Screen unfocused');
+      };
+    }, [])
+  );
+
+  // Fetch business settings for the header display
+  const fetchBusinessSettings = async () => {
+    try {
+      // First try to load from local storage immediately (for fast display)
+      const storedSettings = await shopStorage.getBusinessSettings();
+      if (storedSettings) {
+        console.log('📦 Using business settings from storage (immediate):', storedSettings);
+        setShopData(prev => ({
+          ...prev,
+          opening_time: storedSettings.opening_time || prev?.opening_time,
+          closing_time: storedSettings.closing_time || prev?.closing_time,
+          timezone: storedSettings.timezone || prev?.timezone,
+          vat_rate: storedSettings.vat_rate || prev?.vat_rate,
+        }));
+      }
+      
+      // Then fetch from API to get latest settings
+      const response = await shopAPI.getBusinessSettings();
+      if (response.data) {
+        console.log('📊 Business settings loaded from API:', response.data);
+        
+        // Extract settings from response (handle both direct data and nested structure)
+        const settingsData = response.data.settings || response.data;
+        
+        const newSettings = {
+          opening_time: settingsData.opening_time || storedSettings?.opening_time || null,
+          closing_time: settingsData.closing_time || storedSettings?.closing_time || null,
+          timezone: settingsData.timezone || storedSettings?.timezone || null,
+          vat_rate: settingsData.vat_rate || storedSettings?.vat_rate || null,
+        };
+        
+        // Update shopData with the latest business settings
+        setShopData(prev => ({
+          ...prev,
+          ...newSettings
+        }));
+        
+        // Also save to local storage for persistence
+        try {
+          await shopStorage.saveBusinessSettings(newSettings);
+          console.log('💾 Business settings saved to storage');
+        } catch (storageError) {
+          console.log('⚠️ Could not save business settings to storage:', storageError.message);
+        }
+      }
+    } catch (error) {
+      console.log('⚠️ Could not load business settings from API:', error.message);
+      
+      // If API fails and we didn't load from storage above, try to load from local storage
+      if (!storedSettings) {
+        try {
+          const storedSettings = await shopStorage.getBusinessSettings();
+          if (storedSettings) {
+            console.log('📦 Using business settings from storage (fallback):', storedSettings);
+            setShopData(prev => ({
+              ...prev,
+              opening_time: storedSettings.opening_time || null,
+              closing_time: storedSettings.closing_time || null,
+              timezone: storedSettings.timezone || null,
+              vat_rate: storedSettings.vat_rate || null,
+            }));
+          }
+        } catch (storageError) {
+          console.log('⚠️ Could not load business settings from storage either');
+        }
+      }
+    }
+  };
 
   // Fetch exchange rates for payment processing context
   const fetchExchangeRates = async () => {
@@ -837,6 +925,39 @@ const CashierDashboardScreen = () => {
         minimumFractionDigits: 2,
       }).format(amount || 0);
     }
+  };
+
+  // Refresh business settings - can be called from navigation focus
+  const refreshBusinessSettings = async () => {
+    console.log('🔄 Refreshing business settings...');
+    
+    // Clear cached settings and re-fetch
+    try {
+      const storedSettings = await shopStorage.getBusinessSettings();
+      if (storedSettings) {
+        console.log('📦 Business settings from storage:', storedSettings);
+        setShopData(prev => ({
+          ...prev,
+          opening_time: storedSettings.opening_time || null,
+          closing_time: storedSettings.closing_time || null,
+          timezone: storedSettings.timezone || null,
+          vat_rate: storedSettings.vat_rate || null,
+        }));
+      }
+    } catch (error) {
+      console.log('⚠️ Error refreshing business settings:', error.message);
+    }
+  };
+
+  // Format time from 24-hour (HH:MM) to 12-hour (h:mm AM/PM) format
+  const formatTimeDisplay = (timeStr) => {
+    if (!timeStr || timeStr === 'null' || timeStr === 'undefined') return 'Not set';
+    const [hours, minutes] = timeStr.split(':');
+    if (!hours || !minutes) return 'Not set';
+    const hour = parseInt(hours);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const hour12 = hour % 12 || 12;
+    return `${hour12}:${minutes} ${ampm}`;
   };
 
   // USD Only - No currency conversion needed
@@ -1867,8 +1988,12 @@ const CashierDashboardScreen = () => {
       }
     }, 0);
     
-    // Convert to selected currency
-    return convertToCurrency(usdTotal, selectedCurrency);
+    // Round to 2 decimal places to avoid floating-point precision issues
+    const roundedTotal = Math.round(usdTotal * 100) / 100;
+    
+    // Convert to selected currency and round again
+    const convertedTotal = convertToCurrency(roundedTotal, selectedCurrency);
+    return Math.round(convertedTotal * 100) / 100;
   };
 
   const getChange = () => {
@@ -2898,6 +3023,9 @@ const CashierDashboardScreen = () => {
       }
     }
     
+    // Calculate total with proper rounding to avoid floating-point precision issues
+    const roundedTotal = Math.round(getTotalAmount() * 100) / 100;
+    
     const saleData = {
       cashier_id: cashierData?.cashier_info?.id || cashierData?.id || cashierData?.cashier_id || 1,
       items: cart.map(item => ({
@@ -2910,7 +3038,7 @@ const CashierDashboardScreen = () => {
       product_price_currency: 'USD',
       customer_name: '',
       customer_phone: '',
-      total_amount: getTotalAmount().toString(),
+      total_amount: roundedTotal.toString(),
       // Transfer/Card specific fields
       ...(paymentMethod === 'transfer' && {
         wallet_account: walletAccount, // Now contains specific wallet ID like 'ecocash', 'ecocash_usd', 'onemoney', etc.
@@ -3150,10 +3278,22 @@ const CashierDashboardScreen = () => {
               </View>
               <View style={styles.neuralStatusCard}>
                 <Text style={styles.neuralStatusLabel}>STATUS</Text>
-                <Text style={[styles.neuralStatusValue, shopStatus?.is_open ? styles.neuralOnline : styles.neuralOffline]}>
+                <Text style={[styles.neuralStatusValue, shopStatus?.is_open ? styles.neuralOnline : styles.nerainOffline]}>
                   {shopStatus?.is_open ? 'ONLINE' : 'OFFLINE'}
                 </Text>
                 <View style={[styles.neuralPulse, shopStatus?.is_open ? styles.neuralPulseOnline : styles.neuralPulseOffline]}></View>
+              </View>
+              
+              {/* Business Hours Display */}
+              <View style={styles.neuralBusinessHoursCard}>
+                <Text style={styles.neuralBusinessHoursLabel}>🕐 HOURS</Text>
+                <Text style={styles.neuralBusinessHoursValue}>
+                  {shopData?.opening_time ? formatTimeDisplay(shopData.opening_time) : '-'} - 
+                  {shopData?.closing_time ? formatTimeDisplay(shopData.closing_time) : '-'}
+                </Text>
+                <Text style={styles.neuralBusinessHoursTimezone}>
+                  {shopData?.timezone || 'Not set'}
+                </Text>
               </View>
               
               {/* Currency & Rates - Combined Compact Card (Moved before SYNC) */}
@@ -3172,6 +3312,7 @@ const CashierDashboardScreen = () => {
                   loadProducts();
                   loadShopStatus();
                   fetchExchangeRates();
+                  fetchBusinessSettings();
                   updateRealTimeStats();
                   Alert.alert('✅ REFRESHED', 'All data has been refreshed successfully!', [{ text: 'OK' }]);
                 }} 
@@ -7619,6 +7760,43 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     textTransform: 'uppercase',
     letterSpacing: 1,
+  },
+
+  // Business Hours Display Styles
+  neuralBusinessHoursCard: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: '#00ffff',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+    marginHorizontal: 4,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  neuralBusinessHoursLabel: {
+    color: '#00ffff',
+    fontSize: 10,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  neuralBusinessHoursValue: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  neuralBusinessHoursTimezone: {
+    color: '#9ca3af',
+    fontSize: 8,
+    fontWeight: '500',
+    textAlign: 'center',
+    marginTop: 2,
+    fontStyle: 'italic',
   },
 
   // Exchange Rates Display Styles

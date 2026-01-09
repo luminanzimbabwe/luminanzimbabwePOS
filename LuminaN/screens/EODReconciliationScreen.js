@@ -977,6 +977,7 @@ const EODProductionScreen = () => {
               </View>
             </View>
             
+            
             <TouchableOpacity
               style={[
                 styles.neuralFinalizeButton,
@@ -2025,6 +2026,27 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: 'rgba(255, 255, 255, 0.3)',
     borderRadius: 14,
+  },
+  
+  // Delete Staff Lunch Button Styles
+  neuralDeleteLunchButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 170, 0, 0.2)',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: '#ffaa00',
+    marginTop: 12,
+  },
+  neuralDeleteLunchButtonText: {
+    color: '#ffaa00',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginLeft: 10,
+    letterSpacing: 1,
   },
   
   // Modal Styles
