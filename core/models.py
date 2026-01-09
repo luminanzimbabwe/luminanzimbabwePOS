@@ -3621,6 +3621,11 @@ def get_all_drawers_session(request):
         total_current_usd = sum([d['current_breakdown_by_currency']['usd']['total'] for d in drawers_list])
         total_current_rand = sum([d['current_breakdown_by_currency']['rand']['total'] for d in drawers_list])
         
+        # Calculate totals per currency for transfer display
+        total_transfer_usd = sum([d['current_breakdown_by_currency']['usd']['transfer'] for d in drawers_list])
+        total_transfer_zig = sum([d['current_breakdown_by_currency']['zig']['transfer'] for d in drawers_list])
+        total_transfer_rand = sum([d['current_breakdown_by_currency']['rand']['transfer'] for d in drawers_list])
+        
         return Response({
             'success': True,
             'is_shop_open': is_shop_open,  # Return actual shop status
@@ -3647,6 +3652,10 @@ def get_all_drawers_session(request):
                     'total_expected_cash_multi': total_expected_usd + total_expected_zig + total_expected_rand,
                     'total_current_cash_multi': total_current_usd + total_current_zig + total_current_rand,
                     'variance_multi': (total_current_usd + total_current_zig + total_current_rand) - (total_expected_usd + total_expected_zig + total_expected_rand),
+                    # Transfer totals per currency for FINANCIAL NEURAL GRID
+                    'transfer_usd': total_transfer_usd,
+                    'transfer_zig': total_transfer_zig,
+                    'transfer_rand': total_transfer_rand,
                 },
                 'drawers': drawers_list
             }

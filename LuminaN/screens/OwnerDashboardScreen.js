@@ -460,9 +460,9 @@ const OwnerDashboardScreen = () => {
               acc.current_rand = (acc.current_rand || 0) + (Number(breakdownByCurrency?.rand?.total || 0) || Number(drawer?.current_total_rand || 0));
               
               // Transfer amounts per currency - extract from drawer transfer data
-              acc.transfer_zig = (acc.transfer_zig || 0) + (Number(drawer?.transfer_amount_zig || drawer?.transfer_zig || drawer?.transfer?.zig || 0));
-              acc.transfer_usd = (acc.transfer_usd || 0) + (Number(drawer?.transfer_amount_usd || drawer?.transfer_usd || drawer?.transfer?.usd || 0));
-              acc.transfer_rand = (acc.transfer_rand || 0) + (Number(drawer?.transfer_amount_rand || drawer?.transfer_rand || drawer?.transfer?.rand || 0));
+              acc.transfer_zig = (acc.transfer_zig || 0) + Number(breakdownByCurrency?.zig?.transfer || 0);
+              acc.transfer_usd = (acc.transfer_usd || 0) + Number(breakdownByCurrency?.usd?.transfer || 0);
+              acc.transfer_rand = (acc.transfer_rand || 0) + Number(breakdownByCurrency?.rand?.transfer || 0);
               
               return acc;
             }, {});
@@ -1624,11 +1624,72 @@ const OwnerDashboardScreen = () => {
               </Text>
             </View>
             
-            {/* Variance Matrix - Calculate based on expected AFTER lunch deductions */}
+            {/* Transfer Categories Section */}
+            <View style={styles.transferCategoriesSection}>
+              <View style={styles.transferHeaderRow}>
+                <Icon name="swap-horiz" size={20} color="#ffaa00" />
+                <Text style={styles.transferTitle}>TRANSFERS</Text>
+              </View>
+              
+              {/* USD Transfer Row */}
+              <View style={styles.transferRow}>
+                <View style={styles.transferCurrencyBadge}>
+                  <Text style={styles.transferCurrencyText}>USD</Text>
+                </View>
+                <Text style={styles.transferLabel}>USD TRANSFER</Text>
+                <Text style={[
+                  styles.transferValue,
+                  { color: '#00f5ff' }
+                ]}>
+                  ${(drawerStatus.cash_flow?.transfer_usd || 0).toLocaleString()}
+                </Text>
+              </View>
+              
+              {/* ZIG Transfer Row */}
+              <View style={styles.transferRow}>
+                <View style={[styles.transferCurrencyBadge, { borderColor: '#ffffff' }]}>
+                  <Text style={[styles.transferCurrencyText, { color: '#ffffff' }]}>ZIG</Text>
+                </View>
+                <Text style={styles.transferLabel}>ZIG TRANSFER</Text>
+                <Text style={[
+                  styles.transferValue,
+                  { color: '#ffffff' }
+                ]}>
+                  ZW${(drawerStatus.cash_flow?.transfer_zig || 0).toLocaleString()}
+                </Text>
+              </View>
+              
+              {/* Rand Transfer Row */}
+              <View style={styles.transferRow}>
+                <View style={[styles.transferCurrencyBadge, { borderColor: '#ffaa00' }]}>
+                  <Text style={[styles.transferCurrencyText, { color: '#ffaa00' }]}>RAND</Text>
+                </View>
+                <Text style={styles.transferLabel}>RAND TRANSFER</Text>
+                <Text style={[
+                  styles.transferValue,
+                  { color: '#ffaa00' }
+                ]}>
+                  R{(drawerStatus.cash_flow?.transfer_rand || 0).toLocaleString()}
+                </Text>
+              </View>
+              
+              {/* Total Transfer Value */}
+              <View style={styles.totalTransferRow}>
+                <Text style={styles.totalTransferLabel}>TOTAL TRANSFERS</Text>
+                <Text style={styles.totalTransferValue}>
+                  ${((drawerStatus.cash_flow?.transfer_usd || 0) + (drawerStatus.cash_flow?.transfer_zig || 0) + (drawerStatus.cash_flow?.transfer_rand || 0)).toLocaleString()}
+                </Text>
+              </View>
+            </View>
+            
+            {/* Variance Matrix - Calculate based on expected AFTER lunch deductions and EXCLUDING transfers */}
             {(() => {
               const expectedAfterLunch = (drawerStatus.cash_flow?.total_expected_cash || 0) - staffLunchMetrics.totalValue;
               const currentTotal = drawerStatus.cash_flow?.total_current_cash || 0;
-              const variance = currentTotal - Math.max(0, expectedAfterLunch);
+              const totalTransfers = (drawerStatus.cash_flow?.transfer_usd || 0) + 
+                                     (drawerStatus.cash_flow?.transfer_zig || 0) + 
+                                     (drawerStatus.cash_flow?.transfer_rand || 0);
+              const variance = currentTotal - Math.max(0, expectedAfterLunch) - totalTransfers;
               const isSurplus = variance >= 0;
               return (
                 <View style={styles.totalVarianceCard}>
@@ -1648,6 +1709,11 @@ const OwnerDashboardScreen = () => {
                   {staffLunchMetrics.totalValue > 0 && (
                     <Text style={{ fontSize: 10, color: '#ffaa00', marginTop: 8, textAlign: 'center' }}>
                       (After ${staffLunchMetrics.totalValue.toFixed(2)} lunch deductions)
+                    </Text>
+                  )}
+                  {totalTransfers > 0 && (
+                    <Text style={{ fontSize: 10, color: '#00f5ff', marginTop: 4, textAlign: 'center' }}>
+                      (Excludes ${totalTransfers.toFixed(2)} in transfers)
                     </Text>
                   )}
                 </View>
@@ -3451,6 +3517,89 @@ const styles = StyleSheet.create({
     backgroundColor: 'linear-gradient(90deg, transparent, #ff0080, transparent)',
     marginVertical: 16,
     opacity: 0.5,
+  },
+  
+  // Transfer Categories Styles
+  transferCategoriesSection: {
+    backgroundColor: 'rgba(255, 170, 0, 0.08)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 170, 0, 0.3)',
+  },
+  transferHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  transferTitle: {
+    color: '#ffaa00',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginLeft: 10,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  transferRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+  },
+  transferCurrencyBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#00f5ff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  transferCurrencyText: {
+    color: '#00f5ff',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  transferLabel: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
+    flex: 1,
+  },
+  transferValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    letterSpacing: 1,
+  },
+  totalTransferRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255, 170, 0, 0.15)',
+    borderRadius: 10,
+    padding: 14,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 170, 0, 0.4)',
+  },
+  totalTransferLabel: {
+    color: '#ffaa00',
+    fontSize: 12,
+    fontWeight: 'bold',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  totalTransferValue: {
+    color: '#ffaa00',
+    fontSize: 20,
+    fontWeight: '900',
+    textShadowColor: '#ffaa00',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
   },
   
   // Cash Handover Section Styles

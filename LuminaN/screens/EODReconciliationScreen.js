@@ -49,6 +49,9 @@ const EODProductionScreen = () => {
     cash_usd: '',
     cash_rand: '',
     card: '',
+    transfer_usd: '',
+    transfer_zig: '',
+    transfer_rand: '',
     notes: ''
   });
 
@@ -317,7 +320,7 @@ const EODProductionScreen = () => {
   };
 
   // Calculate per-cashier variance - shows if cashier has short or over
-  // Now accounts for staff lunch deductions
+  // Now accounts for staff lunch deductions and transfer money
   const getCashierVariance = (drawer, verifiedCount) => {
     if (!drawer?.eod_expectations) return { variance: 0, status: 'pending', expected: 0, actual: 0 };
     
@@ -330,6 +333,12 @@ const EODProductionScreen = () => {
     const expectedCard = (drawer.current_breakdown_by_currency?.usd?.card || 0) + 
                         (drawer.current_breakdown_by_currency?.zig?.card || 0) + 
                         (drawer.current_breakdown_by_currency?.rand?.card || 0);
+    
+    // Get transfer amounts from current_breakdown_by_currency
+    const transferUsd = drawer.current_breakdown_by_currency?.usd?.transfer || 0;
+    const transferZig = drawer.current_breakdown_by_currency?.zig?.transfer || 0;
+    const transferRand = drawer.current_breakdown_by_currency?.rand?.transfer || 0;
+    const totalTransfer = transferUsd + transferZig + transferRand;
     
     // Total expected for this cashier (sum of all currencies)
     const totalExpectedBeforeLunch = expectedZig + expectedUsd + expectedRand + expectedCard;
@@ -345,12 +354,17 @@ const EODProductionScreen = () => {
     const actualUsd = verified.cash_usd || 0;
     const actualRand = verified.cash_rand || 0;
     const actualCard = verified.card || 0;
+    const actualTransferUsd = verified.transfer_usd || 0;
+    const actualTransferZig = verified.transfer_zig || 0;
+    const actualTransferRand = verified.transfer_rand || 0;
+    const actualTransferTotal = actualTransferUsd + actualTransferZig + actualTransferRand;
     
-    // Total actual for this cashier
+    // Total actual for this cashier (excluding transfers for variance calculation)
     const totalActual = actualZig + actualUsd + actualRand + actualCard;
     
-    // Calculate variance (positive = overage, negative = shortage)
-    const variance = totalActual - totalExpected;
+    // Calculate variance EXCLUDING transfers (transfers are intentional money movements)
+    // Variance = actual - expected - transfers
+    const variance = totalActual - totalExpected - totalTransfer;
     
     // Determine status
     let status = 'pending';
@@ -378,9 +392,17 @@ const EODProductionScreen = () => {
         zig: { expected: expectedZig, actual: actualZig },
         usd: { expected: expectedUsd, actual: actualUsd },
         rand: { expected: expectedRand, actual: actualRand },
-        card: { expected: expectedCard, actual: actualCard }
+        card: { expected: expectedCard, actual: actualCard },
+        transfers: {
+          expected: totalTransfer,
+          actual: actualTransferTotal,
+          usd: { expected: transferUsd, actual: actualTransferUsd },
+          zig: { expected: transferZig, actual: actualTransferZig },
+          rand: { expected: transferRand, actual: actualTransferRand }
+        }
       },
-      staffLunchDeduction // Include for display purposes
+      staffLunchDeduction, // Include for display purposes
+      totalTransfer // Include expected transfers for display
     };
   };
 
@@ -390,12 +412,18 @@ const EODProductionScreen = () => {
     let cash_usd = 0;
     let cash_rand = 0;
     let card = 0;
+    let transfer_usd = 0;
+    let transfer_zig = 0;
+    let transfer_rand = 0;
 
     Object.values(cashierCounts).forEach(v => {
       cash_zig += v.cash_zig || 0;
       cash_usd += v.cash_usd || 0;
       cash_rand += v.cash_rand || 0;
       card += v.card || 0;
+      transfer_usd += v.transfer_usd || 0;
+      transfer_zig += v.transfer_zig || 0;
+      transfer_rand += v.transfer_rand || 0;
     });
 
     // Calculate expected amounts from current drawer data
@@ -406,6 +434,8 @@ const EODProductionScreen = () => {
       card: 0,
       total: 0
     };
+    
+    let transferTotal = 0;
 
     if (drawerStatus?.drawers && drawerStatus.drawers.length > 0) {
       // Sum up all drawer expected amounts using expected_cash which includes float + sales
@@ -419,7 +449,13 @@ const EODProductionScreen = () => {
         const breakdownByCurrency = drawer?.current_breakdown_by_currency || {};
         expected.card += breakdownByCurrency?.usd?.card || breakdownByCurrency?.zig?.card || 0;
         expected.card += breakdownByCurrency?.rand?.card || 0;
+        
+        // Get transfers from current_breakdown_by_currency
+        transfer_usd += breakdownByCurrency?.usd?.transfer || 0;
+        transfer_zig += breakdownByCurrency?.zig?.transfer || 0;
+        transfer_rand += breakdownByCurrency?.rand?.transfer || 0;
       });
+      transferTotal = transfer_usd + transfer_zig + transfer_rand;
       expected.total = expected.cash_zig + expected.cash_usd + expected.cash_rand + expected.card;
     } else {
       // Check for enhanced multi-currency expected amounts first
@@ -446,12 +482,16 @@ const EODProductionScreen = () => {
     }
 
     const actual = cash_zig + cash_usd + cash_rand + card;
-    const variance = actual - (expected.total - staffLunchMetrics.totalValue);
+    const variance = actual - (expected.total - staffLunchMetrics.totalValue) - transferTotal;
 
     return { 
       cash_zig, cash_usd, cash_rand, card, expected, actual, variance,
       verifiedCash: cash_zig + cash_usd + cash_rand,
-      expectedAfterLunch: expected.total - staffLunchMetrics.totalValue
+      expectedAfterLunch: expected.total - staffLunchMetrics.totalValue,
+      transferTotal,
+      transfer_usd,
+      transfer_zig,
+      transfer_rand
     };
   }, [cashierCounts, reconciliationData, drawerStatus]);
 
@@ -465,9 +505,12 @@ const EODProductionScreen = () => {
             cash_usd: String(existing.cash_usd || ''),
             cash_rand: String(existing.cash_rand || ''),
             card: String(existing.card || ''),
+            transfer_usd: String(existing.transfer_usd || ''),
+            transfer_zig: String(existing.transfer_zig || ''),
+            transfer_rand: String(existing.transfer_rand || ''),
             notes: existing.notes || ''
           }
-        : { cash_zig: '', cash_usd: '', cash_rand: '', card: '', notes: '' }
+        : { cash_zig: '', cash_usd: '', cash_rand: '', card: '', transfer_usd: '', transfer_zig: '', transfer_rand: '', notes: '' }
     );
     setShowModal(true);
   };
@@ -476,6 +519,9 @@ const EODProductionScreen = () => {
     const cash_zig = parseFloat(inputs.cash_zig) || 0;
     const cash_usd = parseFloat(inputs.cash_usd) || 0;
     const cash_rand = parseFloat(inputs.cash_rand) || 0;
+    const transfer_usd = parseFloat(inputs.transfer_usd) || 0;
+    const transfer_zig = parseFloat(inputs.transfer_zig) || 0;
+    const transfer_rand = parseFloat(inputs.transfer_rand) || 0;
     
     if (cash_zig === 0 && cash_usd === 0 && cash_rand === 0) {
       Alert.alert('Invalid Cash', 'Enter a valid cash amount in at least one currency');
@@ -491,6 +537,9 @@ const EODProductionScreen = () => {
         cash_usd,
         cash_rand,
         card: parseFloat(inputs.card || 0),
+        transfer_usd,
+        transfer_zig,
+        transfer_rand,
         notes: inputs.notes,
         timestamp: new Date().toISOString()
       }
@@ -508,6 +557,9 @@ const EODProductionScreen = () => {
         expected_cash_usd: cash_usd,
         expected_cash_rand: cash_rand,
         expected_card: parseFloat(inputs.card || 0),
+        transfer_usd,
+        transfer_zig,
+        transfer_rand,
         notes: inputs.notes,
         status: 'IN_PROGRESS'
       });
@@ -602,9 +654,17 @@ const EODProductionScreen = () => {
               <Text style={styles.neuralSubtitle}>End of Day Reconciliation Command</Text>
             </View>
 
-            <TouchableOpacity onPress={loadAllData} style={styles.neuralRefreshButton} disabled={refreshing}>
+            <TouchableOpacity 
+              onPress={() => {
+                // Force refresh the entire screen with fresh data from API
+                loadAllData(true);
+                loadStaffLunchData();
+              }} 
+              style={styles.neuralRefreshButton} 
+              disabled={refreshing}
+            >
               <Icon name="sync" size={20} color="#00f5ff" />
-              <Text style={styles.neuralRefreshText}>SYNC</Text>
+              <Text style={styles.neuralRefreshText}>{refreshing ? 'SYNCING...' : 'SYNC'}</Text>
             </TouchableOpacity>
           </View>
           
@@ -779,6 +839,15 @@ const EODProductionScreen = () => {
               </View>
               <Text style={styles.neuralMetricValue}>R{(stats.expected.cash_rand || 0).toLocaleString()}</Text>
               <Text style={styles.neuralMetricSubtitle}>System calculated</Text>
+            </View>
+            
+            <View style={styles.neuralMetricCard}>
+              <View style={styles.neuralMetricHeader}>
+                <Icon name="swap-horiz" size={24} color="#00f5ff" />
+                <Text style={styles.neuralMetricTitle}>TRANSFERS</Text>
+              </View>
+              <Text style={[styles.neuralMetricValue, { color: '#00f5ff' }]}>${(stats.transferTotal || 0).toLocaleString()}</Text>
+              <Text style={styles.neuralMetricSubtitle}>Transfer payments</Text>
             </View>
             
             <View style={styles.neuralMetricCard}>
@@ -1008,6 +1077,24 @@ const EODProductionScreen = () => {
                       </View>
                     )}
                     
+                    {/* Transfer Display */}
+                    {varianceData.totalTransfer > 0 && (
+                      <View style={styles.transferDisplayRow}>
+                        <View style={styles.transferDisplayLabel}>
+                          <Icon name="swap-horiz" size={16} color="#00f5ff" />
+                          <Text style={styles.transferDisplayText}>TRANSFERS</Text>
+                        </View>
+                        <View style={styles.transferDisplayValues}>
+                          <Text style={styles.transferExpected}>Expected: ${varianceData.totalTransfer.toFixed(2)}</Text>
+                          {verified && (verified.transfer_usd || verified.transfer_zig || verified.transfer_rand) && (
+                            <Text style={styles.transferActual}>
+                              Actual: ${(varianceData.breakdown.transfers.actual || 0).toFixed(2)}
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                    )}
+                    
                     {/* Currency breakdown */}
                     <View style={styles.currencyRow}>
                       <View style={styles.currencyItem}>
@@ -1036,6 +1123,30 @@ const EODProductionScreen = () => {
                       </View>
                     </View>
                     
+                    {/* Transfer breakdown */}
+                    {varianceData.totalTransfer > 0 && (
+                      <View style={styles.transferCurrencyRow}>
+                        <View style={styles.transferCurrencyItem}>
+                          <Text style={styles.transferCurrencyLabel}>TRANSFER USD</Text>
+                          <Text style={styles.transferCurrencyValue}>
+                            {varianceData.breakdown.transfers.usd.actual > 0 ? varianceData.breakdown.transfers.usd.actual.toFixed(2) : '—'}
+                          </Text>
+                        </View>
+                        <View style={styles.transferCurrencyItem}>
+                          <Text style={[styles.transferCurrencyLabel, { color: '#ffffff' }]}>TRANSFER ZW$</Text>
+                          <Text style={[styles.transferCurrencyValue, { color: '#ffffff' }]}>
+                            {varianceData.breakdown.transfers.zig.actual > 0 ? varianceData.breakdown.transfers.zig.actual.toFixed(2) : '—'}
+                          </Text>
+                        </View>
+                        <View style={styles.transferCurrencyItem}>
+                          <Text style={[styles.transferCurrencyLabel, { color: '#ffaa00' }]}>TRANSFER R</Text>
+                          <Text style={[styles.transferCurrencyValue, { color: '#ffaa00' }]}>
+                            {varianceData.breakdown.transfers.rand.actual > 0 ? varianceData.breakdown.transfers.rand.actual.toFixed(2) : '—'}
+                          </Text>
+                        </View>
+                      </View>
+                    )}
+                    
                     <View style={styles.neuralCashierLine} />
                   </TouchableOpacity>
                 );
@@ -1058,6 +1169,11 @@ const EODProductionScreen = () => {
               <View style={styles.neuralSummaryItem}>
                 <Text style={styles.neuralSummaryLabel}>TOTAL VERIFIED</Text>
                 <Text style={[styles.neuralSummaryValue, { color: '#00ff88' }]}>${(stats.actual || 0).toFixed(2)}</Text>
+              </View>
+              <View style={styles.neuralSummaryDivider} />
+              <View style={styles.neuralSummaryItem}>
+                <Text style={styles.neuralSummaryLabel}>TRANSFERS</Text>
+                <Text style={[styles.neuralSummaryValue, { color: '#00f5ff' }]}>${(stats.transferTotal || 0).toFixed(2)}</Text>
               </View>
               <View style={styles.neuralSummaryDivider} />
               <View style={styles.neuralSummaryItem}>
@@ -1214,6 +1330,53 @@ const EODProductionScreen = () => {
                   keyboardType="decimal-pad"
                   value={inputs.card}
                   onChangeText={v => setInputs({ ...inputs, card: v })}
+                  placeholder="0.00"
+                  placeholderTextColor="#6b7280"
+                />
+              </View>
+            </View>
+
+            {/* Transfer Payments Section */}
+            <View style={styles.modalSectionHeader}>
+              <Icon name="swap-horiz" size={24} color="#00f5ff" />
+              <Text style={styles.modalSectionTitle}>💸 Transfer Payments</Text>
+            </View>
+            
+            <View style={styles.modalCurrencyGrid}>
+              <View style={styles.modalCurrencyCard}>
+                <Icon name="attach-money" size={28} color="#00f5ff" />
+                <Text style={styles.modalCurrencyLabel}>Transfer USD</Text>
+                <TextInput
+                  style={styles.modalAmountInput}
+                  keyboardType="decimal-pad"
+                  value={inputs.transfer_usd}
+                  onChangeText={v => setInputs({ ...inputs, transfer_usd: v })}
+                  placeholder="0.00"
+                  placeholderTextColor="#6b7280"
+                />
+              </View>
+              
+              <View style={styles.modalCurrencyCard}>
+                <Icon name="attach-money" size={28} color="#ffffff" />
+                <Text style={styles.modalCurrencyLabel}>Transfer ZW$</Text>
+                <TextInput
+                  style={styles.modalAmountInput}
+                  keyboardType="decimal-pad"
+                  value={inputs.transfer_zig}
+                  onChangeText={v => setInputs({ ...inputs, transfer_zig: v })}
+                  placeholder="0.00"
+                  placeholderTextColor="#6b7280"
+                />
+              </View>
+              
+              <View style={styles.modalCurrencyCard}>
+                <Icon name="attach-money" size={28} color="#ffaa00" />
+                <Text style={styles.modalCurrencyLabel}>Transfer Rand</Text>
+                <TextInput
+                  style={styles.modalAmountInput}
+                  keyboardType="decimal-pad"
+                  value={inputs.transfer_rand}
+                  onChangeText={v => setInputs({ ...inputs, transfer_rand: v })}
                   placeholder="0.00"
                   placeholderTextColor="#6b7280"
                 />
@@ -1927,6 +2090,34 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#ffffff',
   },
+  
+  // Transfer Currency Row Styles
+  transferCurrencyRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0, 245, 255, 0.2)',
+  },
+  transferCurrencyItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  transferCurrencyLabel: {
+    fontSize: 9,
+    color: '#00f5ff',
+    fontWeight: 'bold',
+    letterSpacing: 1,
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  transferCurrencyValue: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#00f5ff',
+    textAlign: 'center',
+  },
   neuralCashierLine: {
     height: 1,
     backgroundColor: '#ffaa00',
@@ -1949,6 +2140,46 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: 'bold',
     marginLeft: 6,
+  },
+  
+  // Transfer Display Styles
+  transferDisplayRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(0, 245, 255, 0.1)',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 245, 255, 0.3)',
+  },
+  transferDisplayLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  transferDisplayText: {
+    color: '#00f5ff',
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginLeft: 8,
+    letterSpacing: 1,
+  },
+  transferDisplayValues: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  transferExpected: {
+    color: '#ffaa00',
+    fontSize: 12,
+    fontWeight: '600',
+    marginRight: 12,
+  },
+  transferActual: {
+    color: '#00ff88',
+    fontSize: 12,
+    fontWeight: '600',
   },
   neuralSummaryCard: {
     backgroundColor: 'rgba(255, 170, 0, 0.05)',
