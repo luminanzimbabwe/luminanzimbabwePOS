@@ -1168,26 +1168,27 @@ const OwnerDashboardScreen = () => {
         
         {/* System Status Indicators */}
         <View style={styles.systemStatusPanel}>
-          <View style={styles.statusIndicator}>
-            <View style={styles.statusPulse} />
-            <Text style={styles.statusText}>NEURAL INTERFACE: ONLINE</Text>
-            <Icon name="wifi" size={16} color="#00ff88" />
+          <View style={styles.neuralStatusIndicator}>
+            <View style={styles.neuralStatusPulse} />
+            <View style={styles.neuralStatusGlow} />
+            <Text style={styles.neuralStatusText}>NEURAL INTERFACE: ONLINE</Text>
+            <Icon name="wifi" size={16} color="#00ff88" style={styles.neuralWifiIcon} />
           </View>
           
           <View style={styles.performanceMetrics}>
             <View style={styles.metricUnit}>
               <Text style={styles.metricLabel}>OPERATIONAL</Text>
-              <Text style={styles.metricValue}>98.7%</Text>
+              <Text style={[styles.metricValue, { color: '#00ff88' }]}>98.7%</Text>
             </View>
             <View style={styles.metricDivider} />
             <View style={styles.metricUnit}>
               <Text style={styles.metricLabel}>EFFICIENCY</Text>
-              <Text style={styles.metricValue}>MAX</Text>
+              <Text style={[styles.metricValue, { color: '#00f5ff' }]}>MAX</Text>
             </View>
             <View style={styles.metricDivider} />
             <View style={styles.metricUnit}>
               <Text style={styles.metricLabel}>STATUS</Text>
-              <Text style={styles.metricValue}>ACTIVE</Text>
+              <Text style={[styles.metricValue, { color: '#ffaa00' }]}>ACTIVE</Text>
             </View>
           </View>
         </View>
@@ -2353,9 +2354,53 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 255, 136, 0.1)',
     borderRadius: 12,
     padding: 16,
-    borderWidth: 1,
+    borderWidth: 2,
     borderColor: '#00ff88',
     marginBottom: 20,
+    shadowColor: '#00ff88',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+  },
+  neuralStatusIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    position: 'relative',
+  },
+  neuralStatusPulse: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#00ff88',
+    marginRight: 12,
+    shadowColor: '#00ff88',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 12,
+  },
+  neuralStatusGlow: {
+    position: 'absolute',
+    left: 4,
+    top: 4,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: 'rgba(0, 255, 136, 0.5)',
+  },
+  neuralStatusText: {
+    color: '#00ff88',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginRight: 12,
+    letterSpacing: 2,
+    textShadowColor: '#00ff88',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
+  },
+  neuralWifiIcon: {
+    marginLeft: 4,
   },
   statusIndicator: {
     flexDirection: 'row',
