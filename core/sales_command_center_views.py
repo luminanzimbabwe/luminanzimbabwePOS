@@ -12,7 +12,7 @@ import json
 
 from .models import (
     ShopConfiguration, Cashier, Product, Sale, SaleItem, Customer, 
-    StockTransfer, Waste, WasteBatch, InventoryLog, StockMovement, Shift
+    StockTransfer, Waste, WasteBatch, InventoryLog, StockMovement, Shift, ShopDay
 )
 from .serializers import SaleSerializer, ProductSerializer
 
@@ -822,17 +822,27 @@ class EODReconciliationView(APIView):
         # Get today's date
         today = timezone.now().date()
         
+        # Get current open shop_day (for session-aware filtering)
+        current_shop_day = ShopDay.get_open_shop_day(shop)
+        
         # Get all shifts for today
         today_shifts = Shift.objects.filter(
             shop=shop,
             start_time__date=today
         ).select_related('cashier')
         
-        # Get all sales for today (including refunded for refund calculations)
-        today_sales = Sale.objects.filter(
-            shop=shop,
-            created_at__date=today
-        )
+        # Get all sales for today using shop_day and opened_at for session-aware filtering
+        if current_shop_day:
+            # Filter by shop_day AND by created_at >= opened_at to ensure we only get sales from THIS session
+            # This handles the case where shop was closed and reopened on the same day
+            today_sales = Sale.objects.filter(
+                shop=shop, 
+                shop_day=current_shop_day,
+                created_at__gte=current_shop_day.opened_at
+            )
+        else:
+            # Fallback: no open shop day, use today's date
+            today_sales = Sale.objects.filter(shop=shop, created_at__date=today)
         
         # Calculate refund totals by payment method
         refunded_sales = today_sales.filter(status='refunded')
@@ -1029,7 +1039,7 @@ class EODReconciliationView(APIView):
                     total_card_refunds += float(cashier_refund_data['card_refunds'])
                     total_ecocash_refunds += float(cashier_refund_data['ecocash_refunds'])
         
-        # Calculate overall totals
+        # Calculate overall totals by payment method
         gross_cash_sales = completed_sales.filter(payment_method='cash').aggregate(
             total=Sum('total_amount')
         )['total'] or 0
@@ -1044,6 +1054,74 @@ class EODReconciliationView(APIView):
         net_cash_sales = float(gross_cash_sales) - float(cash_refunds)
         net_card_sales = float(gross_card_sales) - float(card_refunds)
         net_ecocash_sales = float(gross_ecocash_sales) - float(ecocash_refunds)
+        
+        # Calculate sales by currency (multi-currency support)
+        # USD sales
+        usd_cash_sales = completed_sales.filter(payment_currency='USD', payment_method='cash').aggregate(
+            total=Sum('total_amount')
+        )['total'] or 0
+        usd_card_sales = completed_sales.filter(payment_currency='USD', payment_method='card').aggregate(
+            total=Sum('total_amount')
+        )['total'] or 0
+        usd_ecocash_sales = completed_sales.filter(payment_currency='USD', payment_method='ecocash').aggregate(
+            total=Sum('total_amount')
+        )['total'] or 0
+        usd_transfer_sales = completed_sales.filter(payment_currency='USD', payment_method='transfer').aggregate(
+            total=Sum('total_amount')
+        )['total'] or 0
+        
+        # ZIG sales
+        zig_cash_sales = completed_sales.filter(payment_currency='ZIG', payment_method='cash').aggregate(
+            total=Sum('total_amount')
+        )['total'] or 0
+        zig_card_sales = completed_sales.filter(payment_currency='ZIG', payment_method='card').aggregate(
+            total=Sum('total_amount')
+        )['total'] or 0
+        zig_ecocash_sales = completed_sales.filter(payment_currency='ZIG', payment_method='ecocash').aggregate(
+            total=Sum('total_amount')
+        )['total'] or 0
+        zig_transfer_sales = completed_sales.filter(payment_currency='ZIG', payment_method='transfer').aggregate(
+            total=Sum('total_amount')
+        )['total'] or 0
+        
+        # RAND sales
+        rand_cash_sales = completed_sales.filter(payment_currency='RAND', payment_method='cash').aggregate(
+            total=Sum('total_amount')
+        )['total'] or 0
+        rand_card_sales = completed_sales.filter(payment_currency='RAND', payment_method='card').aggregate(
+            total=Sum('total_amount')
+        )['total'] or 0
+        rand_ecocash_sales = completed_sales.filter(payment_currency='RAND', payment_method='ecocash').aggregate(
+            total=Sum('total_amount')
+        )['total'] or 0
+        rand_transfer_sales = completed_sales.filter(payment_currency='RAND', payment_method='transfer').aggregate(
+            total=Sum('total_amount')
+        )['total'] or 0
+        
+        # Build sales_by_currency breakdown
+        sales_by_currency = {
+            'usd': {
+                'cash_sales': float(usd_cash_sales),
+                'card_sales': float(usd_card_sales),
+                'ecocash_sales': float(usd_ecocash_sales),
+                'transfer_sales': float(usd_transfer_sales),
+                'total_sales': float(usd_cash_sales + usd_card_sales + usd_ecocash_sales + usd_transfer_sales)
+            },
+            'zig': {
+                'cash_sales': float(zig_cash_sales),
+                'card_sales': float(zig_card_sales),
+                'ecocash_sales': float(zig_ecocash_sales),
+                'transfer_sales': float(zig_transfer_sales),
+                'total_sales': float(zig_cash_sales + zig_card_sales + zig_ecocash_sales + zig_transfer_sales)
+            },
+            'rand': {
+                'cash_sales': float(rand_cash_sales),
+                'card_sales': float(rand_card_sales),
+                'ecocash_sales': float(rand_ecocash_sales),
+                'transfer_sales': float(rand_transfer_sales),
+                'total_sales': float(rand_cash_sales + rand_card_sales + rand_ecocash_sales + rand_transfer_sales)
+            }
+        }
         
         reconciliation_data['overall_summary'] = {
             'total_transactions': total_sales,
@@ -1070,6 +1148,9 @@ class EODReconciliationView(APIView):
             'total_refunds': float(cash_refunds + card_refunds + ecocash_refunds),
             'net_total': float(net_cash_sales + net_card_sales + net_ecocash_sales)
         }
+        
+        # Add multi-currency breakdown to response
+        reconciliation_data['sales_by_currency'] = sales_by_currency
         
         reconciliation_data['expected_cash'] = {
             'opening_float': sum(float(shift.opening_balance) for shift in today_shifts),

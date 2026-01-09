@@ -76,6 +76,7 @@ class LicenseValidationMiddleware:
             '/api/v1/license/activate/',
             '/api/v1/license/status/',
             '/api/v1/license/renew/',
+            '/api/v1/shop/delete-today-sales/',  # No auth required - owner-only endpoint
             '/static/',
             '/media/',
             '/admin/',

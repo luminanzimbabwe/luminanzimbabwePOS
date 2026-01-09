@@ -324,16 +324,45 @@ class EODReconciliationEnhancedView(APIView):
         total_actual_card = sum(count.total_card for count in cashier_counts)
         total_actual_ecocash = sum(count.total_ecocash for count in cashier_counts)
         
-        # Calculate expected totals from original data
-        expected_cash = original_data.get('sales_summary', {}).get('net_cash_sales', 0)
-        expected_card = original_data.get('sales_summary', {}).get('net_card_sales', 0)
-        expected_ecocash = original_data.get('sales_summary', {}).get('net_ecocash_sales', 0)
+        # Calculate expected totals from original data with multi-currency support
+        # Get sales by currency from original data
+        sales_summary = original_data.get('sales_summary', {})
+        sales_by_currency = original_data.get('sales_by_currency', {})
         
-        # Calculate variances
+        # Calculate expected amounts for each currency
+        # ZIG expected cash (from original cash_sales)
+        expected_cash_zig = float(sales_summary.get('cash_sales', 0))
+        expected_card_zig = float(sales_summary.get('card_sales', 0))
+        expected_ecocash_zig = float(sales_summary.get('ecocash_sales', 0))
+        
+        # USD expected amounts (from multi-currency sales)
+        expected_cash_usd = float(sales_by_currency.get('usd', {}).get('cash_sales', 0))
+        expected_card_usd = float(sales_by_currency.get('usd', {}).get('card_sales', 0))
+        expected_ecocash_usd = float(sales_by_currency.get('usd', {}).get('ecocash_sales', 0))
+        
+        # RAND expected amounts
+        expected_cash_rand = float(sales_by_currency.get('rand', {}).get('cash_sales', 0))
+        expected_card_rand = float(sales_by_currency.get('rand', {}).get('card_sales', 0))
+        expected_ecocash_rand = float(sales_by_currency.get('rand', {}).get('ecocash_sales', 0))
+        
+        # Total expected cash across all currencies (for the variance calculation)
+        # This is the CRITICAL FIX: sum all currency expected cash
+        expected_cash_total = expected_cash_usd + expected_cash_zig + expected_cash_rand
+        expected_card_total = expected_card_usd + expected_card_zig + expected_card_rand
+        expected_ecocash_total = expected_ecocash_usd + expected_ecocash_zig + expected_ecocash_rand
+        
+        # Legacy expected amounts (using totals across all currencies)
+        expected_cash = expected_cash_total
+        expected_card = expected_card_total
+        expected_ecocash = expected_ecocash_total
+        
+        # Calculate variances per currency
         cash_variance = total_actual_cash - Decimal(str(expected_cash))
         card_variance = total_actual_card - Decimal(str(expected_card))
         ecocash_variance = total_actual_ecocash - Decimal(str(expected_ecocash))
-        total_variance = cash_variance + card_variance + ecocash_variance
+        
+        # Total variance (all currencies combined)
+        total_variance = (total_actual_cash + total_actual_card + total_actual_ecocash) - Decimal(str(expected_cash + expected_card + expected_ecocash))
         
         # Enhanced reconciliation data
         enhanced_data = {
@@ -350,7 +379,28 @@ class EODReconciliationEnhancedView(APIView):
                 'cash': expected_cash,
                 'card': expected_card,
                 'ecocash': expected_ecocash,
-                'total': expected_cash + expected_card + expected_ecocash
+                'total': expected_cash + expected_card + expected_ecocash,
+                # Multi-currency breakdown
+                'by_currency': {
+                    'usd': {
+                        'expected_cash': expected_cash_usd,
+                        'expected_card': expected_card_usd,
+                        'expected_ecocash': expected_ecocash_usd,
+                        'expected_total': expected_cash_usd + expected_card_usd + expected_ecocash_usd
+                    },
+                    'zig': {
+                        'expected_cash': expected_cash_zig,
+                        'expected_card': expected_card_zig,
+                        'expected_ecocash': expected_ecocash_zig,
+                        'expected_total': expected_cash_zig + expected_card_zig + expected_ecocash_zig
+                    },
+                    'rand': {
+                        'expected_cash': expected_cash_rand,
+                        'expected_card': expected_card_rand,
+                        'expected_ecocash': expected_ecocash_rand,
+                        'expected_total': expected_cash_rand + expected_card_rand + expected_ecocash_rand
+                    }
+                }
             },
             'variances': {
                 'cash': float(cash_variance),

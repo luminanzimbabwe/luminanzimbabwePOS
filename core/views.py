@@ -496,9 +496,25 @@ class BulkProductView(APIView):
 class SaleListView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
+    
     def get(self, request):
+        """Get sales for the current shop day only - returns empty if shop is closed"""
         shop = ShopConfiguration.objects.get()
-        sales = Sale.objects.filter(shop=shop).order_by('-created_at')
+        
+        # Get current shop day - only return sales if shop is open
+        current_shop_day = ShopDay.get_open_shop_day(shop)
+        
+        if not current_shop_day:
+            # Shop is not open - return empty list for new day
+            return Response([])
+        
+        # Only return sales for the current shop day
+        sales = Sale.objects.filter(
+            shop=shop, 
+            shop_day=current_shop_day,
+            status='completed'
+        ).order_by('-created_at')
+        
         serializer = SaleSerializer(sales, many=True)
         return Response(serializer.data)
 
@@ -1647,11 +1663,75 @@ class OwnerDashboardView(APIView):
         week_ago = today - timedelta(days=7)
         month_ago = today - timedelta(days=30)
 
-        # Sales Data
-        today_sales = Sale.objects.filter(shop=shop, created_at__date=today, status='completed')
-        yesterday_sales = Sale.objects.filter(shop=shop, created_at__date=yesterday, status='completed')
-        week_sales = Sale.objects.filter(shop=shop, created_at__date__gte=week_ago, status='completed')
-        month_sales = Sale.objects.filter(shop=shop, created_at__date__gte=month_ago, status='completed')
+        # Get current open shop_day (for session-aware filtering)
+        current_shop_day = ShopDay.get_open_shop_day(shop)
+        
+        # Get yesterday's closed shop_day
+        yesterday_shop_day = ShopDay.objects.filter(
+            shop=shop,
+            date=yesterday,
+            status='CLOSED'
+        ).first()
+        
+        # Get this week's shop_days (closed ones for historical data)
+        week_shop_days = ShopDay.objects.filter(
+            shop=shop,
+            date__gte=week_ago,
+            date__lte=today,
+            status='CLOSED'
+        )
+        
+        # Get last week's shop_days for comparison
+        last_week_start = week_ago - timedelta(days=7)
+        last_week_shop_days = ShopDay.objects.filter(
+            shop=shop,
+            date__gte=last_week_start,
+            date__lt=week_ago,
+            status='CLOSED'
+        )
+        
+        # Get this month's shop_days
+        month_shop_days = ShopDay.objects.filter(
+            shop=shop,
+            date__gte=month_ago,
+            date__lte=today,
+            status='CLOSED'
+        )
+        
+        # Get last month's shop_days for comparison
+        last_month_start = month_ago - timedelta(days=30)
+        last_month_shop_days = ShopDay.objects.filter(
+            shop=shop,
+            date__gte=last_month_start,
+            date__lt=month_ago,
+            status='CLOSED'
+        )
+
+        # Sales Data - use shop_day for session-aware filtering
+        if current_shop_day:
+            today_sales = Sale.objects.filter(shop=shop, shop_day=current_shop_day, status='completed')
+        else:
+            # Fallback: no open shop day, use today's date as fallback
+            today_sales = Sale.objects.filter(shop=shop, created_at__date=today, status='completed')
+        
+        if yesterday_shop_day:
+            yesterday_sales = Sale.objects.filter(shop=shop, shop_day=yesterday_shop_day, status='completed')
+        else:
+            # Fallback: use yesterday's date
+            yesterday_sales = Sale.objects.filter(shop=shop, created_at__date=yesterday, status='completed')
+        
+        # For week/month comparisons, use shop_days if available, otherwise fall back to date
+        week_shop_day_ids = list(week_shop_days.values_list('id', flat=True))
+        if week_shop_day_ids:
+            week_sales = Sale.objects.filter(shop=shop, shop_day_id__in=week_shop_day_ids, status='completed')
+        else:
+            week_sales = Sale.objects.filter(shop=shop, created_at__date__gte=week_ago, status='completed')
+        
+        month_shop_day_ids = list(month_shop_days.values_list('id', flat=True))
+        if month_shop_day_ids:
+            month_sales = Sale.objects.filter(shop=shop, shop_day_id__in=month_shop_day_ids, status='completed')
+        else:
+            month_sales = Sale.objects.filter(shop=shop, created_at__date__gte=month_ago, status='completed')
 
         # Calculate sales metrics
         today_revenue = today_sales.aggregate(total=Sum('total_amount'))['total'] or 0
@@ -1665,22 +1745,36 @@ class OwnerDashboardView(APIView):
 
         week_revenue = week_sales.aggregate(total=Sum('total_amount'))['total'] or 0
         week_orders = week_sales.count()
-        prev_week_revenue = Sale.objects.filter(
-            shop=shop, 
-            created_at__date__gte=week_ago - timedelta(days=7), 
-            created_at__date__lt=week_ago, 
-            status='completed'
-        ).aggregate(total=Sum('total_amount'))['total'] or 0
+        
+        # Previous week comparison
+        last_week_shop_day_ids = list(last_week_shop_days.values_list('id', flat=True))
+        if last_week_shop_day_ids:
+            prev_week_sales = Sale.objects.filter(shop=shop, shop_day_id__in=last_week_shop_day_ids, status='completed')
+        else:
+            prev_week_sales = Sale.objects.filter(
+                shop=shop, 
+                created_at__date__gte=last_week_start, 
+                created_at__date__lt=week_ago, 
+                status='completed'
+            )
+        prev_week_revenue = prev_week_sales.aggregate(total=Sum('total_amount'))['total'] or 0
         week_growth = ((week_revenue - prev_week_revenue) / max(prev_week_revenue, 1)) * 100 if prev_week_revenue > 0 else 0
 
         month_revenue = month_sales.aggregate(total=Sum('total_amount'))['total'] or 0
         month_orders = month_sales.count()
-        prev_month_revenue = Sale.objects.filter(
-            shop=shop, 
-            created_at__date__gte=month_ago - timedelta(days=30), 
-            created_at__date__lt=month_ago, 
-            status='completed'
-        ).aggregate(total=Sum('total_amount'))['total'] or 0
+        
+        # Previous month comparison
+        last_month_shop_day_ids = list(last_month_shop_days.values_list('id', flat=True))
+        if last_month_shop_day_ids:
+            prev_month_sales = Sale.objects.filter(shop=shop, shop_day_id__in=last_month_shop_day_ids, status='completed')
+        else:
+            prev_month_sales = Sale.objects.filter(
+                shop=shop, 
+                created_at__date__gte=last_month_start, 
+                created_at__date__lt=month_ago, 
+                status='completed'
+            )
+        prev_month_revenue = prev_month_sales.aggregate(total=Sum('total_amount'))['total'] or 0
         month_growth = ((month_revenue - prev_month_revenue) / max(prev_month_revenue, 1)) * 100 if prev_month_revenue > 0 else 0
 
         # Inventory Data
@@ -1756,13 +1850,22 @@ class OwnerDashboardView(APIView):
                 'message': 'No sales recorded today'
             })
         
-        # High value sales alert (for large transactions)
-        large_sales_today = Sale.objects.filter(
-            shop=shop,
-            created_at__date=today,
-            status='completed',
-            total_amount__gte=1000  # Alert for sales over $1000
-        ).count()
+        # High value sales alert (for large transactions) - use shop_day for session-aware filtering
+        if current_shop_day:
+            large_sales_today = Sale.objects.filter(
+                shop=shop,
+                shop_day=current_shop_day,
+                status='completed',
+                total_amount__gte=1000  # Alert for sales over $1000
+            ).count()
+        else:
+            # Fallback: no open shop day, use today's date
+            large_sales_today = Sale.objects.filter(
+                shop=shop,
+                created_at__date=today,
+                status='completed',
+                total_amount__gte=1000
+            ).count()
         
         if large_sales_today > 0:
             alerts.append({
@@ -3151,6 +3254,127 @@ class RevokeDrawerAccessView(APIView):
             return Response({
                 'error': f'Server error: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class DeleteTodaySalesView(APIView):
+    """Delete all today's sales and reset all drawers to start fresh (OWNER ONLY - no auth required)"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    
+    def post(self, request):
+        try:
+            shop = ShopConfiguration.objects.get()
+            
+            # NO AUTHENTICATION REQUIRED - allow anyone to delete today's sales
+            # The EOD screen is already protected and only accessible to authorized users
+            
+            today = timezone.now().date()
+            
+            # Get all sales for today
+            from .models import Sale, SaleItem, CashFloat, CurrencyWallet, CurrencyTransaction
+            
+            # Get unique shops and cashiers from today's sales
+            today_sales = Sale.objects.filter(created_at__date=today)
+            sale_count = today_sales.count()
+            
+            print(f"🗑️ Deleting {sale_count} sales for {today}")
+            
+            # Get unique shops and cashiers from these sales
+            shops = set()
+            cashiers = set()
+            for sale in today_sales:
+                shops.add(sale.shop)
+                cashiers.add((sale.shop, sale.cashier))
+            
+            # Delete all sales for today
+            today_sales.delete()
+            print(f"✅ Deleted {sale_count} sales")
+            
+            # Reset all CashFloat records for today to zero
+            from decimal import Decimal
+            for shop_obj, cashier in cashiers:
+                try:
+                    drawer = CashFloat.objects.get(shop=shop_obj, cashier=cashier, date=today)
+                    
+                    # Reset all currency fields to zero
+                    drawer.current_cash = Decimal('0.00')
+                    drawer.current_card = Decimal('0.00')
+                    drawer.current_ecocash = Decimal('0.00')
+                    drawer.current_transfer = Decimal('0.00')
+                    drawer.current_total = Decimal('0.00')
+                    
+                    drawer.current_cash_usd = Decimal('0.00')
+                    drawer.current_cash_zig = Decimal('0.00')
+                    drawer.current_cash_rand = Decimal('0.00')
+                    drawer.current_card_usd = Decimal('0.00')
+                    drawer.current_card_zig = Decimal('0.00')
+                    drawer.current_card_rand = Decimal('0.00')
+                    drawer.current_ecocash_usd = Decimal('0.00')
+                    drawer.current_ecocash_zig = Decimal('0.00')
+                    drawer.current_ecocash_rand = Decimal('0.00')
+                    drawer.current_transfer_usd = Decimal('0.00')
+                    drawer.current_transfer_zig = Decimal('0.00')
+                    drawer.current_transfer_rand = Decimal('0.00')
+                    drawer.current_total_usd = Decimal('0.00')
+                    drawer.current_total_zig = Decimal('0.00')
+                    drawer.current_total_rand = Decimal('0.00')
+                    
+                    drawer.session_cash_sales = Decimal('0.00')
+                    drawer.session_card_sales = Decimal('0.00')
+                    drawer.session_ecocash_sales = Decimal('0.00')
+                    drawer.session_transfer_sales = Decimal('0.00')
+                    drawer.session_total_sales = Decimal('0.00')
+                    
+                    drawer.session_cash_sales_usd = Decimal('0.00')
+                    drawer.session_cash_sales_zig = Decimal('0.00')
+                    drawer.session_cash_sales_rand = Decimal('0.00')
+                    drawer.session_card_sales_usd = Decimal('0.00')
+                    drawer.session_card_sales_zig = Decimal('0.00')
+                    drawer.session_card_sales_rand = Decimal('0.00')
+                    drawer.session_ecocash_sales_usd = Decimal('0.00')
+                    drawer.session_ecocash_sales_zig = Decimal('0.00')
+                    drawer.session_ecocash_sales_rand = Decimal('0.00')
+                    drawer.session_transfer_sales_usd = Decimal('0.00')
+                    drawer.session_transfer_sales_zig = Decimal('0.00')
+                    drawer.session_transfer_sales_rand = Decimal('0.00')
+                    drawer.session_total_sales_usd = Decimal('0.00')
+                    drawer.session_total_sales_zig = Decimal('0.00')
+                    drawer.session_total_sales_rand = Decimal('0.00')
+                    
+                    drawer.status = 'INACTIVE'
+                    drawer.save()
+                    print(f"✅ Reset drawer for {cashier.name}")
+                except CashFloat.DoesNotExist:
+                    print(f"ℹ️ No drawer found for {cashier.name}")
+            
+            # Reset CurrencyWallet balances to zero
+            wallet, created = CurrencyWallet.objects.get_or_create(shop=shop)
+            wallet.balance_usd = Decimal('0.00')
+            wallet.balance_zig = Decimal('0.00')
+            wallet.balance_rand = Decimal('0.00')
+            wallet.total_transactions = 0
+            wallet.save()
+            print("✅ Reset currency wallet balances to zero")
+            
+            # Delete currency transactions for today
+            transactions_deleted = CurrencyTransaction.objects.filter(
+                shop=shop,
+                created_at__date=today
+            ).delete()
+            print(f"✅ Deleted {transactions_deleted[0] if transactions_deleted[0] else 0} currency transactions")
+            
+            return Response({
+                "success": True,
+                "message": f"Successfully deleted {sale_count} sales and reset all drawers for today ({today})",
+                "deleted_sales": sale_count,
+                "date": str(today)
+            }, status=status.HTTP_200_OK)
+            
+        except ShopConfiguration.DoesNotExist:
+            return Response({"error": "Shop not found"}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": f"Failed to delete sales: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @method_decorator(csrf_exempt, name='dispatch')

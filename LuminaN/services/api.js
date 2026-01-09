@@ -35,7 +35,7 @@ api.interceptors.response.use(
   (error) => {
     if (!error.response) {
       // Network error (timeout, no connection, etc.)
-      const errorMessage = error.code === 'ECONNREFUSED' 
+      const errorMessage = error.code === 'ECONNABORTED' 
         ? 'Cannot connect to server. Please check if the development server is running and the IP address is correct.'
         : 'Network connection failed. Please check your internet connection and try again.';
       throw new Error(errorMessage);
@@ -53,6 +53,7 @@ export const shopAPI = {
   retrieveCredentials: (data) => api.post('/retrieve-credentials/', data),
   resetCashierPassword: (data) => api.post('/cashiers/reset-password/', data),
   getOwnerDashboard: () => api.get('/dashboard/'),
+  getShopStatus: () => api.get('/shop-status/'),
   updateShop: (data) => api.patch('/update/', data),
   
   // Staff management methods - NO AUTHENTICATION REQUIRED
@@ -212,7 +213,10 @@ export const shopAPI = {
   getSalesMetrics: (config = {}) => api.get('/sales/metrics/', config),
 
   // Enhanced EOD Reconciliation methods
-  getEnhancedReconciliation: (config = {}) => api.get('/reconciliation/enhanced/', config),
+  getEnhancedReconciliation: (cacheBuster = '') => {
+    const url = cacheBuster ? `/reconciliation/enhanced/${cacheBuster}` : '/reconciliation/enhanced/';
+    return api.get(url);
+  },
   getCashierCount: (cashierId, date, config = {}) => api.get(`/reconciliation/count/?cashier_id=${cashierId}&date=${date}`, config),
   saveCashierCount: (countData, config = {}) => api.post('/reconciliation/count/', countData, config),
   getReconciliationSession: (date, config = {}) => api.get(`/reconciliation/session/?date=${date}`, config),
@@ -261,6 +265,24 @@ export const shopAPI = {
   
   // NEW: Today's drawer endpoint - fetches ONLY today's sales for drawer display
   getCashierDrawerToday: (cashierId) => api.get(`/cash-float/drawer-today/?cashier_id=${cashierId}`),
+  
+  // NEW: Session drawer endpoint - fetches ONLY current session sales (shop open/close aware)
+  getCashierDrawerSession: (cashierId) => api.get(`/cash-float/drawer-session/?cashier_id=${cashierId}`),
+  
+  // NEW: All drawers session endpoint - fetches session-aware data for ALL cashiers (shop open/close aware)
+  getAllDrawersSession: (cacheBuster = '') => {
+    const url = cacheBuster ? `/cash-float/all-drawers-session/${cacheBuster}` : '/cash-float/all-drawers-session/';
+    return api.get(url);
+  },
+  
+  // DELETE TODAY'S SALES - Owner only endpoint to start fresh
+  deleteTodaySales: (data = {}, config = {}) => api.post('/delete-today-sales/', data, config),
 };
+
+// Export apiService as alias for shopAPI for backwards compatibility
+export const apiService = shopAPI;
+
+// Export getApiBaseUrl for use in components
+export { getApiBaseUrl };
 
 export default api;

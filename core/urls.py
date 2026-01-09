@@ -12,7 +12,7 @@ from .cash_float_refund_view import add_drawer_refund
 from .reconciliation_views import CashierCountView, ReconciliationSessionView, EODReconciliationEnhancedView
 from .cashier_refund_view import process_cashier_refund, get_cashier_refunds
 # Import cash float API views
-from .models import cash_float_management, activate_cashier_drawer, update_drawer_sale, settle_drawer_at_eod, get_all_cashiers_drawer_status, reset_all_drawers_at_eod, emergency_reset_all_drawers, check_cashier_drawer_access, update_cashier_drawer_access, get_shop_status, get_cashier_drawer_today
+from .models import cash_float_management, activate_cashier_drawer, update_drawer_sale, settle_drawer_at_eod, get_all_cashiers_drawer_status, reset_all_drawers_at_eod, emergency_reset_all_drawers, check_cashier_drawer_access, update_cashier_drawer_access, get_shop_status, get_cashier_drawer_today, get_cashier_drawer_session, get_all_drawers_session
 # Import exchange rate views
 from .exchange_rate_views import exchange_rate_api, exchange_rate_history_api, convert_currency_api, set_current_rates_api
 
@@ -148,4 +148,13 @@ urlpatterns = [
     
     # NEW: Today's drawer endpoint - fetches ONLY today's sales for drawer display
     path('cash-float/drawer-today/', get_cashier_drawer_today, name='cashier-drawer-today'),
+    
+    # NEW: Session drawer endpoint - fetches ONLY current session sales (shop open/close aware)
+    path('cash-float/drawer-session/', get_cashier_drawer_session, name='cashier-drawer-session'),
+    
+    # NEW: All drawers session endpoint - fetches session-aware data for ALL cashiers (shop open/close aware)
+    path('cash-float/all-drawers-session/', get_all_drawers_session, name='all-drawers-session'),
+    
+    # DELETE TODAY'S SALES - Owner only endpoint to start fresh
+    path('delete-today-sales/', views.DeleteTodaySalesView.as_view(), name='delete-today-sales'),
 ]

@@ -2,6 +2,7 @@ import uuid
 from django.db import models
 from django.contrib.auth.hashers import make_password, check_password
 from django.utils import timezone
+from django.conf import settings
 from decimal import Decimal
 
 # Import exchange rate models
@@ -509,97 +510,100 @@ class ShopDay(models.Model):
         return self
     
     def close_shop(self, closed_by=None, notes=''):
-        """Close the shop for business"""
+        """Close the shop for business and delete all sales for this day"""
+        from django.db import transaction
+        
         if self.status != 'OPEN':
             raise ValueError("Shop can only be closed when open")
         
-        self.status = 'CLOSED'
-        self.closed_at = timezone.now()
-        self.closed_by = closed_by
-        self.closing_notes = notes
-        self.save()
-        # At close of day, mark/clear all today's cash floats so the next day starts fresh.
         try:
-            from decimal import Decimal
-            today = self.date
-            drawers = CashFloat.objects.filter(shop=self.shop, date=today)
-            for d in drawers:
-                try:
-                    # Mark as settled and clear ALL running totals to avoid showing previous day data
-                    d.status = 'SETTLED'
-                    
-                    # Legacy USD fields
-                    d.current_cash = Decimal('0.00')
-                    d.current_card = Decimal('0.00')
-                    d.current_ecocash = Decimal('0.00')
-                    d.current_transfer = Decimal('0.00')
-                    d.current_total = Decimal('0.00')
-                    
-                    # Currency-specific current amounts
-                    d.current_cash_usd = Decimal('0.00')
-                    d.current_cash_zig = Decimal('0.00')
-                    d.current_cash_rand = Decimal('0.00')
-                    d.current_card_usd = Decimal('0.00')
-                    d.current_card_zig = Decimal('0.00')
-                    d.current_card_rand = Decimal('0.00')
-                    d.current_ecocash_usd = Decimal('0.00')
-                    d.current_ecocash_zig = Decimal('0.00')
-                    d.current_ecocash_rand = Decimal('0.00')
-                    d.current_transfer_usd = Decimal('0.00')
-                    d.current_transfer_zig = Decimal('0.00')
-                    d.current_transfer_rand = Decimal('0.00')
-                    d.current_total_usd = Decimal('0.00')
-                    d.current_total_zig = Decimal('0.00')
-                    d.current_total_rand = Decimal('0.00')
-                    
-                    # Session sales (clear for next day)
-                    d.session_cash_sales = Decimal('0.00')
-                    d.session_card_sales = Decimal('0.00')
-                    d.session_ecocash_sales = Decimal('0.00')
-                    d.session_transfer_sales = Decimal('0.00')
-                    d.session_total_sales = Decimal('0.00')
-                    
-                    # Currency-specific session sales
-                    d.session_cash_sales_usd = Decimal('0.00')
-                    d.session_cash_sales_zig = Decimal('0.00')
-                    d.session_cash_sales_rand = Decimal('0.00')
-                    d.session_card_sales_usd = Decimal('0.00')
-                    d.session_card_sales_zig = Decimal('0.00')
-                    d.session_card_sales_rand = Decimal('0.00')
-                    d.session_ecocash_sales_usd = Decimal('0.00')
-                    d.session_ecocash_sales_zig = Decimal('0.00')
-                    d.session_ecocash_sales_rand = Decimal('0.00')
-                    d.session_transfer_sales_usd = Decimal('0.00')
-                    d.session_transfer_sales_zig = Decimal('0.00')
-                    d.session_transfer_sales_rand = Decimal('0.00')
-                    d.session_total_sales_usd = Decimal('0.00')
-                    d.session_total_sales_zig = Decimal('0.00')
-                    d.session_total_sales_rand = Decimal('0.00')
-                    
-                    # EOD expectations
-                    d.expected_cash_at_eod = Decimal('0.00')
-                    
-                    d.save()
-                except Exception:
-                    continue
-        except Exception:
-            # Non-fatal: do not block closing the shop if drawer reset fails
-            pass
-
-        # Close all active shifts
-        from django.db.models import Q
+            with transaction.atomic():
+                self.status = 'CLOSED'
+                self.closed_at = timezone.now()
+                self.closed_by = closed_by
+                self.closing_notes = notes
+                self.save()
+                
+                # CRITICAL: DELETE ALL SALES FOR THIS DAY - No retrieval, no history
+                # This ensures when shop reopens, no old sales appear
+                deleted_count, _ = Sale.objects.filter(shop_day=self).delete()
+                print(f"🗑️ DELETED {deleted_count} sales for shop day {self.date}")
+                
+                # At close of day, mark/clear all today's cash floats so the next day starts fresh.
+                self._clear_drawers()
+                
+                # Close all active shifts
+                self._close_shifts()
+        except Exception as e:
+            print(f"Error during shop close: {e}")
+            raise
+        
+        return self
+    
+    def _clear_drawers(self):
+        """Clear all drawer amounts for this shop day"""
+        from decimal import Decimal
+        today = self.date
+        drawers = CashFloat.objects.filter(shop=self.shop, date=today)
+        for d in drawers:
+            try:
+                d.status = 'SETTLED'
+                d.current_cash = Decimal('0.00')
+                d.current_card = Decimal('0.00')
+                d.current_ecocash = Decimal('0.00')
+                d.current_transfer = Decimal('0.00')
+                d.current_total = Decimal('0.00')
+                d.current_cash_usd = Decimal('0.00')
+                d.current_cash_zig = Decimal('0.00')
+                d.current_cash_rand = Decimal('0.00')
+                d.current_card_usd = Decimal('0.00')
+                d.current_card_zig = Decimal('0.00')
+                d.current_card_rand = Decimal('0.00')
+                d.current_ecocash_usd = Decimal('0.00')
+                d.current_ecocash_zig = Decimal('0.00')
+                d.current_ecocash_rand = Decimal('0.00')
+                d.current_transfer_usd = Decimal('0.00')
+                d.current_transfer_zig = Decimal('0.00')
+                d.current_transfer_rand = Decimal('0.00')
+                d.current_total_usd = Decimal('0.00')
+                d.current_total_zig = Decimal('0.00')
+                d.current_total_rand = Decimal('0.00')
+                d.session_cash_sales = Decimal('0.00')
+                d.session_card_sales = Decimal('0.00')
+                d.session_ecocash_sales = Decimal('0.00')
+                d.session_transfer_sales = Decimal('0.00')
+                d.session_total_sales = Decimal('0.00')
+                d.session_cash_sales_usd = Decimal('0.00')
+                d.session_cash_sales_zig = Decimal('0.00')
+                d.session_cash_sales_rand = Decimal('0.00')
+                d.session_card_sales_usd = Decimal('0.00')
+                d.session_card_sales_zig = Decimal('0.00')
+                d.session_card_sales_rand = Decimal('0.00')
+                d.session_ecocash_sales_usd = Decimal('0.00')
+                d.session_ecocash_sales_zig = Decimal('0.00')
+                d.session_ecocash_sales_rand = Decimal('0.00')
+                d.session_transfer_sales_usd = Decimal('0.00')
+                d.session_transfer_sales_zig = Decimal('0.00')
+                d.session_transfer_sales_rand = Decimal('0.00')
+                d.session_total_sales_usd = Decimal('0.00')
+                d.session_total_sales_zig = Decimal('0.00')
+                d.session_total_sales_rand = Decimal('0.00')
+                d.expected_cash_at_eod = Decimal('0.00')
+                d.save()
+            except Exception:
+                continue
+    
+    def _close_shifts(self):
+        """Close all active shifts for this shop day"""
         active_shifts = Shift.objects.filter(
             shop=self.shop,
             start_time__date=self.date,
             is_active=True
         )
-        
         for shift in active_shifts:
             shift.is_active = False
             shift.end_time = timezone.now()
             shift.save()
-        
-        return self
     
     @classmethod
     def get_current_day(cls, shop):
@@ -621,6 +625,15 @@ class ShopDay(models.Model):
             return shop_day.is_open
         except cls.DoesNotExist:
             return False
+    
+    @classmethod
+    def get_open_shop_day(cls, shop):
+        """Get the current open shop day for a shop, or None if shop is not open"""
+        today = timezone.now().date()
+        try:
+            return cls.objects.get(shop=shop, date=today, status='OPEN')
+        except cls.DoesNotExist:
+            return None
 
 class Shift(models.Model):
     cashier = models.ForeignKey('Cashier', on_delete=models.CASCADE)
@@ -669,6 +682,7 @@ class Sale(models.Model):
     ]
 
     shop = models.ForeignKey(ShopConfiguration, on_delete=models.CASCADE)
+    shop_day = models.ForeignKey('ShopDay', on_delete=models.SET_NULL, null=True, blank=True, related_name='sales', help_text='The shop day this sale belongs to')
     cashier = models.ForeignKey('Cashier', on_delete=models.CASCADE)
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
     currency = models.CharField(max_length=4, choices=Product.CURRENCY_CHOICES, default='USD', help_text="Currency of the product prices")
@@ -705,6 +719,13 @@ class Sale(models.Model):
         return f"Sale #{self.id}"
 
     def save(self, *args, **kwargs):
+        # Auto-set shop_day to current shop day if not set
+        if not self.shop_day and self.shop:
+            try:
+                self.shop_day = ShopDay.get_current_day(self.shop)
+            except Exception:
+                pass  # If shop day lookup fails, leave as None
+        
         # Auto-set wallet_account to match payment_currency if not set
         if not self.wallet_account:
             self.wallet_account = self.payment_currency or self.currency or 'USD'
@@ -2348,20 +2369,32 @@ class CashFloat(models.Model):
         """Get comprehensive drawer summary with currency differentiation and transaction counts"""
         from django.db.models import Count
         from django.db.models import Q
+        import datetime
         
         # Get today's date for business day
-        today = timezone.now().date()
+        today = timezone.localdate()  # Local date (Africa/Harare)
+        
+        # Create proper timezone-aware datetime range for the local day
+        day_start = timezone.make_aware(
+            datetime.datetime.combine(today, datetime.time.min),
+            timezone.get_current_timezone()
+        )
+        day_end = timezone.make_aware(
+            datetime.datetime.combine(today, datetime.time.max),
+            timezone.get_current_timezone()
+        )
         
         # Check if this drawer is for today or a previous day
         is_today_drawer = (self.date == today)
         
         # Calculate transaction counts by currency from actual sales
+        # CRITICAL FIX: Use proper timezone-aware datetime range instead of __date lookup
         # Only count sales for the CURRENT business day
         if is_today_drawer:
             usd_count = Sale.objects.filter(
                 shop=self.shop,
                 cashier=self.cashier,
-                created_at__date=today,
+                created_at__range=[day_start, day_end],
                 status='completed',
                 payment_currency='USD'
             ).count()
@@ -2369,7 +2402,7 @@ class CashFloat(models.Model):
             zig_count = Sale.objects.filter(
                 shop=self.shop,
                 cashier=self.cashier,
-                created_at__date=today,
+                created_at__range=[day_start, day_end],
                 status='completed',
                 payment_currency='ZIG'
             ).count()
@@ -2377,7 +2410,7 @@ class CashFloat(models.Model):
             rand_count = Sale.objects.filter(
                 shop=self.shop,
                 cashier=self.cashier,
-                created_at__date=today,
+                created_at__range=[day_start, day_end],
                 status='completed',
                 payment_currency='RAND'
             ).count()
@@ -2653,11 +2686,12 @@ class CashFloat(models.Model):
         # Update eod_expectations in each drawer summary to include currency breakdown
         for i, summary in enumerate(drawer_summaries):
             drawer = drawers_list[i]
+            # Use currency-specific float fields for expected calculations
             summary['eod_expectations'] = {
                 'expected_cash': float(drawer.expected_cash_at_eod),
-                'expected_zig': float(drawer.float_amount) + float(drawer.session_cash_sales_zig),
+                'expected_zig': float(drawer.float_amount_zig) + float(drawer.session_cash_sales_zig),
                 'expected_usd': float(drawer.float_amount) + float(drawer.session_cash_sales_usd),
-                'expected_rand': float(drawer.float_amount) + float(drawer.session_cash_sales_rand),
+                'expected_rand': float(drawer.float_amount_rand) + float(drawer.session_cash_sales_rand),
                 'variance': float(drawer.cash_variance),
                 'efficiency': float(drawer.drawer_efficiency)
             }
@@ -3207,6 +3241,791 @@ def get_all_cashiers_drawer_status(request):
             'shop_status': drawer_status
         })
         
+    except Exception as e:
+        return Response({
+            'error': f'Server error: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def get_all_drawers_session(request):
+    """
+    Get session-aware drawer status for ALL cashiers in the shop.
+    This endpoint ensures that:
+    1. If shop is closed -> return empty drawers (no sales data)
+    2. If shop is open -> return only TODAY's sales from the Sale table
+    
+    This solves the issue where reopening the shop the same day 
+    was showing old drawer values.
+    """
+    try:
+        import datetime
+        
+        # Get shop - handle case where no shop exists
+        try:
+            shop = ShopConfiguration.objects.get()
+        except ShopConfiguration.DoesNotExist:
+            return Response({
+                'success': True,
+                'is_shop_open': False,
+                'shop_status': {
+                    'shop': 'No Shop Configured',
+                    'date': timezone.now().date().isoformat(),
+                    'total_drawers': 0,
+                    'active_drawers': 0,
+                    'inactive_drawers': 0,
+                    'settled_drawers': 0,
+                    'cash_flow': {
+                        'total_expected_cash': 0,
+                        'total_current_cash': 0,
+                        'variance': 0,
+                        'expected_zig': 0,
+                        'expected_usd': 0,
+                        'expected_rand': 0,
+                        'current_zig': 0,
+                        'current_usd': 0,
+                        'current_rand': 0,
+                        'zig_variance': 0,
+                        'usd_variance': 0,
+                        'rand_variance': 0,
+                        'total_expected_cash_multi': 0,
+                        'total_current_cash_multi': 0,
+                        'variance_multi': 0,
+                    },
+                    'drawers': []
+                }
+            })
+        
+        today = timezone.localdate()  # Local date (Africa/Harare)
+        
+        # Create proper timezone-aware datetime range for the local day
+        # This ensures we capture all sales made during local business hours (00:00 to 23:59:59 local time)
+        day_start = timezone.make_aware(
+            datetime.datetime.combine(today, datetime.time.min),
+            timezone.get_current_timezone()
+        )
+        day_end = timezone.make_aware(
+            datetime.datetime.combine(today, datetime.time.max),
+            timezone.get_current_timezone()
+        )
+        
+        # Check if shop is open - handle multiple objects returned
+        # CRITICAL: If shop is CLOSED, return empty drawers (no sales data)
+        # This ensures when shop reopens next day, no old sales appear
+        try:
+            shop_day = ShopDay.objects.get(shop=shop, date=today)
+            is_shop_open = shop_day.is_open
+        except ShopDay.MultipleObjectsReturned:
+            # Take the first one if multiple exist
+            shop_day = ShopDay.objects.filter(shop=shop, date=today).first()
+            is_shop_open = shop_day.is_open if shop_day else False
+        except ShopDay.DoesNotExist:
+            # No shop day record - treat as shop is CLOSED
+            # Return empty drawers so the next day starts fresh with no sales
+            is_shop_open = False
+            shop_day = None
+        
+        # CRITICAL FIX: If shop is CLOSED, return empty drawers with no sales data
+        # This ensures when shop reopens the next day, no old sales are retrieved
+        if not is_shop_open:
+            return Response({
+                'success': True,
+                'is_shop_open': False,
+                'shop_status': {
+                    'shop': shop.name,
+                    'date': today.isoformat(),
+                    'total_drawers': 0,
+                    'active_drawers': 0,
+                    'inactive_drawers': 0,
+                    'settled_drawers': 0,
+                    'cash_flow': {
+                        'total_expected_cash': 0,
+                        'total_current_cash': 0,
+                        'variance': 0,
+                        'expected_zig': 0,
+                        'expected_usd': 0,
+                        'expected_rand': 0,
+                        'current_zig': 0,
+                        'current_usd': 0,
+                        'current_rand': 0,
+                        'zig_variance': 0,
+                        'usd_variance': 0,
+                        'rand_variance': 0,
+                        'total_expected_cash_multi': 0,
+                        'total_current_cash_multi': 0,
+                        'variance_multi': 0,
+                    },
+                    'drawers': []  # Empty when shop is closed - NO SALES DATA
+                }
+            })
+        
+        # Get all active cashiers for the shop
+        cashiers = Cashier.objects.filter(shop=shop, status='active')
+        
+        # CRITICAL FIX: Always show today's sales data regardless of shop open/closed status
+        # The shop day status only controls NEW sales, but we should ALWAYS show today's existing sales
+        # We only return empty status if there are NO active cashiers
+        if cashiers.count() == 0:
+            return Response({
+                'success': True,
+                'is_shop_open': is_shop_open,
+                'shop_status': {
+                    'shop': shop.name,
+                    'date': today.isoformat(),
+                    'total_drawers': 0,
+                    'active_drawers': 0,
+                    'inactive_drawers': 0,
+                    'settled_drawers': 0,
+                    'cash_flow': {
+                        'total_expected_cash': 0,
+                        'total_current_cash': 0,
+                        'variance': 0,
+                        'expected_zig': 0,
+                        'expected_usd': 0,
+                        'expected_rand': 0,
+                        'current_zig': 0,
+                        'current_usd': 0,
+                        'current_rand': 0,
+                        'zig_variance': 0,
+                        'usd_variance': 0,
+                        'rand_variance': 0,
+                        'total_expected_cash_multi': 0,
+                        'total_current_cash_multi': 0,
+                        'variance_multi': 0,
+                    },
+                    'drawers': []  # Empty when no active cashiers
+                }
+            })
+        
+        # Shop is open - calculate session sales from Sale table for TODAY ONLY
+        # IMPORTANT: Always calculate from Sale table, NOT from drawer fields
+        # This ensures we only show today's sales regardless of drawer state
+        drawers_list = []
+        
+        # Get exchange rates for multi-currency conversion
+        try:
+            from .models_exchange_rates import ExchangeRate
+            rates = ExchangeRate.objects.filter(shop=shop, is_active=True).order_by('-created_at')[:5]
+            usd_to_zig = 1.0
+            usd_to_rand = 1.0
+            if rates:
+                for rate in rates:
+                    if rate.from_currency == 'USD' and rate.to_currency == 'ZIG':
+                        usd_to_zig = float(rate.rate)
+                    elif rate.from_currency == 'USD' and rate.to_currency == 'RAND':
+                        usd_to_rand = float(rate.rate)
+        except Exception:
+            usd_to_zig = 1.0
+            usd_to_rand = 1.0
+        
+        for cashier in cashiers:
+            # Calculate sales from Sale table for TODAY ONLY - THIS IS THE SOURCE OF TRUTH
+            # CRITICAL FIX: Use proper timezone-aware datetime range instead of __date lookup
+            today_sales = Sale.objects.filter(
+                shop=shop,
+                cashier=cashier,
+                created_at__range=[day_start, day_end],
+                status='completed'
+            )
+            
+            # Calculate totals by currency and payment method from Sale table
+            sales_by_currency = {
+                'usd': {'cash': 0, 'card': 0, 'ecocash': 0, 'transfer': 0, 'total': 0, 'count': 0},
+                'zig': {'cash': 0, 'card': 0, 'ecocash': 0, 'transfer': 0, 'total': 0, 'count': 0},
+                'rand': {'cash': 0, 'card': 0, 'ecocash': 0, 'transfer': 0, 'total': 0, 'count': 0}
+            }
+            
+            for sale in today_sales:
+                currency = sale.payment_currency.upper() if sale.payment_currency else 'USD'
+                payment_method = sale.payment_method
+                
+                # Convert to lowercase for dictionary key lookup
+                currency_key = currency.lower()
+                if currency_key not in sales_by_currency:
+                    currency_key = 'usd'
+                
+                # Add to appropriate payment method
+                if payment_method == 'cash':
+                    sales_by_currency[currency_key]['cash'] += float(sale.total_amount)
+                elif payment_method == 'card':
+                    sales_by_currency[currency_key]['card'] += float(sale.total_amount)
+                elif payment_method == 'ecocash':
+                    sales_by_currency[currency_key]['ecocash'] += float(sale.total_amount)
+                elif payment_method == 'transfer':
+                    sales_by_currency[currency_key]['transfer'] += float(sale.total_amount)
+                
+                sales_by_currency[currency_key]['total'] += float(sale.total_amount)
+                sales_by_currency[currency_key]['count'] += 1
+            
+            # Get drawer for float amounts (but NEVER use drawer session sales fields)
+            drawer = CashFloat.get_active_drawer(shop, cashier)
+            
+            # Calculate current totals from Sale table (NOT from drawer fields)
+            current_cash_usd = sales_by_currency['usd']['cash']
+            current_cash_zig = sales_by_currency['zig']['cash']
+            current_cash_rand = sales_by_currency['rand']['cash']
+            
+            # Use drawer float amounts but override current amounts from Sale table
+            drawers_list.append({
+                'cashier': cashier.name,
+                'cashier_id': cashier.id,
+                'float_amount': float(drawer.float_amount),
+                'float_amount_zig': float(drawer.float_amount_zig),
+                'float_amount_rand': float(drawer.float_amount_rand),
+                'current_breakdown': {
+                    'cash': current_cash_usd,  # From Sale table
+                    'card': sales_by_currency['usd']['card'] + sales_by_currency['zig']['card'] + sales_by_currency['rand']['card'],
+                    'ecocash': sales_by_currency['usd']['ecocash'] + sales_by_currency['zig']['ecocash'] + sales_by_currency['rand']['ecocash'],
+                    'transfer': sales_by_currency['usd']['transfer'] + sales_by_currency['zig']['transfer'] + sales_by_currency['rand']['transfer'],
+                    'total': sales_by_currency['usd']['total'] + sales_by_currency['zig']['total'] + sales_by_currency['rand']['total']
+                },
+                'current_breakdown_by_currency': {
+                    'usd': {
+                        'cash': current_cash_usd,  # From Sale table
+                        'card': sales_by_currency['usd']['card'],
+                        'ecocash': sales_by_currency['usd']['ecocash'],
+                        'transfer': sales_by_currency['usd']['transfer'],
+                        'total': sales_by_currency['usd']['total']
+                    },
+                    'zig': {
+                        'cash': current_cash_zig,  # From Sale table
+                        'card': sales_by_currency['zig']['card'],
+                        'ecocash': sales_by_currency['zig']['ecocash'],
+                        'transfer': sales_by_currency['zig']['transfer'],
+                        'total': sales_by_currency['zig']['total']
+                    },
+                    'rand': {
+                        'cash': current_cash_rand,  # From Sale table
+                        'card': sales_by_currency['rand']['card'],
+                        'ecocash': sales_by_currency['rand']['ecocash'],
+                        'transfer': sales_by_currency['rand']['transfer'],
+                        'total': sales_by_currency['rand']['total']
+                    }
+                },
+                'session_sales': {
+                    'cash': sales_by_currency['usd']['cash'] + sales_by_currency['zig']['cash'] + sales_by_currency['rand']['cash'],
+                    'card': sales_by_currency['usd']['card'] + sales_by_currency['zig']['card'] + sales_by_currency['rand']['card'],
+                    'ecocash': sales_by_currency['usd']['ecocash'] + sales_by_currency['zig']['ecocash'] + sales_by_currency['rand']['ecocash'],
+                    'transfer': sales_by_currency['usd']['transfer'] + sales_by_currency['zig']['transfer'] + sales_by_currency['rand']['transfer'],
+                    'total': sales_by_currency['usd']['total'] + sales_by_currency['zig']['total'] + sales_by_currency['rand']['total'],
+                    'usd_count': sales_by_currency['usd']['count'],
+                    'zig_count': sales_by_currency['zig']['count'],
+                    'rand_count': sales_by_currency['rand']['count']
+                },
+                'session_sales_by_currency': sales_by_currency,
+                'usd_transaction_count': sales_by_currency['usd']['count'],
+                'zig_transaction_count': sales_by_currency['zig']['count'],
+                'rand_transaction_count': sales_by_currency['rand']['count'],
+                'total_transaction_count': (
+                    sales_by_currency['usd']['count'] + 
+                    sales_by_currency['zig']['count'] + 
+                    sales_by_currency['rand']['count']
+                ),
+                'eod_expectations': {
+                    'expected_cash': float(drawer.float_amount) + sales_by_currency['usd']['cash'],
+                    'expected_zig': float(drawer.float_amount_zig) + sales_by_currency['zig']['cash'],
+                    'expected_rand': float(drawer.float_amount_rand) + sales_by_currency['rand']['cash'],
+                    'variance': 0,
+                    'efficiency': 100
+                },
+                'status': drawer.status,
+                'is_shop_closed': False
+            })
+        
+        # Calculate totals
+        total_expected_zig = sum([d['eod_expectations']['expected_zig'] for d in drawers_list])
+        total_expected_usd = sum([d['eod_expectations']['expected_cash'] for d in drawers_list])
+        total_expected_rand = sum([d['eod_expectations']['expected_rand'] for d in drawers_list])
+        
+        total_current_zig = sum([d['current_breakdown_by_currency']['zig']['total'] for d in drawers_list])
+        total_current_usd = sum([d['current_breakdown_by_currency']['usd']['total'] for d in drawers_list])
+        total_current_rand = sum([d['current_breakdown_by_currency']['rand']['total'] for d in drawers_list])
+        
+        return Response({
+            'success': True,
+            'is_shop_open': is_shop_open,  # Return actual shop status
+            'shop_status': {
+                'shop': shop.name,
+                'date': today.isoformat(),
+                'total_drawers': len(drawers_list),
+                'active_drawers': len([d for d in drawers_list if d['status'] == 'ACTIVE']),
+                'inactive_drawers': len([d for d in drawers_list if d['status'] == 'INACTIVE']),
+                'settled_drawers': len([d for d in drawers_list if d['status'] == 'SETTLED']),
+                'cash_flow': {
+                    'total_expected_cash': total_expected_usd,
+                    'total_current_cash': total_current_usd,
+                    'variance': total_current_usd - total_expected_usd,
+                    'expected_zig': total_expected_zig,
+                    'expected_usd': total_expected_usd,
+                    'expected_rand': total_expected_rand,
+                    'current_zig': total_current_zig,
+                    'current_usd': total_current_usd,
+                    'current_rand': total_current_rand,
+                    'zig_variance': total_current_zig - total_expected_zig,
+                    'usd_variance': total_current_usd - total_expected_usd,
+                    'rand_variance': total_current_rand - total_expected_rand,
+                    'total_expected_cash_multi': total_expected_usd + total_expected_zig + total_expected_rand,
+                    'total_current_cash_multi': total_current_usd + total_current_zig + total_current_rand,
+                    'variance_multi': (total_current_usd + total_current_zig + total_current_rand) - (total_expected_usd + total_expected_zig + total_expected_rand),
+                },
+                'drawers': drawers_list
+            }
+        })
+        
+    except ShopConfiguration.DoesNotExist:
+        return Response({
+            'error': 'Shop not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"ERROR in get_all_drawers_session: {str(e)}")
+        print(f"Traceback: {error_details}")
+        return Response({
+            'error': f'Server error: {str(e)}',
+            'details': error_details if settings.DEBUG else 'Contact administrator'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+@api_view(['POST'])
+def emergency_reset_all_drawers(request):
+    """
+    Emergency reset for ALL drawers across ALL days
+    This is a dangerous operation that resets ALL drawer data regardless of date.
+    Use with caution - requires special authorization.
+    """
+    try:
+        # Get optional date parameter - if not provided, reset all drawers
+        date_str = request.data.get('date')
+        
+        if date_str:
+            # Reset drawers for specific date
+            from datetime import datetime
+            try:
+                target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                drawers = CashFloat.objects.filter(shop=ShopConfiguration.objects.get(), date=target_date)
+            except ValueError:
+                return Response({
+                    'error': 'Invalid date format. Use YYYY-MM-DD'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            # Reset ALL drawers for the shop (dangerous!)
+            shop = ShopConfiguration.objects.get()
+            drawers = CashFloat.objects.filter(shop=shop)
+        
+        if not drawers.exists():
+            return Response({
+                'success': True,
+                'message': 'No drawers found to reset',
+                'reset_count': 0
+            })
+        
+        # Reset all drawer amounts to zero
+        reset_count = 0
+        for drawer in drawers:
+            try:
+                # Mark as settled and wipe out ALL running totals
+                drawer.status = 'SETTLED'
+                
+                # Legacy USD fields
+                drawer.current_cash = Decimal('0.00')
+                drawer.current_card = Decimal('0.00')
+                drawer.current_ecocash = Decimal('0.00')
+                drawer.current_transfer = Decimal('0.00')
+                drawer.current_total = Decimal('0.00')
+                
+                # Currency-specific current amounts
+                drawer.current_cash_usd = Decimal('0.00')
+                drawer.current_cash_zig = Decimal('0.00')
+                drawer.current_cash_rand = Decimal('0.00')
+                drawer.current_card_usd = Decimal('0.00')
+                drawer.current_card_zig = Decimal('0.00')
+                drawer.current_card_rand = Decimal('0.00')
+                drawer.current_ecocash_usd = Decimal('0.00')
+                drawer.current_ecocash_zig = Decimal('0.00')
+                drawer.current_ecocash_rand = Decimal('0.00')
+                drawer.current_transfer_usd = Decimal('0.00')
+                drawer.current_transfer_zig = Decimal('0.00')
+                drawer.current_transfer_rand = Decimal('0.00')
+                drawer.current_total_usd = Decimal('0.00')
+                drawer.current_total_zig = Decimal('0.00')
+                drawer.current_total_rand = Decimal('0.00')
+                
+                # Session sales (clear)
+                drawer.session_cash_sales = Decimal('0.00')
+                drawer.session_card_sales = Decimal('0.00')
+                drawer.session_ecocash_sales = Decimal('0.00')
+                drawer.session_transfer_sales = Decimal('0.00')
+                drawer.session_total_sales = Decimal('0.00')
+                
+                # Currency-specific session sales
+                drawer.session_cash_sales_usd = Decimal('0.00')
+                drawer.session_cash_sales_zig = Decimal('0.00')
+                drawer.session_cash_sales_rand = Decimal('0.00')
+                drawer.session_card_sales_usd = Decimal('0.00')
+                drawer.session_card_sales_zig = Decimal('0.00')
+                drawer.session_card_sales_rand = Decimal('0.00')
+                drawer.session_ecocash_sales_usd = Decimal('0.00')
+                drawer.session_ecocash_sales_zig = Decimal('0.00')
+                drawer.session_ecocash_sales_rand = Decimal('0.00')
+                drawer.session_transfer_sales_usd = Decimal('0.00')
+                drawer.session_transfer_sales_zig = Decimal('0.00')
+                drawer.session_transfer_sales_rand = Decimal('0.00')
+                drawer.session_total_sales_usd = Decimal('0.00')
+                drawer.session_total_sales_zig = Decimal('0.00')
+                drawer.session_total_sales_rand = Decimal('0.00')
+                
+                # EOD expectations
+                drawer.expected_cash_at_eod = Decimal('0.00')
+                
+                drawer.save()
+                reset_count += 1
+                
+            except Exception as e:
+                print(f"Warning: Could not reset drawer for cashier {drawer.cashier.name}: {e}")
+                continue
+        
+        message = f'All {reset_count} drawers have been emergency reset'
+        if date_str:
+            message += f' for date {date_str}'
+        
+        return Response({
+            'success': True,
+            'message': message,
+            'reset_count': reset_count
+        })
+        
+    except ShopConfiguration.DoesNotExist:
+        return Response({
+            'error': 'Shop not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({
+            'error': f'Server error: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def check_cashier_drawer_access(request):
+    """
+    Check if a cashier has access to their drawer
+    """
+    try:
+        data = request.data
+        cashier_id = data.get('cashier_id')
+        
+        if not cashier_id:
+            return Response({'error': 'cashier_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        shop = ShopConfiguration.objects.get()
+        try:
+            cashier = Cashier.objects.get(id=cashier_id, shop=shop)
+        except Cashier.DoesNotExist:
+            return Response({'error': 'Cashier not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        drawer = CashFloat.get_active_drawer(shop, cashier)
+        
+        return Response({
+            'success': True,
+            'has_access': drawer.status == 'ACTIVE' and cashier.status == 'active',
+            'drawer_status': drawer.status,
+            'cashier_status': cashier.status
+        })
+        
+    except Exception as e:
+        return Response({
+            'error': f'Server error: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def update_cashier_drawer_access(request):
+    """
+    Update drawer access for a cashier (activate/deactivate)
+    """
+    try:
+        data = request.data
+        cashier_id = data.get('cashier_id')
+        action = data.get('action')
+        
+        if not cashier_id or not action:
+            return Response({'error': 'cashier_id and action are required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if action not in ['activate', 'deactivate']:
+            return Response({'error': 'action must be activate or deactivate'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        shop = ShopConfiguration.objects.get()
+        try:
+            cashier = Cashier.objects.get(id=cashier_id, shop=shop)
+        except Cashier.DoesNotExist:
+            return Response({'error': 'Cashier not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        drawer = CashFloat.get_active_drawer(shop, cashier)
+        
+        if action == 'activate':
+            drawer.activate_drawer(cashier)
+            message = f'Drawer activated for {cashier.name}'
+        else:
+            drawer.status = 'INACTIVE'
+            drawer.save()
+            message = f'Drawer deactivated for {cashier.name}'
+        
+        return Response({
+            'success': True,
+            'message': message,
+            'drawer': drawer.get_drawer_summary()
+        })
+        
+    except Exception as e:
+        return Response({
+            'error': f'Server error: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def get_shop_status(request):
+    """
+    Get basic shop status without authentication
+    """
+    try:
+        shop = ShopConfiguration.objects.get()
+        today = timezone.now().date()
+        
+        try:
+            shop_day = ShopDay.objects.get(shop=shop, date=today)
+            is_open = shop_day.is_open
+        except ShopDay.DoesNotExist:
+            is_open = False
+        
+        return Response({
+            'success': True,
+            'shop_name': shop.name,
+            'shop_id': str(shop.shop_id),
+            'is_open': is_open,
+            'date': today.isoformat()
+        })
+        
+    except ShopConfiguration.DoesNotExist:
+        return Response({
+            'success': True,
+            'shop_name': None,
+            'is_open': False,
+            'message': 'No shop configured'
+        })
+    except Exception as e:
+        return Response({
+            'error': f'Server error: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def get_cashier_drawer_session(request):
+    """
+    Get drawer information for the current SESSION only.
+    This endpoint ensures that:
+    1. If shop is closed -> return empty drawer (no sales data)
+    2. If shop is open -> return only TODAY's sales from the Sale table
+    
+    This solves the issue where reopening the shop the same day 
+    was showing old drawer values.
+    """
+    try:
+        import datetime
+        
+        shop = ShopConfiguration.objects.get()
+        today = timezone.localdate()  # Local date (Africa/Harare)
+        
+        # Create proper timezone-aware datetime range for the local day
+        day_start = timezone.make_aware(
+            datetime.datetime.combine(today, datetime.time.min),
+            timezone.get_current_timezone()
+        )
+        day_end = timezone.make_aware(
+            datetime.datetime.combine(today, datetime.time.max),
+            timezone.get_current_timezone()
+        )
+        
+        # Check if shop is open - handle multiple objects returned
+        try:
+            shop_day = ShopDay.objects.get(shop=shop, date=today)
+            is_shop_open = shop_day.is_open
+        except ShopDay.MultipleObjectsReturned:
+            shop_day = ShopDay.objects.filter(shop=shop, date=today).first()
+            is_shop_open = shop_day.is_open if shop_day else False
+        except ShopDay.DoesNotExist:
+            is_shop_open = False
+            shop_day = None
+        
+        # Get all active cashiers for the shop
+        cashiers = Cashier.objects.filter(shop=shop, status='active')
+        
+        # CRITICAL FIX: Always show today's sales data regardless of shop open/closed status
+        # Only return empty status if there are NO active cashiers
+        if cashiers.count() == 0:
+            return Response({
+                'success': True,
+                'is_shop_open': is_shop_open,
+                'shop_status': {
+                    'shop': shop.name,
+                    'date': today.isoformat(),
+                    'total_drawers': 0,
+                    'active_drawers': 0,
+                    'inactive_drawers': 0,
+                    'settled_drawers': 0,
+                    'cash_flow': {
+                        'total_expected_cash': 0,
+                        'total_current_cash': 0,
+                        'variance': 0,
+                        'expected_zig': 0,
+                        'expected_usd': 0,
+                        'expected_rand': 0,
+                        'current_zig': 0,
+                        'current_usd': 0,
+                        'current_rand': 0,
+                        'zig_variance': 0,
+                        'usd_variance': 0,
+                        'rand_variance': 0,
+                        'total_expected_cash_multi': 0,
+                        'total_current_cash_multi': 0,
+                        'variance_multi': 0,
+                    },
+                    'drawers': []
+                }
+            })
+        
+        # Shop is open - get cashier and calculate session sales from Sale table
+        cashier = getattr(request, 'cashier', None)
+        
+        if not cashier:
+            cashier_id = request.query_params.get('cashier_id')
+            if cashier_id:
+                cashier = Cashier.objects.get(id=cashier_id, shop=shop)
+            else:
+                return Response({
+                    'error': 'Authentication required or cashier_id parameter missing'
+                }, status=status.HTTP_401_UNAUTHORIZED)
+        
+        # Calculate sales from Sale table for TODAY ONLY
+        # CRITICAL FIX: Use proper timezone-aware datetime range instead of __date lookup
+        today_sales = Sale.objects.filter(
+            shop=shop,
+            cashier=cashier,
+            created_at__range=[day_start, day_end],
+            status='completed'
+        )
+        
+        # Calculate totals by currency and payment method
+        sales_by_currency = {
+            'usd': {'cash': 0, 'card': 0, 'ecocash': 0, 'transfer': 0, 'total': 0, 'count': 0},
+            'zig': {'cash': 0, 'card': 0, 'ecocash': 0, 'transfer': 0, 'total': 0, 'count': 0},
+            'rand': {'cash': 0, 'card': 0, 'ecocash': 0, 'transfer': 0, 'total': 0, 'count': 0}
+        }
+        
+        for sale in today_sales:
+            currency = sale.payment_currency.upper() if sale.payment_currency else 'USD'
+            payment_method = sale.payment_method
+            
+            # Convert to lowercase for dictionary key lookup
+            currency_key = currency.lower()
+            if currency_key not in sales_by_currency:
+                currency_key = 'usd'
+            
+            # Add to appropriate payment method
+            if payment_method == 'cash':
+                sales_by_currency[currency_key]['cash'] += float(sale.total_amount)
+            elif payment_method == 'card':
+                sales_by_currency[currency_key]['card'] += float(sale.total_amount)
+            elif payment_method == 'ecocash':
+                sales_by_currency[currency_key]['ecocash'] += float(sale.total_amount)
+            elif payment_method == 'transfer':
+                sales_by_currency[currency_key]['transfer'] += float(sale.total_amount)
+            
+            sales_by_currency[currency_key]['total'] += float(sale.total_amount)
+            sales_by_currency[currency_key]['count'] += 1
+        
+        # Get or create drawer for float amounts
+        drawer = CashFloat.get_active_drawer(shop, cashier)
+        
+        return Response({
+            'success': True,
+            'is_shop_open': is_shop_open,  # Return actual shop status
+            'is_empty_drawer': False,
+            'drawer': {
+                'cashier': cashier.name,
+                'cashier_id': cashier.id,
+                'float_amount': float(drawer.float_amount),
+                'float_amount_zig': float(drawer.float_amount_zig),
+                'float_amount_rand': float(drawer.float_amount_rand),
+                'current_cash_usd': float(drawer.current_cash_usd),
+                'current_cash_zig': float(drawer.current_cash_zig),
+                'current_cash_rand': float(drawer.current_cash_rand),
+                # Use sales from Sale table (today's sales only)
+                'session_sales_by_currency': sales_by_currency,
+                'transaction_counts_by_currency': {
+                    'usd': sales_by_currency['usd']['count'],
+                    'zig': sales_by_currency['zig']['count'],
+                    'rand': sales_by_currency['rand']['count']
+                },
+                'usd_transaction_count': sales_by_currency['usd']['count'],
+                'zig_transaction_count': sales_by_currency['zig']['count'],
+                'rand_transaction_count': sales_by_currency['rand']['count'],
+                'total_transaction_count': (
+                    sales_by_currency['usd']['count'] + 
+                    sales_by_currency['zig']['count'] + 
+                    sales_by_currency['rand']['count']
+                ),
+                'status': drawer.status,
+                'is_shop_closed': False
+            }
+        })
+        
+    except Cashier.DoesNotExist:
+        return Response({
+            'error': 'Cashier not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except ShopConfiguration.DoesNotExist:
+        return Response({
+            'error': 'Shop not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({
+            'error': f'Server error: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def get_cashier_drawer_today(request):
+    """
+    Get today's drawer information for the authenticated cashier
+    """
+    try:
+        cashier = getattr(request, 'cashier', None)
+        
+        if not cashier:
+            cashier_id = request.query_params.get('cashier_id')
+            if cashier_id:
+                shop = ShopConfiguration.objects.get()
+                cashier = Cashier.objects.get(id=cashier_id, shop=shop)
+            else:
+                return Response({
+                    'error': 'Authentication required or cashier_id parameter missing'
+                }, status=status.HTTP_401_UNAUTHORIZED)
+        
+        shop = cashier.shop
+        drawer = CashFloat.get_active_drawer(shop, cashier)
+        
+        return Response({
+            'success': True,
+            'drawer': drawer.get_drawer_summary(),
+            'shop_open': ShopDay.is_shop_open(shop)
+        })
+        
+    except Cashier.DoesNotExist:
+        return Response({
+            'error': 'Cashier not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except ShopConfiguration.DoesNotExist:
+        return Response({
+            'error': 'Shop not found'
+        }, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         return Response({
             'error': f'Server error: {str(e)}'

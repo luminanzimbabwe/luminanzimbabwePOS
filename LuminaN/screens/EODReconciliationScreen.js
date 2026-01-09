@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
-import { shopAPI } from '../services/api';
+import { shopAPI, getApiBaseUrl } from '../services/api';
 import { shopStorage } from '../services/storage';
 import presenceService from '../services/presenceService';
 
@@ -39,6 +39,10 @@ const EODProductionScreen = () => {
 
   const [showModal, setShowModal] = useState(false);
   const [currentCashier, setCurrentCashier] = useState(null);
+  
+  // Delete modal state
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
 
   const [inputs, setInputs] = useState({
     cash_zig: '',
@@ -78,12 +82,15 @@ const EODProductionScreen = () => {
     return () => clearInterval(systemUpdateInterval);
   }, []);
 
-  const loadAllData = async () => {
+  const loadAllData = async (forceRefresh = false) => {
     setRefreshing(true);
     try {
+      // Add timestamp to prevent caching
+      const timestamp = forceRefresh ? `?t=${Date.now()}` : '';
       const [recon, drawers] = await Promise.all([
-        shopAPI.getEnhancedReconciliation(),
-        shopAPI.getAllDrawersStatus()
+        shopAPI.getEnhancedReconciliation(timestamp),
+        // Use session-aware endpoint - returns only current session sales (resets when shop is closed)
+        shopAPI.getAllDrawersSession(timestamp)
       ]);
       setReconciliationData(recon.data);
       setDrawerStatus(drawers.data.shop_status || drawers.data);
@@ -124,9 +131,13 @@ const EODProductionScreen = () => {
   };
 
   const finalizeDay = async () => {
+    console.log('🚀 finalizeDay() CALLED - Starting EOD process');
     try {
       setFinalizing(true);
+      console.log('✅ setFinalizing(true) done');
+      
       const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+      console.log('📅 Today:', today);
       
       // First, save all cashier counts to the database
       const savePromises = Object.entries(cashierCounts).map(([cashierId, count]) => {
@@ -144,43 +155,176 @@ const EODProductionScreen = () => {
       
       // Wait for all cashier counts to be saved
       await Promise.all(savePromises);
+      console.log('✅ All cashier counts saved');
       
-      // CRITICAL: PERMANENTLY DELETE ALL DRAWER DATA for today before finalizing
+      // CRITICAL: PERMANENTLY DELETE ALL SALES AND RESET ALL DRAWERS before finalizing
       // This ensures next day starts fresh with zero sales
-      // We do this FIRST to ensure data is cleared before session completion
-      console.log('🔄 PERMANENTLY DELETING all drawer data for today...');
+      console.log('🔄 Starting delete process...');
+      
       try {
-        const resetResponse = await shopAPI.resetAllDrawersAtEOD();
-        if (resetResponse.data && resetResponse.data.success) {
-          console.log(`✅ ${resetResponse.data.message}`);
+        console.log('📡 Calling shopAPI.deleteTodaySales...');
+        const deleteResponse = await shopAPI.deleteTodaySales({}, { headers: {} });
+        console.log('✅ Delete API call succeeded, status:', deleteResponse.status);
+        console.log('📊 Delete response data:', JSON.stringify(deleteResponse.data, null, 2));
+        
+        if (deleteResponse.data && deleteResponse.data.success) {
+          console.log(`✅ ${deleteResponse.data.message}`);
+        } else if (deleteResponse.data) {
+          console.warn('⚠️ Delete returned but success=false:', deleteResponse.data);
         } else {
-          console.warn('⚠️ Drawer reset response:', resetResponse.data);
+          console.warn('⚠️ Delete returned no data');
         }
-      } catch (resetErr) {
-        console.warn('⚠️ Warning: Failed to reset drawers during EOD:', resetErr);
-        // Continue with EOD process even if drawer reset fails
+      } catch (deleteErr) {
+        console.error('❌ Delete API ERROR:');
+        console.error('   Message:', deleteErr.message);
+        console.error('   Status:', deleteErr.response?.status || 'no status');
+        console.error('   Data:', JSON.stringify(deleteErr.response?.data || 'no data'));
+        console.error('   Stack:', deleteErr.stack);
+        // Continue with EOD process even if delete fails
+        console.log('⚠️ Continuing with EOD despite delete error...');
       }
       
       // Now finalize the session
-      const response = await shopAPI.completeReconciliationSession({
-        action: 'complete',
-        date: today,
-        notes: globalNotes
-      });
+      console.log('📡 Calling completeReconciliationSession...');
+      try {
+        const response = await shopAPI.completeReconciliationSession({
+          action: 'complete',
+          date: today,
+          notes: globalNotes
+        });
+        console.log('✅ Session completion response:', JSON.stringify(response.data, null, 2));
 
-      if (response.data.success) {
-        // Start the shop closing process
-        startShopClosing();
-        
-      } else {
-        Alert.alert('Error', response.data.error || 'Failed to finalize day');
+        if (response.data.success) {
+          // Start the shop closing process
+          console.log('🚀 Calling startShopClosing...');
+          startShopClosing();
+        } else {
+          console.error('❌ Session completion failed:', response.data.error);
+          Alert.alert('Error', response.data.error || 'Failed to finalize day');
+        }
+      } catch (sessionErr) {
+        console.error('❌ Session completion ERROR:');
+        console.error('   Message:', sessionErr.message);
+        console.error('   Status:', sessionErr.response?.status || 'no status');
+        console.error('   Data:', JSON.stringify(sessionErr.response?.data || 'no data'));
+        Alert.alert('Error', sessionErr.response?.data?.error || sessionErr.message || 'Failed to finalize day');
       }
     } catch (error) {
+      console.error('❌ finalizeDay ERROR:', error);
       const errorMessage = error.response?.data?.error || error.message || 'Failed to finalize day';
       Alert.alert('Error', errorMessage);
     } finally {
+      console.log('🔄 Setting finalizing=false');
       setFinalizing(false);
     }
+  };
+
+  // Delete today's sales - no authentication required
+  const deleteTodaySales = async () => {
+    console.log('🔴 DELETE BUTTON PRESSED - Starting delete process');
+    setShowDeleteModal(true);
+  };
+  
+  // Handle actual delete from modal - no password needed
+  const handleDeleteConfirm = async () => {
+    console.log('🔴 Proceeding with delete...');
+    
+    setShowDeleteModal(false);
+    
+    try {
+      console.log('🔴 Calling API to delete today\'s sales...');
+      
+      // No password required - just delete
+      const response = await shopAPI.deleteTodaySales({});
+      
+      console.log('🔴 API Response received:', JSON.stringify(response.data, null, 2));
+      
+      if (response.data.success) {
+        console.log('✅ DELETE SUCCESS:', response.data.message);
+        
+        // Clear local state immediately
+        setCashierCounts({});
+        setDrawerStatus(null);
+        setReconciliationData(null);
+        
+        Alert.alert(
+          'Success',
+          `✅ ${response.data.message}\n\nDeleted: ${response.data.deleted_sales} sales`,
+          [{ text: 'OK', onPress: async () => {
+            console.log('🔄 Reloading data after successful delete...');
+            await loadAllData(true);
+          }}]
+        );
+      } else {
+        console.log('❌ DELETE FAILED:', response.data.error || 'Unknown error');
+        Alert.alert('Error', response.data.error || 'Failed to delete sales');
+      }
+    } catch (error) {
+      console.log('❌ API ERROR:', error.message);
+      console.log('❌ Error response:', error.response?.data || 'No response data');
+      Alert.alert('Error', error.response?.data?.error || 'Failed to delete sales.');
+    }
+  };
+
+  // Calculate per-cashier variance - shows if cashier has short or over
+  const getCashierVariance = (drawer, verifiedCount) => {
+    if (!drawer?.eod_expectations) return { variance: 0, status: 'pending', expected: 0, actual: 0 };
+    
+    // Get expected amounts from drawer expectations
+    const expectedZig = drawer.eod_expectations.expected_zig || 0;
+    const expectedUsd = drawer.eod_expectations.expected_cash || 0;
+    const expectedRand = drawer.eod_expectations.expected_rand || 0;
+    
+    // Get expected card from breakdown
+    const expectedCard = (drawer.current_breakdown_by_currency?.usd?.card || 0) + 
+                        (drawer.current_breakdown_by_currency?.zig?.card || 0) + 
+                        (drawer.current_breakdown_by_currency?.rand?.card || 0);
+    
+    // Total expected for this cashier (sum of all currencies)
+    const totalExpected = expectedZig + expectedUsd + expectedRand + expectedCard;
+    
+    // Get verified/counted amounts
+    const verified = verifiedCount || {};
+    const actualZig = verified.cash_zig || 0;
+    const actualUsd = verified.cash_usd || 0;
+    const actualRand = verified.cash_rand || 0;
+    const actualCard = verified.card || 0;
+    
+    // Total actual for this cashier
+    const totalActual = actualZig + actualUsd + actualRand + actualCard;
+    
+    // Calculate variance (positive = overage, negative = shortage)
+    const variance = totalActual - totalExpected;
+    
+    // Determine status
+    let status = 'pending';
+    let varianceType = 'pending';
+    if (verifiedCount && Object.keys(verifiedCount).length > 0) {
+      if (variance === 0) {
+        status = 'perfect';
+        varianceType = 'perfect';
+      } else if (variance > 0) {
+        status = 'over';
+        varianceType = 'over';
+      } else {
+        status = 'short';
+        varianceType = 'short';
+      }
+    }
+    
+    return { 
+      expected: totalExpected, 
+      actual: totalActual, 
+      variance, 
+      status,
+      varianceType,
+      breakdown: {
+        zig: { expected: expectedZig, actual: actualZig },
+        usd: { expected: expectedUsd, actual: actualUsd },
+        rand: { expected: expectedRand, actual: actualRand },
+        card: { expected: expectedCard, actual: actualCard }
+      }
+    };
   };
 
   // Calculate expected amounts from current drawer data
@@ -207,11 +351,11 @@ const EODProductionScreen = () => {
     };
 
     if (drawerStatus?.drawers && drawerStatus.drawers.length > 0) {
-      // Sum up all drawer expected amounts - support multi-currency
+      // Sum up all drawer expected amounts using expected_cash which includes float + sales
       drawerStatus.drawers.forEach(drawer => {
         if (drawer.eod_expectations) {
+          expected.cash_usd += drawer.eod_expectations.expected_cash || 0;
           expected.cash_zig += drawer.eod_expectations.expected_zig || 0;
-          expected.cash_usd += drawer.eod_expectations.expected_usd || 0;
           expected.cash_rand += drawer.eod_expectations.expected_rand || 0;
         }
         // Get card from current_breakdown_by_currency
@@ -221,14 +365,27 @@ const EODProductionScreen = () => {
       });
       expected.total = expected.cash_zig + expected.cash_usd + expected.cash_rand + expected.card;
     } else {
-      // Fallback to reconciliation data if available
-      expected = reconciliationData?.expected_amounts || {
-        cash_zig: 0,
-        cash_usd: 0,
-        cash_rand: 0,
-        card: 0,
-        total: 0
-      };
+      // Check for enhanced multi-currency expected amounts first
+      const enhancedExpected = reconciliationData?.expected_amounts?.by_currency;
+      if (enhancedExpected) {
+        // Use the multi-currency breakdown from enhanced reconciliation
+        expected.cash_zig = enhancedExpected?.zig?.expected_cash || 0;
+        expected.cash_usd = enhancedExpected?.usd?.expected_cash || 0;
+        expected.cash_rand = enhancedExpected?.rand?.expected_cash || 0;
+        // Sum up all card payments across currencies
+        expected.card = (enhancedExpected?.usd?.expected_card || 0) + 
+                       (enhancedExpected?.zig?.expected_card || 0) + 
+                       (enhancedExpected?.rand?.expected_card || 0);
+        expected.total = expected.cash_zig + expected.cash_usd + expected.cash_rand + expected.card;
+      } else {
+        // Fallback to legacy format
+        const legacyExpected = reconciliationData?.expected_amounts || {};
+        expected.cash_zig = legacyExpected.cash_zig || 0;
+        expected.cash_usd = legacyExpected.cash_usd || 0;
+        expected.cash_rand = legacyExpected.cash_rand || 0;
+        expected.card = legacyExpected.card || 0;
+        expected.total = legacyExpected.total || 0;
+      }
     }
 
     const actual = cash_zig + cash_usd + cash_rand + card;
@@ -303,7 +460,30 @@ const EODProductionScreen = () => {
     setShowModal(false);
   };
 
-  const totalCashiers = drawerStatus?.drawers?.length || 0;
+  // Filter drawers to only show cashiers who logged in TODAY (have activity/sales)
+  const todayDrawers = useMemo(() => {
+    if (!drawerStatus?.drawers) return [];
+    const today = new Date().toISOString().split('T')[0];
+    
+    return drawerStatus.drawers.filter(drawer => {
+      // Check if drawer has expected amounts (means it has activity today)
+      const hasExpectedAmounts = drawer.eod_expectations && (
+        (drawer.eod_expectations.expected_cash || 0) > 0 ||
+        (drawer.eod_expectations.expected_zig || 0) > 0 ||
+        (drawer.eod_expectations.expected_rand || 0) > 0
+      );
+      
+      // Check if drawer has current holdings (has cash in drawer)
+      const hasCurrentHoldings = drawer.current_total_cash > 0 || 
+        drawer.current_breakdown_by_currency?.zig?.total > 0 ||
+        drawer.current_breakdown_by_currency?.usd?.total > 0 ||
+        drawer.current_breakdown_by_currency?.rand?.total > 0;
+      
+      return hasExpectedAmounts || hasCurrentHoldings;
+    });
+  }, [drawerStatus]);
+
+  const totalCashiers = todayDrawers.length || 0;
   const verifiedCount = Object.keys(cashierCounts).length;
   const progress = totalCashiers ? verifiedCount / totalCashiers : 0;
 
@@ -428,7 +608,6 @@ const EODProductionScreen = () => {
           <View style={styles.systemIntelligenceHeader}>
             <Icon name="psychology" size={24} color="#ff0080" />
             <Text style={styles.systemIntelligenceTitle}>SYSTEM INTELLIGENCE MATRIX</Text>
-            <View style={styles.headerScanner} />
           </View>
           
           <View style={styles.systemMetricsGrid}>
@@ -501,7 +680,6 @@ const EODProductionScreen = () => {
           <View style={styles.neuralFinancialHeader}>
             <Icon name="account-balance" size={28} color="#00ff88" />
             <Text style={styles.neuralFinancialTitle}>FINANCIAL NEURAL GRID</Text>
-            <View style={styles.financialHeaderScanner} />
           </View>
           
           {/* Shop Status Indicator */}
@@ -607,74 +785,124 @@ const EODProductionScreen = () => {
           <View style={styles.neuralCashierHeader}>
             <Icon name="people" size={28} color="#ffaa00" />
             <Text style={styles.neuralCashierTitle}>CASHIER NEURAL VERIFICATION</Text>
-            <View style={styles.cashierHeaderScanner} />
           </View>
           
           <View style={styles.neuralCashierList}>
-            {drawerStatus?.drawers?.map((d) => {
-              const verified = cashierCounts[d.cashier];
-              const statusColor = verified ? '#00ff88' : '#ff4444';
-              
-              return (
-                <TouchableOpacity
-                  key={d.cashier}
-                  style={[
-                    styles.neuralCashierCard,
-                    { borderLeftColor: statusColor }
-                  ]}
-                  onPress={() => openCashier(d.cashier)}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.neuralCashierHeader}>
-                    <View style={styles.neuralCashierInfo}>
-                      <View style={styles.neuralCashierNameRow}>
-                        <Text style={styles.neuralCashierName}>{d.cashier}</Text>
-                        <View style={[styles.neuralStatusBadge, { backgroundColor: statusColor }]}>
-                          <Icon name={verified ? "check" : "pending"} size={14} color="#ffffff" />
-                        </View>
-                      </View>
-                      <Text style={[styles.neuralCashierStatus, { color: statusColor }]}>
-                        {verified ? '✓ VERIFIED' : '○ PENDING VERIFICATION'}
-                      </Text>
-                    </View>
-                    <View style={styles.neuralCashierArrow}>
-                      <Icon name="chevron-right" size={24} color="#00f5ff" />
-                    </View>
-                  </View>
-                  
-                  <View style={styles.neuralCashierDetails}>
-                    <View style={styles.neuralCurrencyRow}>
-                      <View style={styles.neuralCurrencyItem}>
-                        <Text style={styles.neuralCurrencyLabel}>ZW$</Text>
-                        <Text style={styles.neuralCurrencyValue}>
-                          {verified ? (verified.cash_zig || 0).toFixed(2) : '0.00'}
-                        </Text>
-                      </View>
-                      <View style={styles.neuralCurrencyItem}>
-                        <Text style={styles.neuralCurrencyLabel}>USD</Text>
-                        <Text style={[styles.neuralCurrencyValue, { color: '#00f5ff' }]}>
-                          {verified ? (verified.cash_usd || 0).toFixed(2) : '0.00'}
-                        </Text>
-                      </View>
-                      <View style={styles.neuralCurrencyItem}>
-                        <Text style={styles.neuralCurrencyLabel}>RAND</Text>
-                        <Text style={[styles.neuralCurrencyValue, { color: '#ffaa00' }]}>
-                          {verified ? (verified.cash_rand || 0).toFixed(2) : '0.00'}
-                        </Text>
-                      </View>
-                      <View style={styles.neuralCurrencyItem}>
-                        <Text style={styles.neuralCurrencyLabel}>CARD</Text>
-                        <Text style={[styles.neuralCurrencyValue, { color: '#8b5cf6' }]}>
-                          {verified ? (verified.card || 0).toFixed(2) : '0.00'}
+            {todayDrawers.length === 0 ? (
+              <View style={styles.neuralEmptyState}>
+                <Icon name="info-outline" size={48} color="#6b7280" />
+                <Text style={styles.neuralEmptyStateText}>No active cashiers for today</Text>
+                <Text style={styles.neuralEmptyStateSubtext}>Cashiers who log in today will appear here</Text>
+              </View>
+            ) : (
+              todayDrawers.map((d) => {
+                const verified = cashierCounts[d.cashier];
+                const varianceData = getCashierVariance(d, verified);
+                
+                // Status colors based on variance type
+                const statusColor = varianceData.varianceType === 'pending' ? '#ff4444' : 
+                                   varianceData.varianceType === 'perfect' ? '#00ff88' : 
+                                   varianceData.varianceType === 'short' ? '#ff4444' : 
+                                   '#ffaa00'; // over
+                
+                // Status icon
+                const StatusIcon = varianceData.varianceType === 'pending' ? "pending" : 
+                                   varianceData.varianceType === 'perfect' ? "check-circle" : 
+                                   varianceData.varianceType === 'short' ? "arrow-downward" : 
+                                   "arrow-upward";
+                
+                // Status text
+                const statusText = varianceData.varianceType === 'pending' ? '○ PENDING VERIFICATION' : 
+                                   varianceData.varianceType === 'perfect' ? '✓ BALANCED - PERFECT' : 
+                                   varianceData.varianceType === 'short' ? `⚠️ SHORTAGE: ${Math.abs(varianceData.variance).toFixed(2)}` : 
+                                   `✓ OVERAGE: ${varianceData.variance.toFixed(2)}`;
+                
+                return (
+                  <TouchableOpacity
+                    key={d.cashier}
+                    style={[
+                      styles.neuralCashierCard,
+                      { borderLeftColor: statusColor }
+                    ]}
+                    onPress={() => openCashier(d.cashier)}
+                    activeOpacity={0.7}
+                  >
+                    {/* Cashier Name - BIG AND CLEAR */}
+                    <View style={styles.cashierNameRow}>
+                      <Text style={styles.cashierBigName}>{d.cashier}</Text>
+                      <View style={[styles.cashierStatusBadge, { backgroundColor: statusColor }]}>
+                        <Text style={styles.cashierStatusText}>
+                          {varianceData.varianceType === 'pending' ? 'PENDING' : 
+                           varianceData.varianceType === 'perfect' ? 'BALANCED' : 
+                           varianceData.varianceType === 'short' ? 'SHORT' : 'OVER'}
                         </Text>
                       </View>
                     </View>
-                  </View>
-                  
-                  <View style={styles.neuralCashierLine} />
-                </TouchableOpacity>
-              );
-            })}
+                    
+                    {/* Expected vs Actual - BIG VALUES */}
+                    <View style={styles.bigAmountsRow}>
+                      <View style={styles.bigAmountBox}>
+                        <Text style={styles.bigAmountLabel}>EXPECTED</Text>
+                        <Text style={[styles.bigAmountValue, { color: '#ffaa00' }]}>${varianceData.expected.toFixed(2)}</Text>
+                      </View>
+                      <View style={styles.bigAmountDivider} />
+                      <View style={styles.bigAmountBox}>
+                        <Text style={styles.bigAmountLabel}>ACTUAL</Text>
+                        <Text style={[styles.bigAmountValue, { color: '#00ff88' }]}>
+                          {verified ? `${varianceData.actual.toFixed(2)}` : '—'}
+                        </Text>
+                      </View>
+                    </View>
+                    
+                    {/* Variance - THE KEY METRIC */}
+                    {varianceData.varianceType !== 'pending' && (
+                      <View style={styles.varianceBanner}>
+                        <Icon 
+                          name={varianceData.varianceType === 'short' ? "warning" : varianceData.varianceType === 'over' ? "check-circle" : "check"} 
+                          size={20} 
+                          color={statusColor} 
+                        />
+                        <Text style={[styles.varianceBannerText, { color: statusColor }]}>
+                          {varianceData.varianceType === 'short' ? `SHORTAGE: -${Math.abs(varianceData.variance).toFixed(2)}` : 
+                           varianceData.varianceType === 'over' ? `OVERAGE: +${varianceData.variance.toFixed(2)}` : 
+                           "PERFECT BALANCE"}
+                        </Text>
+                      </View>
+                    )}
+                    
+                    {/* Currency breakdown */}
+                    <View style={styles.currencyRow}>
+                      <View style={styles.currencyItem}>
+                        <Text style={styles.currencyLabel}>ZW$</Text>
+                        <Text style={styles.currencyValue}>
+                          {varianceData.breakdown.zig.actual > 0 ? varianceData.breakdown.zig.actual.toFixed(2) : '—'}
+                        </Text>
+                      </View>
+                      <View style={styles.currencyItem}>
+                        <Text style={[styles.currencyLabel, { color: '#00f5ff' }]}>USD</Text>
+                        <Text style={[styles.currencyValue, { color: '#00f5ff' }]}>
+                          {varianceData.breakdown.usd.actual > 0 ? varianceData.breakdown.usd.actual.toFixed(2) : '—'}
+                        </Text>
+                      </View>
+                      <View style={styles.currencyItem}>
+                        <Text style={[styles.currencyLabel, { color: '#ffaa00' }]}>RAND</Text>
+                        <Text style={[styles.currencyValue, { color: '#ffaa00' }]}>
+                          {varianceData.breakdown.rand.actual > 0 ? varianceData.breakdown.rand.actual.toFixed(2) : '—'}
+                        </Text>
+                      </View>
+                      <View style={styles.currencyItem}>
+                        <Text style={[styles.currencyLabel, { color: '#8b5cf6' }]}>CARD</Text>
+                        <Text style={[styles.currencyValue, { color: '#8b5cf6' }]}>
+                          {varianceData.breakdown.card.actual > 0 ? varianceData.breakdown.card.actual.toFixed(2) : '—'}
+                        </Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.neuralCashierLine} />
+                  </TouchableOpacity>
+                );
+              })
+            )}
           </View>
           
           {/* Neural Summary Card */}
@@ -707,7 +935,6 @@ const EODProductionScreen = () => {
           <View style={styles.neuralNotesHeader}>
             <Icon name="note" size={24} color="#8b5cf6" />
             <Text style={styles.neuralNotesTitle}>NEURAL NOTES INTERFACE</Text>
-            <View style={styles.notesHeaderScanner} />
           </View>
           
           <View style={styles.neuralNotesCard}>
@@ -725,31 +952,28 @@ const EODProductionScreen = () => {
         {/* Finalization - Neural Control Interface */}
         <View style={styles.neuralFinalizationSection}>
           <View style={styles.neuralFinalizationHeader}>
-            <Icon name="security" size={28} color="#ff4444" />
+            <Icon name="security" size={32} color="#ff4444" />
             <Text style={styles.neuralFinalizationTitle}>EOD FINALIZATION CONTROL</Text>
-            <View style={styles.finalizationHeaderScanner} />
           </View>
           
-          <View style={[styles.neuralFinalizationCard, { borderLeftColor: '#ff4444' }]}>
+          <View style={styles.neuralFinalizationCard}>
             <View style={styles.neuralWarningRow}>
-              <Icon name="warning" size={24} color="#ffaa00" />
+              <Icon name="warning" size={28} color="#ffaa00" style={styles.neuralWarningIcon} />
               <Text style={styles.neuralWarningText}>
-                ⚠️ This will finalize the day and execute shop shutdown sequence - all users will be logged out
+                This will PERMANENTLY DELETE all sales for today, reset all drawers to zero, and log out all users
               </Text>
             </View>
             
             <View style={styles.neuralFinalizationStatus}>
               <View style={styles.neuralStatusRow}>
-                <Icon name="verified" size={20} color="#00ff88" />
-                <Text style={styles.neuralStatusRowText}>
-                  Verification: {verifiedCount}/{totalCashiers} Complete
-                </Text>
+                <Icon name="verified" size={24} color="#00ff88" style={styles.neuralStatusRowIcon} />
+                <Text style={styles.neuralStatusRowText}>Verification</Text>
+                <Text style={[styles.neuralStatusRowValue, { color: '#00ff88' }]}>{verifiedCount}/{totalCashiers} Complete</Text>
               </View>
               <View style={styles.neuralStatusRow}>
-                <Icon name="analytics" size={20} color={varianceColor} />
-                <Text style={[styles.neuralStatusRowText, { color: varianceColor }]}>
-                  Variance: ${Math.abs(stats.variance).toFixed(2)}
-                </Text>
+                <Icon name="analytics" size={24} color={varianceColor} style={styles.neuralStatusRowIcon} />
+                <Text style={styles.neuralStatusRowText}>Variance</Text>
+                <Text style={[styles.neuralStatusRowValue, { color: varianceColor }]}>${Math.abs(stats.variance).toFixed(2)}</Text>
               </View>
             </View>
             
@@ -760,17 +984,15 @@ const EODProductionScreen = () => {
               ]}
               disabled={verifiedCount !== totalCashiers || finalizing || closing}
               onPress={() => {
-                if (verifiedCount !== totalCashiers) {
-                  Alert.alert('Cannot Finalize', 'All cashiers must verify their counts before finalizing.');
-                  return;
-                }
+                alert('FINAL TEST: Calling finalizeDay() NOW');
                 finalizeDay();
+                alert(' finalizeDay() returned ');
               }}
             >
               <View style={styles.neuralButtonGlow} />
-              <Icon name="power-settings-new" size={24} color="#ffffff" />
+              <Icon name="delete-forever" size={28} color="#ffffff" style={styles.neuralButtonIcon} />
               <Text style={styles.neuralFinalizeButtonText}>
-                {closing ? 'CLOSING SHOP...' : finalizing ? 'FINALIZING NEURAL CORE...' : 'INITIATE SHUTDOWN'}
+                {closing ? 'CLOSING SHOP...' : finalizing ? 'DELETING & FINALIZING...' : 'DELETE SALES & SHUTDOWN'}
               </Text>
               <View style={styles.neuralButtonScanner} />
             </TouchableOpacity>
@@ -891,6 +1113,39 @@ const EODProductionScreen = () => {
         </View>
       </View>
     </Modal>
+
+      {/* DELETE CONFIRMATION MODAL */}
+      <Modal visible={showDeleteModal} animationType="fade" transparent={true}>
+        <View style={styles.deleteModalOverlay}>
+          <View style={styles.deleteModalContent}>
+            <View style={styles.deleteModalHeader}>
+              <Icon name="delete-forever" size={40} color="#ff4444" />
+              <Text style={styles.deleteModalTitle}>⚠️ DELETE TODAY'S SALES</Text>
+            </View>
+            
+            <Text style={styles.deleteModalWarning}>
+              This will PERMANENTLY DELETE all sales for today and reset all drawers to zero.\n\nThis action cannot be undone!
+            </Text>
+            
+            <View style={styles.deleteModalButtons}>
+              <TouchableOpacity
+                style={styles.deleteModalCancelButton}
+                onPress={() => setShowDeleteModal(false)}
+              >
+                <Text style={styles.deleteModalCancelText}>CANCEL</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={styles.deleteModalConfirmButton}
+                onPress={handleDeleteConfirm}
+              >
+                <Icon name="delete-forever" size={20} color="#ffffff" />
+                <Text style={styles.deleteModalConfirmText}>DELETE</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 };
@@ -943,8 +1198,6 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: 'transparent',
-    backgroundImage: 'linear-gradient(90deg, rgba(0,245,255,0.1) 1px, transparent 1px), linear-gradient(rgba(0,245,255,0.1) 1px, transparent 1px)',
-    backgroundSize: '20px 20px',
     opacity: 0.3,
   },
   energyPulse: {
@@ -953,7 +1206,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 3,
-    backgroundColor: 'linear-gradient(90deg, #ff0080, #00f5ff, #00ff88, #ffaa00)',
+    backgroundColor: '#ff0080',
   },
   controlBar: {
     flexDirection: 'row',
@@ -1127,7 +1380,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
-    position: 'relative',
   },
   systemIntelligenceTitle: {
     color: '#ff0080',
@@ -1135,18 +1387,15 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginLeft: 12,
     letterSpacing: 2,
-    textShadowColor: '#ff0080',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 8,
   },
   headerScanner: {
     position: 'absolute',
-    top: '100%',
+    top: 36,
     left: '50%',
     transform: [{ translateX: -50 }],
     width: 280,
     height: 2,
-    backgroundColor: 'linear-gradient(90deg, #ff0080, #00f5ff, #ff0080)',
+    backgroundColor: '#ff0080',
   },
   systemMetricsGrid: {
     flexDirection: 'row',
@@ -1180,7 +1429,7 @@ const styles = StyleSheet.create({
   },
   systemProgressBar: {
     height: 6,
-    backgroundColor: 'linear-gradient(90deg, #00f5ff, #00ff88)',
+    backgroundColor: '#00f5ff',
     borderRadius: 3,
     marginRight: 12,
   },
@@ -1236,7 +1485,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
-    position: 'relative',
   },
   neuralFinancialTitle: {
     color: '#00ff88',
@@ -1244,18 +1492,15 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginLeft: 12,
     letterSpacing: 2,
-    textShadowColor: '#00ff88',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 10,
   },
   financialHeaderScanner: {
     position: 'absolute',
-    top: '100%',
+    top: 38,
     left: '50%',
     transform: [{ translateX: -50 }],
     width: 260,
     height: 2,
-    backgroundColor: 'linear-gradient(90deg, #00ff88, #00f5ff, #00ff88)',
+    backgroundColor: '#00ff88',
   },
   neuralMetricsGrid: {
     flexDirection: 'row',
@@ -1398,7 +1643,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
-    position: 'relative',
   },
   neuralCashierTitle: {
     color: '#ffaa00',
@@ -1412,15 +1656,37 @@ const styles = StyleSheet.create({
   },
   cashierHeaderScanner: {
     position: 'absolute',
-    top: '100%',
+    top: 36,
     left: '50%',
     transform: [{ translateX: -50 }],
     width: 300,
     height: 2,
-    backgroundColor: 'linear-gradient(90deg, #ffaa00, #ff0080, #ffaa00)',
+    backgroundColor: '#ffaa00',
   },
   neuralCashierList: {
     gap: 12,
+  },
+  neuralEmptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(107, 114, 128, 0.3)',
+  },
+  neuralEmptyStateText: {
+    color: '#9ca3af',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  neuralEmptyStateSubtext: {
+    color: '#6b7280',
+    fontSize: 12,
+    marginTop: 8,
+    textAlign: 'center',
   },
   neuralCashierCard: {
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
@@ -1431,70 +1697,119 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.1)',
     position: 'relative',
     overflow: 'hidden',
+    marginBottom: 12,
   },
-  neuralCashierHeader: {
+  cashierNameRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
   },
-  neuralCashierInfo: {
-    flex: 1,
-  },
-  neuralCashierNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  neuralCashierName: {
-    fontSize: 16,
+  cashierBigName: {
+    fontSize: 22,
     fontWeight: 'bold',
     color: '#ffffff',
-    marginRight: 10,
-  },
-  neuralStatusBadge: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  neuralCashierStatus: {
-    fontSize: 11,
-    fontWeight: 'bold',
-    marginTop: 4,
     letterSpacing: 1,
   },
-  neuralCashierArrow: {
-    padding: 4,
+  cashierStatusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
   },
-  neuralCashierDetails: {
-    marginBottom: 8,
+  cashierStatusText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: 'bold',
+    letterSpacing: 1,
   },
-  neuralCurrencyRow: {
+  bigAmountsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+  },
+  bigAmountBox: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  bigAmountDivider: {
+    width: 1,
+    height: 40,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    marginHorizontal: 16,
+  },
+  bigAmountLabel: {
+    fontSize: 12,
+    color: '#888',
+    fontWeight: 'bold',
+    letterSpacing: 2,
+    marginBottom: 6,
+  },
+  bigAmountValue: {
+    fontSize: 28,
+    fontWeight: 'bold',
+  },
+  varianceBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+  },
+  varianceBannerText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginLeft: 10,
+    letterSpacing: 1,
+  },
+  currencyRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
-  neuralCurrencyItem: {
+  currencyItem: {
     alignItems: 'center',
     flex: 1,
   },
-  neuralCurrencyLabel: {
-    fontSize: 10,
+  currencyLabel: {
+    fontSize: 11,
     color: '#888',
     fontWeight: 'bold',
     letterSpacing: 1,
     marginBottom: 4,
   },
-  neuralCurrencyValue: {
+  currencyValue: {
     fontSize: 14,
     fontWeight: 'bold',
     color: '#ffffff',
   },
   neuralCashierLine: {
     height: 1,
-    backgroundColor: 'linear-gradient(90deg, transparent, #ffaa00, transparent)',
+    backgroundColor: '#ffaa00',
     marginTop: 8,
     opacity: 0.5,
+  },
+  neuralVarianceRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  neuralVarianceBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  neuralVarianceBadgeText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginLeft: 6,
   },
   neuralSummaryCard: {
     backgroundColor: 'rgba(255, 170, 0, 0.05)',
@@ -1556,7 +1871,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
-    position: 'relative',
   },
   neuralNotesTitle: {
     color: '#8b5cf6',
@@ -1564,18 +1878,15 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginLeft: 12,
     letterSpacing: 2,
-    textShadowColor: '#8b5cf6',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 8,
   },
   notesHeaderScanner: {
     position: 'absolute',
-    top: '100%',
+    top: 36,
     left: '50%',
     transform: [{ translateX: -50 }],
     width: 280,
     height: 2,
-    backgroundColor: 'linear-gradient(90deg, #8b5cf6, #00f5ff, #8b5cf6)',
+    backgroundColor: '#8b5cf6',
   },
   neuralNotesCard: {
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
@@ -1586,17 +1897,16 @@ const styles = StyleSheet.create({
   },
   neuralNotesInput: {
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    borderRadius: 8,
+    borderRadius: 12,
     padding: 14,
     minHeight: 100,
     color: '#ffffff',
     fontSize: 14,
     textAlignVertical: 'top',
     borderWidth: 1,
-    borderColor: 'rgba(139, 92, 246, 0.2)',
+    borderColor: 'rgba(139, 92, 246, 0.3)',
   },
-  
-  // Neural Finalization Section
+  // Finalization Section Styles
   neuralFinalizationSection: {
     padding: 20,
     paddingTop: 10,
@@ -1607,81 +1917,85 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
-    position: 'relative',
   },
   neuralFinalizationTitle: {
     color: '#ff4444',
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
     marginLeft: 12,
     letterSpacing: 2,
-    textShadowColor: '#ff4444',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 8,
-  },
-  finalizationHeaderScanner: {
-    position: 'absolute',
-    top: '100%',
-    left: '50%',
-    transform: [{ translateX: -50 }],
-    width: 320,
-    height: 2,
-    backgroundColor: 'linear-gradient(90deg, #ff4444, #ffaa00, #ff4444)',
   },
   neuralFinalizationCard: {
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: 1,
-    borderLeftWidth: 4,
-    position: 'relative',
-    overflow: 'hidden',
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    borderRadius: 20,
+    padding: 24,
+    borderWidth: 2,
+    borderLeftWidth: 6,
+    borderColor: 'rgba(255, 68, 68, 0.4)',
+  },
+  neuralWarningIcon: {
+    marginRight: 12,
+    marginTop: 2,
   },
   neuralWarningRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: 'rgba(255, 170, 0, 0.1)',
+    backgroundColor: 'rgba(255, 170, 0, 0.15)',
     borderRadius: 12,
-    padding: 14,
-    marginBottom: 16,
+    padding: 16,
+    marginBottom: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255, 170, 0, 0.3)',
+    borderColor: 'rgba(255, 170, 0, 0.5)',
   },
   neuralWarningText: {
     color: '#ffaa00',
-    fontSize: 13,
-    fontWeight: '500',
-    marginLeft: 10,
+    fontSize: 14,
+    fontWeight: '600',
     flex: 1,
-    lineHeight: 18,
+    lineHeight: 20,
   },
   neuralFinalizationStatus: {
-    marginBottom: 20,
-    gap: 10,
+    marginBottom: 24,
+    gap: 12,
+  },
+  neuralStatusRowIcon: {
+    marginRight: 12,
   },
   neuralStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 10,
   },
   neuralStatusRowText: {
-    fontSize: 14,
+    fontSize: 16,
     color: '#e2e8f0',
     marginLeft: 10,
-    fontWeight: '500',
+    fontWeight: '600',
+    flex: 1,
+  },
+  neuralStatusRowValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  neuralButtonIcon: {
+    marginRight: 4,
   },
   neuralFinalizeButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255, 68, 68, 0.2)',
-    paddingVertical: 18,
+    backgroundColor: 'rgba(255, 68, 68, 0.3)',
+    paddingVertical: 20,
     paddingHorizontal: 24,
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 2,
     borderColor: '#ff4444',
     position: 'relative',
     overflow: 'hidden',
+    marginTop: 8,
   },
   neuralDisabledButton: {
     backgroundColor: 'rgba(107, 114, 128, 0.3)',
@@ -1709,7 +2023,7 @@ const styles = StyleSheet.create({
     left: '-100%',
     right: 0,
     height: '100%',
-    backgroundColor: 'linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent)',
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
     borderRadius: 14,
   },
   
@@ -1874,6 +2188,171 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
     marginLeft: 8,
+    letterSpacing: 1,
+  },
+  
+  // Delete Section Styles
+  neuralDeleteSection: {
+    padding: 20,
+    paddingTop: 10,
+    paddingBottom: 30,
+  },
+  neuralDeleteHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+    position: 'relative',
+  },
+  neuralDeleteTitle: {
+    color: '#ff4444',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginLeft: 12,
+    letterSpacing: 2,
+    textShadowColor: '#ff4444',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
+  },
+  deleteHeaderScanner: {
+    position: 'absolute',
+    top: '100%',
+    left: '50%',
+    transform: [{ translateX: -50 }],
+    width: 160,
+    height: 2,
+    backgroundColor: '#ff4444',
+  },
+  neuralDeleteCard: {
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 68, 68, 0.3)',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  neuralDeleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 68, 68, 0.3)',
+    paddingVertical: 18,
+    paddingHorizontal: 24,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: '#ff4444',
+    position: 'relative',
+    overflow: 'hidden',
+    marginTop: 16,
+  },
+  neuralDeleteButtonGlow: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 68, 68, 0.2)',
+    borderRadius: 14,
+  },
+  neuralDeleteButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 12,
+    letterSpacing: 2,
+  },
+  neuralDeleteButtonScanner: {
+    position: 'absolute',
+    top: 0,
+    left: '-100%',
+    right: 0,
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 14,
+  },
+  
+  // Delete Modal Styles
+  deleteModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  deleteModalContent: {
+    backgroundColor: '#1a1a2e',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    borderWidth: 2,
+    borderColor: '#ff4444',
+    alignItems: 'center',
+  },
+  deleteModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  deleteModalTitle: {
+    color: '#ff4444',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginLeft: 12,
+    letterSpacing: 1,
+  },
+  deleteModalWarning: {
+    color: '#ffaa00',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  deleteModalInput: {
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
+    color: '#ffffff',
+    width: '100%',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 68, 68, 0.5)',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  deleteModalButtons: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 12,
+  },
+  deleteModalCancelButton: {
+    flex: 1,
+    paddingVertical: 16,
+    borderRadius: 12,
+    backgroundColor: 'rgba(107, 114, 128, 0.3)',
+    alignItems: 'center',
+  },
+  deleteModalCancelText: {
+    color: '#9ca3af',
+    fontSize: 14,
+    fontWeight: 'bold',
+    letterSpacing: 1,
+  },
+  deleteModalConfirmButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderRadius: 12,
+    backgroundColor: '#ff4444',
+    gap: 8,
+  },
+  deleteModalConfirmText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: 'bold',
     letterSpacing: 1,
   },
 });

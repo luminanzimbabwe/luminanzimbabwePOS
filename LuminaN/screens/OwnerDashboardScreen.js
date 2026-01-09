@@ -363,8 +363,18 @@ const OwnerDashboardScreen = () => {
   const loadDrawerStatus = async () => {
     try {
       setDrawerLoading(true);
-      const response = await shopAPI.getAllDrawersStatus();
-      console.log('[/cash-float/all-status/] response:', response?.data);
+      
+      // Wait for shopStatus to be loaded before checking if shop is closed
+      // This ensures we have the correct shop status before making decisions
+      let attempts = 0;
+      while (shopStatus === null && attempts < 50) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        attempts++;
+      }
+      
+      // Use session-aware endpoint - returns only current session sales (resets when shop is closed)
+      const response = await shopAPI.getAllDrawersSession();
+      console.log('[/cash-float/all-drawers-session/] response:', response?.data);
       if (response.data && response.data.success) {
         let shop_status = response.data.shop_status;
 
@@ -433,7 +443,7 @@ const OwnerDashboardScreen = () => {
             const currencyBreakdown = shop_status.drawers.reduce((acc, drawer) => {
               // Expected amounts per currency
               acc.expected_zig = (acc.expected_zig || 0) + Number(drawer?.eod_expectations?.expected_zig || 0);
-              acc.expected_usd = (acc.expected_usd || 0) + Number(drawer?.eod_expectations?.expected_usd || 0);
+              acc.expected_usd = (acc.expected_usd || 0) + Number(drawer?.eod_expectations?.expected_cash || drawer?.eod_expectations?.expected_usd || 0);
               acc.expected_rand = (acc.expected_rand || 0) + Number(drawer?.eod_expectations?.expected_rand || 0);
               
               // Current amounts per currency - use current_breakdown_by_currency from backend
@@ -489,6 +499,40 @@ const OwnerDashboardScreen = () => {
     try {
       setSalesLoading(true);
       setSalesError(null);
+      
+      // Wait for shopStatus to be loaded before checking if shop is closed
+      // This ensures we have the correct shop status before making decisions
+      let attempts = 0;
+      while (shopStatus === null && attempts < 50) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        attempts++;
+      }
+      
+      // If the shop is closed, show zeroed sales data for current session
+      if (shopStatus && shopStatus.is_open === false) {
+        console.log('📊 Shop is closed, showing zeroed sales data for current session');
+        setSalesMetrics({
+          todaySales: 0,
+          todayTransactions: 0,
+          weekSales: 0,
+          weekTransactions: 0,
+          monthSales: 0,
+          monthTransactions: 0,
+          averageTransactionValue: 0,
+          topSellingProducts: [],
+          salesTrend: [],
+          totalRevenue: 0,
+          totalExpenses: 0,
+          totalProfit: 0,
+          shrinkageAnalysis: {},
+          categoryContribution: [],
+          paymentAnalysis: [],
+          performanceMetrics: {},
+          growthMetrics: {}
+        });
+        setSalesLoading(false);
+        return;
+      }
       
       console.log('📊 Fetching real sales data from analytics endpoint...');
       

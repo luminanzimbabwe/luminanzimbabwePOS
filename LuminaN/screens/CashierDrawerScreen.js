@@ -223,8 +223,10 @@ const CashierDrawerScreen = () => {
         return;
       }
       
-      console.log('📡 Loading today\'s drawer data for cashier:', cashierId);
-      const response = await shopAPI.getCashierDrawerToday(cashierId);
+      console.log('📡 Loading session drawer data for cashier:', cashierId);
+      // Use the NEW session endpoint that respects shop open/close state
+      // This ensures drawer only shows sales from current session (after shop was opened)
+      const response = await shopAPI.getCashierDrawerSession(cashierId);
       
       if (response.data && response.data.success) {
         const drawerData = response.data.drawer;

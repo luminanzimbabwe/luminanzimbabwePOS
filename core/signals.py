@@ -239,12 +239,15 @@ def update_cash_float_on_sale(sender, instance, created, **kwargs):
                 drawer.current_total = drawer.current_total_usd
             
             # Update expected cash at EOD (use primary currency's cash sales + float)
-            if primary_currency == 'ZIG':
-                drawer.expected_cash_at_eod = drawer.float_amount + drawer.session_cash_sales_zig
-            elif primary_currency == 'RAND':
-                drawer.expected_cash_at_eod = drawer.float_amount + drawer.session_cash_sales_rand
-            else:
-                drawer.expected_cash_at_eod = drawer.float_amount + drawer.session_cash_sales_usd
+            # CRITICAL FIX: Always update expected_cash_at_eod for ALL currencies, not just primary
+            # This ensures variance calculation works correctly for all currencies
+            drawer.expected_cash_at_eod = drawer.float_amount + drawer.session_cash_sales_usd
+            drawer.expected_cash_usd = drawer.float_amount + drawer.session_cash_sales_usd
+            drawer.expected_cash_zig = drawer.float_amount_zig + drawer.session_cash_sales_zig
+            drawer.expected_cash_rand = drawer.float_amount_rand + drawer.session_cash_sales_rand
+            
+            # Also call the model's method for additional consistency
+            drawer.update_expected_cash()
             
             # Update last activity
             drawer.last_activity = timezone.now()
