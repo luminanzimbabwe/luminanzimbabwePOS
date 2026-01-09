@@ -436,7 +436,7 @@ const StaffLunchScreen = () => {
           title: '✅ Staff Lunch Recorded Successfully!',
           message: `${lunchType === 'cash' ? 'Cash amount' : 'Products'} worth ${formatCurrency(lunchType === 'cash' ? parseFloat(cashAmount) : getTotalStockValue())} has been deducted from ${lunchType === 'cash' ? 'drawer' : 'inventory'} for ${staffName}`,
           details: lunchType === 'cash' 
-            ? `Cash amount deducted from drawer and staff lunch record created.`
+            ? `Cash amount: ${formatCurrency(parseFloat(cashAmount))}\nWallet Balance: ${response.data.wallet_balance !== undefined ? formatCurrency(response.data.wallet_balance) : 'N/A'}\nDrawer Balance: ${response.data.drawer_balance !== undefined ? formatCurrency(response.data.drawer_balance) : 'N/A'}`
             : `Products deducted from inventory and staff lunch record created.`
         });
         setShowResultModal(true);

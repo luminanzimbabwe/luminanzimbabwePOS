@@ -977,10 +977,12 @@ class Expense(models.Model):
 
 class StaffLunch(models.Model):
     shop = models.ForeignKey(ShopConfiguration, on_delete=models.CASCADE)
-    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    # Track which cashier's drawer this lunch was deducted from
+    cashier = models.ForeignKey('Cashier', on_delete=models.SET_NULL, null=True, blank=True, related_name='staff_lunches')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, null=True, blank=True)
     quantity = models.PositiveIntegerField()
-    unit_price = models.DecimalField(max_digits=10, decimal_places=2)  # Cost price at time of lunch
-    total_cost = models.DecimalField(max_digits=10, decimal_places=2)
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)  # Cost price at time of lunch
+    total_cost = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     currency = models.CharField(max_length=4, choices=Product.CURRENCY_CHOICES, default='USD')
     recorded_by = models.ForeignKey(Cashier, on_delete=models.SET_NULL, null=True, blank=True)
     notes = models.TextField(blank=True)
@@ -991,10 +993,20 @@ class StaffLunch(models.Model):
         verbose_name_plural = "Staff Lunches"
 
     def __str__(self):
+        if self.product is None:
+            return f"Staff Lunch: Money Lunch ${float(self.total_cost):.2f} x{self.quantity}"
         return f"Staff Lunch: {self.product.name} x{self.quantity}"
 
     def save(self, *args, **kwargs):
-        # Calculate total cost based on current cost price
+        # Handle money lunch (no product) - unit_price and total_cost are passed directly
+        if self.product is None:
+            # For money lunch, unit_price and total_cost should already be set
+            if self.total_cost == 0 and self.unit_price > 0:
+                self.total_cost = self.unit_price * self.quantity
+            super().save(*args, **kwargs)
+            return
+        
+        # Calculate total cost based on current cost price for product lunch
         self.unit_price = self.product.cost_price
         self.total_cost = self.unit_price * self.quantity
         self.currency = self.product.currency
@@ -3513,10 +3525,25 @@ def get_all_drawers_session(request):
             # Get drawer for float amounts (but NEVER use drawer session sales fields)
             drawer = CashFloat.get_active_drawer(shop, cashier)
             
+            # Calculate ALL staff lunch costs for today (not just this cashier's)
+            # Money lunch (product=None) deducts from drawer, so we need to subtract it from totals
+            all_staff_lunches = StaffLunch.objects.filter(
+                shop=shop,
+                created_at__range=[day_start, day_end],
+                product=None  # Money lunch (no product) - this is the cash deduction
+            )
+            total_staff_lunch_cost_usd = sum([float(lunch.total_cost) for lunch in all_staff_lunches])
+            
             # Calculate current totals from Sale table (NOT from drawer fields)
-            current_cash_usd = sales_by_currency['usd']['cash']
+            # CRITICAL: Subtract ALL staff lunch costs to get net drawer contents
+            current_cash_usd = sales_by_currency['usd']['cash'] - total_staff_lunch_cost_usd
             current_cash_zig = sales_by_currency['zig']['cash']
             current_cash_rand = sales_by_currency['rand']['cash']
+            
+            # Calculate total current by currency (subtract staff lunch from USD total only)
+            current_total_usd = sales_by_currency['usd']['total'] - total_staff_lunch_cost_usd
+            current_total_zig = sales_by_currency['zig']['total']
+            current_total_rand = sales_by_currency['rand']['total']
             
             # Use drawer float amounts but override current amounts from Sale table
             drawers_list.append({
@@ -3526,11 +3553,11 @@ def get_all_drawers_session(request):
                 'float_amount_zig': float(drawer.float_amount_zig),
                 'float_amount_rand': float(drawer.float_amount_rand),
                 'current_breakdown': {
-                    'cash': current_cash_usd,  # From Sale table
+                    'cash': current_cash_usd,  # From Sale table (after staff lunch deduction)
                     'card': sales_by_currency['usd']['card'] + sales_by_currency['zig']['card'] + sales_by_currency['rand']['card'],
                     'ecocash': sales_by_currency['usd']['ecocash'] + sales_by_currency['zig']['ecocash'] + sales_by_currency['rand']['ecocash'],
                     'transfer': sales_by_currency['usd']['transfer'] + sales_by_currency['zig']['transfer'] + sales_by_currency['rand']['transfer'],
-                    'total': sales_by_currency['usd']['total'] + sales_by_currency['zig']['total'] + sales_by_currency['rand']['total']
+                    'total': sales_by_currency['usd']['total'] + sales_by_currency['zig']['total'] + sales_by_currency['rand']['total'] - total_staff_lunch_cost_usd
                 },
                 'current_breakdown_by_currency': {
                     'usd': {

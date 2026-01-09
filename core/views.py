@@ -8,7 +8,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.utils import timezone
 from django.db import models, IntegrityError
-from django.db.models import Sum, F
+from django.db.models import Sum, F, Q
+from django.db.models.functions import Cast
 from datetime import timedelta
 from decimal import Decimal
 from .models import ShopConfiguration, Cashier, Product, Sale, SaleItem, Customer, Discount, Shift, Expense, StaffLunch, StockTake, StockTakeItem, InventoryLog, StockTransfer, Waste, ShopDay, CurrencyWallet, CurrencyTransaction
@@ -1167,12 +1168,12 @@ class StaffLunchListView(APIView):
     def get(self, request):
         shop = ShopConfiguration.objects.get()
         
-        # DEFAULT: Only show today's staff lunches (shop day aware)
-        # Get current shop day for session-aware filtering
+        # DEFAULT: Show today's staff lunches using date-based filtering
+        # Use timezone-agnostic date filtering to match local time records
         today = timezone.now().date()
-        current_shop_day = ShopDay.get_open_shop_day(shop)
         
-        # Build base queryset - filter by today's date by default
+        # Build base queryset - filter by today's date using date() lookup
+        # This matches records regardless of the timezone they were created in
         lunches = StaffLunch.objects.filter(
             shop=shop, 
             created_at__date=today
@@ -1530,7 +1531,49 @@ class StaffLunchDeductMoneyView(APIView):
                             status='ACTIVE'
                         )
             
-            # Deduct amount from drawer (real money)
+            # FIRST: Create the StaffLunch record (before any deductions)
+            staff_lunch = StaffLunch.objects.create(
+                shop=shop,
+                product=None,  # No product for money lunch
+                quantity=1,
+                total_cost=amount,
+                notes=f"MONEY LUNCH - Staff: {staff_name}, Amount: ${float(amount):.2f}, Reason: {reason}",
+                recorded_by=cashier
+            )
+            
+            # SECOND: Create expense record for tracking staff lunch as a business expense
+            expense = Expense.objects.create(
+                shop=shop,
+                expense_type='other',
+                description=f'Staff Lunch - {staff_name}: {reason}',
+                amount=amount,
+                currency='USD',
+                recorded_by=cashier
+            )
+            
+            # FOURTH: Validate sufficient funds before deduction
+            # Calculate available cash (current drawer cash + today's cash sales)
+            available_cash = cash_float.current_cash + cash_float.session_cash_sales
+            
+            # Also check USD-specific fields if they exist
+            if hasattr(cash_float, 'current_cash_usd'):
+                available_cash_usd = cash_float.current_cash_usd + cash_float.session_cash_sales_usd if hasattr(cash_float, 'session_cash_sales_usd') else cash_float.current_cash_usd
+                if amount > available_cash_usd:
+                    return Response({
+                        "error": f"Insufficient funds in drawer. Requested: ${float(amount):.2f}, Available: ${float(available_cash_usd):.2f}",
+                        "available_balance": float(available_cash_usd),
+                        "requested_amount": float(amount)
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                # Fallback to regular current_cash check
+                if amount > available_cash:
+                    return Response({
+                        "error": f"Insufficient funds in drawer. Requested: ${float(amount):.2f}, Available: ${float(available_cash):.2f}",
+                        "available_balance": float(available_cash),
+                        "requested_amount": float(amount)
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # FIFTH: Deduct amount from drawer (real money)
             cash_float.current_cash -= amount
             cash_float.current_cash_usd -= amount
             cash_float.current_total_usd -= amount
@@ -1543,49 +1586,16 @@ class StaffLunchDeductMoneyView(APIView):
             
             cash_float.save()
             
-            # Also deduct from currency wallet (track as STAFF_LUNCH withdrawal)
-            try:
-                wallet, _ = CurrencyWallet.objects.get_or_create(shop=shop)
-                balance_before = wallet.balance_usd
-                wallet.balance_usd -= amount
-                wallet.total_transactions += 1
-                wallet.save()
-                
-                # Create wallet transaction record for audit trail
-                CurrencyTransaction.objects.create(
-                    shop=shop,
-                    wallet=wallet,
-                    transaction_type='WITHDRAWAL',
-                    currency='USD',
-                    amount=amount,
-                    reference_type='StaffLunch',
-                    reference_id=staff_lunch.id if 'staff_lunch' in dir() else None,
-                    description=f'Staff Lunch - {staff_name}: {reason}',
-                    balance_after=wallet.balance_usd,
-                    performed_by=cashier
-                )
-                
-                print(f"✅ WALLET WITHDRAWAL: ${float(amount):.2f} deducted from wallet for staff lunch (balance: {wallet.balance_usd})")
-            except Exception as wallet_error:
-                print(f"⚠️ WARNING: Failed to update wallet for staff lunch: {wallet_error}")
-            
-            # Create expense record for tracking staff lunch as a business expense
-            expense = Expense.objects.create(
-                shop=shop,
-                expense_type='other',
-                description=f'Staff Lunch - {staff_name}: {reason}',
-                amount=amount,
-                currency='USD',
-                recorded_by=cashier
-            )
+            # NOTE: Wallet is NOT deducted for staff lunch
+            # Staff lunch is a cash expense from the drawer, not a wallet transaction
+            # The wallet tracks sales revenue only
             
             return Response({
                 "success": True,
-                "message": f"Money lunch recorded. ${float(amount):.2f} deducted from drawer and wallet for {staff_name}",
+                "message": f"Money lunch recorded. ${float(amount):.2f} deducted from drawer for {staff_name}",
                 "staff_name": staff_name,
                 "amount": float(amount),
-                "drawer_balance": float(cash_float.current_cash),
-                "wallet_balance": float(wallet.balance_usd) if 'wallet' in dir() else None
+                "drawer_balance": float(cash_float.current_cash)
             }, status=status.HTTP_201_CREATED)
             
         except Exception as e:
@@ -1618,6 +1628,21 @@ class StaffLunchDeductProductView(APIView):
         
         try:
             recorded_time = timezone.now()
+            frontend_timestamp = request.data.get('timestamp')
+            if frontend_timestamp:
+                try:
+                    # Parse the frontend timestamp and make it timezone-aware
+                    recorded_time = timezone.datetime.fromisoformat(frontend_timestamp.replace('Z', '+00:00'))
+                    # Convert to shop timezone if available
+                    if hasattr(timezone, 'get_current_timezone'):
+                        try:
+                            from django.utils.timezone import get_current_timezone
+                            recorded_time = recorded_time.astimezone(get_current_timezone())
+                        except Exception:
+                            pass
+                except (ValueError, TypeError):
+                    recorded_time = timezone.now()
+            
             created_lunches = []
             
             # Process each product
@@ -1648,7 +1673,7 @@ class StaffLunchDeductProductView(APIView):
                 product.stock_quantity = product.stock_quantity - Decimal(str(quantity))
                 product.save()
                 
-                # Create staff lunch record
+                # Create staff lunch record - use frontend timestamp or current time
                 staff_lunch = StaffLunch.objects.create(
                     shop=shop,
                     product=product,
@@ -1662,27 +1687,43 @@ class StaffLunchDeductProductView(APIView):
                     'product_id': product.id,
                     'product_name': product.name,
                     'quantity': quantity,
-                    'total_cost': float(staff_lunch.total_cost)
+                    'total_cost': float(staff_lunch.total_cost),
+                    'created_at': recorded_time  # Store timestamp for lookup
                 })
             
-            # Set recorded_by if cashier can be found
+            # Set recorded_by if cashier can be found - use the exact recorded_time
             if cashier_name:
                 try:
                     cashier = Cashier.objects.filter(shop=shop, name__icontains=cashier_name).first()
                     if cashier:
                         for lunch_data in created_lunches:
                             try:
+                                # Use the exact timestamp we stored
+                                lunch_time = lunch_data.get('created_at', recorded_time)
                                 lunch = StaffLunch.objects.get(
                                     shop=shop,
                                     product_id=lunch_data['product_id'],
-                                    created_at__gte=timezone.now() - timezone.timedelta(seconds=10)
+                                    created_at=lunch_time
                                 )
                                 lunch.recorded_by = cashier
                                 lunch.save()
+                                print(f"DEBUG: Set recorded_by to {cashier.name} for product lunch ID {lunch.id}")
                             except StaffLunch.DoesNotExist:
-                                pass
-                except Exception:
-                    pass
+                                # Fallback to time window search if exact match fails
+                                try:
+                                    lunch = StaffLunch.objects.get(
+                                        shop=shop,
+                                        product_id=lunch_data['product_id'],
+                                        created_at__gte=lunch_time - timezone.timedelta(seconds=30),
+                                        created_at__lte=lunch_time + timezone.timedelta(seconds=30)
+                                    )
+                                    lunch.recorded_by = cashier
+                                    lunch.save()
+                                    print(f"DEBUG: Set recorded_by (fallback) to {cashier.name} for product lunch ID {lunch.id}")
+                                except StaffLunch.DoesNotExist:
+                                    print(f"DEBUG: Could not find StaffLunch record to update for product {lunch_data['product_id']}")
+                except Exception as e:
+                    print(f"DEBUG: Error updating recorded_by: {e}")
             
             return Response({
                 "success": True,

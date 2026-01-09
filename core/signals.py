@@ -1,7 +1,7 @@
 # Auto-update cash float drawer when sales are made
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from core.models import Sale, CashFloat
+from core.models import Sale, CashFloat, StaffLunch
 from django.utils import timezone
 from django.db.models import Sum
 from django.db import transaction
@@ -248,6 +248,34 @@ def update_cash_float_on_sale(sender, instance, created, **kwargs):
             
             # Also call the model's method for additional consistency
             drawer.update_expected_cash()
+            
+            # CRITICAL FIX: Account for staff lunch deductions
+            # Staff lunch deductions are taken from the drawer, so we need to subtract them
+            # from the drawer cash to get the actual money remaining
+            today_staff_lunches = StaffLunch.objects.filter(
+                shop=shop,
+                created_at__range=[day_start, day_end],
+                product=None  # Money lunches only (deduct from drawer)
+            )
+            staff_lunch_total = today_staff_lunches.aggregate(total=Sum('total_cost'))['total'] or Decimal('0.00')
+            
+            # Subtract staff lunch from drawer cash USD (staff lunch is always in USD)
+            if staff_lunch_total > 0:
+                logger.info(f"Accounting for staff lunch deductions: ${staff_lunch_total}")
+                drawer.current_cash_usd -= staff_lunch_total
+                drawer.current_total_usd -= staff_lunch_total
+                drawer.session_cash_sales_usd -= staff_lunch_total
+                drawer.session_total_sales_usd -= staff_lunch_total
+                
+                # Also update expected cash (reduce it by staff lunch amount)
+                drawer.expected_cash_at_eod -= staff_lunch_total
+                drawer.expected_cash_usd -= staff_lunch_total
+                
+                # Update legacy fields too
+                drawer.current_cash -= staff_lunch_total
+                drawer.current_total -= staff_lunch_total
+                drawer.session_cash_sales -= staff_lunch_total
+                drawer.session_total_sales -= staff_lunch_total
             
             # Update last activity
             drawer.last_activity = timezone.now()

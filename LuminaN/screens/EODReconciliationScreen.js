@@ -63,8 +63,58 @@ const EODProductionScreen = () => {
     analysisAccuracy: 97.8,
   });
 
+  // Staff lunch state for deduction tracking
+  const [staffLunchMetrics, setStaffLunchMetrics] = useState({
+    todayLunches: 0,
+    totalValue: 0,
+    recentActivity: []
+  });
+
+  // Load staff lunch data for deduction tracking
+  const loadStaffLunchData = async () => {
+    try {
+      const response = await shopAPI.getStaffLunchHistory('limit=20');
+      
+      if (response.data && response.data.success) {
+        const lunches = response.data.data || [];
+        
+        // Calculate today's lunches
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        
+        const todayLunches = lunches.filter(lunch => {
+          const lunchDate = new Date(lunch.created_at);
+          return lunchDate >= today;
+        });
+        
+        // Calculate total value of today's lunches
+        const totalValue = todayLunches.reduce((sum, lunch) => {
+          if (lunch.notes?.includes('CASH LUNCH') && lunch.notes?.includes('Amount:')) {
+            const cashAmount = lunch.notes.match(/Amount: \$([0-9.]+)/)?.[1];
+            return sum + (parseFloat(cashAmount) || 0);
+          }
+          return sum + (parseFloat(lunch.total_cost) || 0);
+        }, 0);
+        
+        setStaffLunchMetrics({
+          todayLunches: todayLunches.length,
+          totalValue: totalValue,
+          recentActivity: todayLunches.slice(0, 5)
+        });
+      }
+    } catch (error) {
+      console.error('Failed to load staff lunch data:', error);
+      setStaffLunchMetrics({
+        todayLunches: 0,
+        totalValue: 0,
+        recentActivity: []
+      });
+    }
+  };
+
   useEffect(() => {
     loadAllData();
+    loadStaffLunchData();
 
     // Dynamic system metrics updater
     const systemUpdateInterval = setInterval(() => {
@@ -267,6 +317,7 @@ const EODProductionScreen = () => {
   };
 
   // Calculate per-cashier variance - shows if cashier has short or over
+  // Now accounts for staff lunch deductions
   const getCashierVariance = (drawer, verifiedCount) => {
     if (!drawer?.eod_expectations) return { variance: 0, status: 'pending', expected: 0, actual: 0 };
     
@@ -281,7 +332,12 @@ const EODProductionScreen = () => {
                         (drawer.current_breakdown_by_currency?.rand?.card || 0);
     
     // Total expected for this cashier (sum of all currencies)
-    const totalExpected = expectedZig + expectedUsd + expectedRand + expectedCard;
+    const totalExpectedBeforeLunch = expectedZig + expectedUsd + expectedRand + expectedCard;
+    
+    // Subtract staff lunch deductions from expected amount
+    // Staff lunches reduce the cash that should be in the drawer
+    const staffLunchDeduction = staffLunchMetrics.totalValue || 0;
+    const totalExpected = totalExpectedBeforeLunch - staffLunchDeduction;
     
     // Get verified/counted amounts
     const verified = verifiedCount || {};
@@ -323,7 +379,8 @@ const EODProductionScreen = () => {
         usd: { expected: expectedUsd, actual: actualUsd },
         rand: { expected: expectedRand, actual: actualRand },
         card: { expected: expectedCard, actual: actualCard }
-      }
+      },
+      staffLunchDeduction // Include for display purposes
     };
   };
 
@@ -389,11 +446,12 @@ const EODProductionScreen = () => {
     }
 
     const actual = cash_zig + cash_usd + cash_rand + card;
-    const variance = actual - expected.total;
+    const variance = actual - (expected.total - staffLunchMetrics.totalValue);
 
     return { 
       cash_zig, cash_usd, cash_rand, card, expected, actual, variance,
-      verifiedCash: cash_zig + cash_usd + cash_rand
+      verifiedCash: cash_zig + cash_usd + cash_rand,
+      expectedAfterLunch: expected.total - staffLunchMetrics.totalValue
     };
   }, [cashierCounts, reconciliationData, drawerStatus]);
 
@@ -710,8 +768,8 @@ const EODProductionScreen = () => {
                 <Icon name="attach-money" size={24} color="#00f5ff" />
                 <Text style={styles.neuralMetricTitle}>EXPECTED CASH USD</Text>
               </View>
-              <Text style={styles.neuralMetricValue}>${(stats.expected.cash_usd || 0).toLocaleString()}</Text>
-              <Text style={styles.neuralMetricSubtitle}>System calculated</Text>
+              <Text style={styles.neuralMetricValue}>${((stats.expected.cash_usd || 0) - staffLunchMetrics.totalValue).toLocaleString()}</Text>
+              <Text style={styles.neuralMetricSubtitle}>After lunch: ${staffLunchMetrics.totalValue.toFixed(2)}</Text>
             </View>
             
             <View style={styles.neuralMetricCard}>
@@ -780,6 +838,81 @@ const EODProductionScreen = () => {
           </View>
         </View>
 
+        {/* Staff Lunch Neural Grid - Showing Expected Minus Staff Lunch Deductions */}
+        <View style={styles.neuralFinancialSection}>
+          <View style={styles.neuralFinancialHeader}>
+            <Icon name="restaurant" size={28} color="#ffaa00" />
+            <Text style={styles.neuralFinancialTitle}>STAFF LUNCH DEDUCTIONS</Text>
+          </View>
+          
+          {/* Staff Lunch Metrics */}
+          <View style={styles.neuralMetricsGrid}>
+            <View style={styles.neuralMetricCard}>
+              <View style={styles.neuralMetricHeader}>
+                <Icon name="today" size={24} color="#ff0080" />
+                <Text style={styles.neuralMetricTitle}>TODAY'S LUNCHES</Text>
+              </View>
+              <Text style={styles.neuralMetricValue}>{staffLunchMetrics.todayLunches}</Text>
+              <Text style={styles.neuralMetricSubtitle}>Staff Meals</Text>
+            </View>
+            
+            <View style={styles.neuralMetricCard}>
+              <View style={styles.neuralMetricHeader}>
+                <Icon name="attach-money" size={24} color="#00f5ff" />
+                <Text style={styles.neuralMetricTitle}>TOTAL DEDUCTIONS</Text>
+              </View>
+              <Text style={[styles.neuralMetricValue, { color: '#ff4444' }]}>${staffLunchMetrics.totalValue.toFixed(2)}</Text>
+              <Text style={styles.neuralMetricSubtitle}>Staff Lunch Value</Text>
+            </View>
+          </View>
+          
+          {/* Expected After Staff Lunch */}
+          <View style={styles.neuralVarianceCard}>
+            <View style={styles.neuralVarianceIconContainer}>
+              <Icon name="calculate" size={32} color="#00ff88" />
+            </View>
+            <View style={styles.neuralVarianceContent}>
+              <Text style={styles.neuralVarianceTitle}>EXPECTED AFTER LUNCH DEDUCTIONS</Text>
+              <Text style={[styles.neuralVarianceAmount, { color: '#00ff88' }]}>
+                ${((stats.expected.cash_usd || 0) - staffLunchMetrics.totalValue).toFixed(2)}
+              </Text>
+              <Text style={styles.neuralVarianceSubtitle}>
+                USD Expected: ${(stats.expected.cash_usd || 0).toFixed(2)} - Staff Lunch: ${staffLunchMetrics.totalValue.toFixed(2)}
+              </Text>
+            </View>
+            <View style={[styles.neuralVariancePulse, { backgroundColor: '#00ff88' }]} />
+          </View>
+          
+          {/* Recent Staff Lunch Activity */}
+          {staffLunchMetrics.recentActivity.length > 0 && (
+            <View style={styles.neuralSummaryCard}>
+              <View style={styles.neuralSummaryHeader}>
+                <Icon name="history" size={20} color="#ffaa00" />
+                <Text style={styles.neuralSummaryTitle}>RECENT LUNCH ACTIVITY</Text>
+              </View>
+              {staffLunchMetrics.recentActivity.slice(0, 3).map((lunch, index) => (
+                <View key={lunch.id || index} style={styles.neuralSummaryContent}>
+                  <View style={styles.neuralSummaryItem}>
+                    <Text style={styles.neuralSummaryLabel}>
+                      {lunch.notes?.includes('Staff:') 
+                        ? lunch.notes.match(/Staff:\s*([^,]+)/)?.[1] || 'Staff'
+                        : 'Staff Member'}
+                    </Text>
+                    <Text style={styles.neuralSummaryValue}>
+                      ${lunch.notes?.includes('CASH LUNCH') && lunch.notes?.includes('Amount:')
+                        ? (lunch.notes.match(/Amount: \$([0-9.]+)/)?.[1] || '0.00')
+                        : parseFloat(lunch.total_cost || 0).toFixed(2)}
+                    </Text>
+                  </View>
+                  {index < Math.min(staffLunchMetrics.recentActivity.length - 1, 2) && (
+                    <View style={styles.neuralSummaryDivider} />
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+
         {/* Neural Cashier Verification Section */}
         <View style={styles.neuralCashierSection}>
           <View style={styles.neuralCashierHeader}>
@@ -844,6 +977,11 @@ const EODProductionScreen = () => {
                       <View style={styles.bigAmountBox}>
                         <Text style={styles.bigAmountLabel}>EXPECTED</Text>
                         <Text style={[styles.bigAmountValue, { color: '#ffaa00' }]}>${varianceData.expected.toFixed(2)}</Text>
+                        {varianceData.staffLunchDeduction > 0 && (
+                          <Text style={{ fontSize: 10, color: '#ff4444', marginTop: 2 }}>
+                            -${varianceData.staffLunchDeduction.toFixed(2)} lunch
+                          </Text>
+                        )}
                       </View>
                       <View style={styles.bigAmountDivider} />
                       <View style={styles.bigAmountBox}>

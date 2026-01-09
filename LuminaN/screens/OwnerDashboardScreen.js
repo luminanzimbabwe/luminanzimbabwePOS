@@ -882,7 +882,7 @@ const OwnerDashboardScreen = () => {
       
       // Get waste data with proper error handling for missing endpoints
       try {
-        const response = await shopAPI.getAnonymousEndpoint('/waste/');
+        const response = await shopAPI.getAnonymousEndpoint('/wastes/');
         
         if (response.data) {
           const wasteItems = response.data || [];
@@ -1562,10 +1562,15 @@ const OwnerDashboardScreen = () => {
           
           {/* Multi-Currency Financial Display - Clean Layout */}
           <View style={styles.financialMetricsMatrix}>
-            {/* Expected Total Row */}
+            {/* Expected Total Row - Show expected AFTER staff lunch deductions */}
             <View style={styles.currencyTotalRow}>
               <View style={styles.currencyTotalLabelBox}>
                 <Text style={styles.currencyTotalLabelText}>EXPECTED TOTAL</Text>
+                {staffLunchMetrics.totalValue > 0 && (
+                  <Text style={{ fontSize: 9, color: '#ff4444', marginTop: 4 }}>
+                    -${staffLunchMetrics.totalValue.toFixed(2)} lunch
+                  </Text>
+                )}
               </View>
               <View style={styles.currencyTotalValuesRow}>
                 <View style={styles.currencyTotalItem}>
@@ -1575,7 +1580,7 @@ const OwnerDashboardScreen = () => {
                 </View>
                 <View style={styles.currencyTotalItem}>
                   <Text style={styles.currencyTotalValueUsd}>
-                    ${(drawerStatus.cash_flow?.expected_usd || 0).toLocaleString()}
+                    ${Math.max(0, (drawerStatus.cash_flow?.expected_usd || 0) - staffLunchMetrics.totalValue).toLocaleString()}
                   </Text>
                 </View>
                 <View style={styles.currencyTotalItem}>
@@ -1618,22 +1623,35 @@ const OwnerDashboardScreen = () => {
               </Text>
             </View>
             
-            {/* Variance Matrix */}
-            <View style={styles.totalVarianceCard}>
-              <View style={styles.totalVarianceHeader}>
-                <Icon name="analytics" size={20} color="#ff0080" />
-                <Text style={styles.totalVarianceTitle}>VARIANCE MATRIX</Text>
-              </View>
-              <Text style={[
-                styles.totalVarianceAmount,
-                { color: (drawerStatus.cash_flow?.variance || 0) >= 0 ? '#00ff88' : '#ff4444' }
-              ]}>
-                {(drawerStatus.cash_flow?.variance || 0) >= 0 ? 'SURPLUS DETECTED' : 'DEFICIT DETECTED'}
-              </Text>
-              <Text style={styles.totalVarianceValue}>
-                ${Math.abs(drawerStatus.cash_flow?.variance || 0).toLocaleString()}
-              </Text>
-            </View>
+            {/* Variance Matrix - Calculate based on expected AFTER lunch deductions */}
+            {(() => {
+              const expectedAfterLunch = (drawerStatus.cash_flow?.total_expected_cash || 0) - staffLunchMetrics.totalValue;
+              const currentTotal = drawerStatus.cash_flow?.total_current_cash || 0;
+              const variance = currentTotal - Math.max(0, expectedAfterLunch);
+              const isSurplus = variance >= 0;
+              return (
+                <View style={styles.totalVarianceCard}>
+                  <View style={styles.totalVarianceHeader}>
+                    <Icon name="analytics" size={20} color="#ff0080" />
+                    <Text style={styles.totalVarianceTitle}>VARIANCE MATRIX</Text>
+                  </View>
+                  <Text style={[
+                    styles.totalVarianceAmount,
+                    { color: isSurplus ? '#00ff88' : '#ff4444' }
+                  ]}>
+                    {isSurplus ? 'SURPLUS DETECTED' : 'SHORTAGE DETECTED'}
+                  </Text>
+                  <Text style={styles.totalVarianceValue}>
+                    ${Math.abs(variance).toLocaleString()}
+                  </Text>
+                  {staffLunchMetrics.totalValue > 0 && (
+                    <Text style={{ fontSize: 10, color: '#ffaa00', marginTop: 8, textAlign: 'center' }}>
+                      (After ${staffLunchMetrics.totalValue.toFixed(2)} lunch deductions)
+                    </Text>
+                  )}
+                </View>
+              );
+            })()}
           </View>
         </View>
       )}
