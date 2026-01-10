@@ -575,7 +575,7 @@ const OwnerDashboardScreen = () => {
               zig_variance: finalZigVariance,
               usd_variance: finalUsdVariance,
               rand_variance: finalRandVariance,
-              // Recalculate total from currency breakdown (excluding transfers for variance)
+              // Recalculate totals from currency breakdown (for display)
               total_expected_cash: (currencyBreakdown.expected_zig || 0) + (currencyBreakdown.expected_usd || 0) + (currencyBreakdown.expected_rand || 0),
               total_current_cash: (currencyBreakdown.current_zig || 0) + (currencyBreakdown.current_usd || 0) + (currencyBreakdown.current_rand || 0),
               variance: finalZigVariance + finalUsdVariance + finalRandVariance,
@@ -1734,7 +1734,11 @@ const OwnerDashboardScreen = () => {
             <View style={styles.realTimeTotalRow}>
               <Text style={styles.realTimeTotalLabel}>REAL-TIME TOTAL</Text>
               <Text style={styles.realTimeTotalValue}>
-                ${(drawerStatus.cash_flow?.total_current_cash || 0).toLocaleString()}
+                ${(
+                  (drawerStatus.cash_flow?.current_usd || 0) + 
+                  (drawerStatus.cash_flow?.current_zig || 0) + 
+                  (drawerStatus.cash_flow?.current_rand || 0)
+                ).toLocaleString()}
               </Text>
             </View>
             
@@ -1916,21 +1920,44 @@ const OwnerDashboardScreen = () => {
               </View>
             </View>
             
-            {/* Variance Matrix - Calculate based on expected AFTER lunch deductions and EXCLUDING transfers (card payments are tracked separately and don't affect cash variance) */}
+            {/* Variance Matrix - Calculate based on actual cash in drawer (current - transfers - cards) vs expected */}
             {(() => {
               const expectedAfterLunch = (drawerStatus.cash_flow?.total_expected_cash || 0) - staffLunchMetrics.totalValue;
-              const currentTotal = drawerStatus.cash_flow?.total_current_cash || 0;
-              const totalTransfers = (drawerStatus.cash_flow?.transfer_usd || 0) + 
-                                     (drawerStatus.cash_flow?.transfer_zig || 0) + 
-                                     (drawerStatus.cash_flow?.transfer_rand || 0);
-              const totalCardPayments = (drawerStatus.cash_flow?.card_usd || 0) + 
-                                        (drawerStatus.cash_flow?.card_zig || 0) + 
-                                        (drawerStatus.cash_flow?.card_rand || 0);
               
-              // Variance = current cash (after transfers removed) - expected (after lunch deductions)
-              // Card payments don't go to drawer, so they're excluded from variance calculation
-              const variance = currentTotal - Math.max(0, expectedAfterLunch) - totalTransfers;
-              const isSurplus = variance >= 0;
+              // Get individual currency values
+              const currentUsd = drawerStatus.cash_flow?.current_usd || 0;
+              const currentZig = drawerStatus.cash_flow?.current_zig || 0;
+              const currentRand = drawerStatus.cash_flow?.current_rand || 0;
+              
+              const transferUsd = drawerStatus.cash_flow?.transfer_usd || 0;
+              const transferZig = drawerStatus.cash_flow?.transfer_zig || 0;
+              const transferRand = drawerStatus.cash_flow?.transfer_rand || 0;
+              
+              const cardUsd = drawerStatus.cash_flow?.card_usd || 0;
+              const cardZig = drawerStatus.cash_flow?.card_zig || 0;
+              const cardRand = drawerStatus.cash_flow?.card_rand || 0;
+              
+              const expectedUsd = drawerStatus.cash_flow?.expected_usd || 0;
+              const expectedZig = drawerStatus.cash_flow?.expected_zig || 0;
+              const expectedRand = drawerStatus.cash_flow?.expected_rand || 0;
+              
+              // Calculate actual cash in drawer per currency
+              const actualCashUsd = currentUsd - transferUsd - cardUsd;
+              const actualCashZig = currentZig - transferZig - cardZig;
+              const actualCashRand = currentRand - transferRand - cardRand;
+              
+              // Calculate variance per currency (actual cash - expected)
+              const varianceUsd = actualCashUsd - expectedUsd;
+              const varianceZig = actualCashZig - expectedZig;
+              const varianceRand = actualCashRand - expectedRand;
+              
+              // Total variance
+              const totalVariance = varianceUsd + varianceZig + varianceRand;
+              
+              const totalTransfers = transferUsd + transferZig + transferRand;
+              const totalCardPayments = cardUsd + cardZig + cardRand;
+              
+              const isSurplus = totalVariance >= 0;
               return (
                 <View style={styles.totalVarianceCard}>
                   <View style={styles.totalVarianceHeader}>
@@ -1944,7 +1971,7 @@ const OwnerDashboardScreen = () => {
                     {isSurplus ? 'SURPLUS DETECTED' : 'SHORTAGE DETECTED'}
                   </Text>
                   <Text style={styles.totalVarianceValue}>
-                    ${Math.abs(variance).toLocaleString()}
+                    ${Math.abs(totalVariance).toLocaleString()}
                   </Text>
                   {staffLunchMetrics.totalValue > 0 && (
                     <Text style={{ fontSize: 10, color: '#ffaa00', marginTop: 8, textAlign: 'center' }}>

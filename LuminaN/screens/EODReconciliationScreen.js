@@ -1179,7 +1179,7 @@ const EODProductionScreen = () => {
                       </View>
                     )}
                     
-                    {/* Currency breakdown */}
+                    {/* Currency breakdown - CASH ONLY */}
                     <View style={styles.currencyRow}>
                       <View style={styles.currencyItem}>
                         <Text style={styles.currencyLabel}>ZW$</Text>
@@ -1199,43 +1199,13 @@ const EODProductionScreen = () => {
                           {varianceData.breakdown.rand.actual > 0 ? varianceData.breakdown.rand.actual.toFixed(2) : '—'}
                         </Text>
                       </View>
-                      <View style={styles.currencyItem}>
-                        <Text style={[styles.currencyLabel, { color: '#8b5cf6' }]}>CARD</Text>
-                        <Text style={[styles.currencyValue, { color: '#8b5cf6' }]}>
-                          {varianceData.breakdown.card.actual > 0 ? varianceData.breakdown.card.actual.toFixed(2) : '—'}
-                        </Text>
-                      </View>
                     </View>
                     
-                    {/* Tap Instruction */}
+                    {/* Tap Instruction - PROMINENT */}
                     {varianceData.varianceType === 'pending' && (
-                      <View style={styles.tapInstructionRow}>
-                        <Icon name="touch-app" size={16} color="#00f5ff" />
-                        <Text style={styles.tapInstructionText}>TAP HERE TO COUNT CASH</Text>
-                      </View>
-                    )}
-                    
-                    {/* Transfer breakdown */}
-                    {varianceData.totalTransfer > 0 && (
-                      <View style={styles.transferCurrencyRow}>
-                        <View style={styles.transferCurrencyItem}>
-                          <Text style={styles.transferCurrencyLabel}>TRANSFER USD</Text>
-                          <Text style={styles.transferCurrencyValue}>
-                            {varianceData.breakdown.transfers.usd.actual > 0 ? varianceData.breakdown.transfers.usd.actual.toFixed(2) : '—'}
-                          </Text>
-                        </View>
-                        <View style={styles.transferCurrencyItem}>
-                          <Text style={[styles.transferCurrencyLabel, { color: '#ffffff' }]}>TRANSFER ZW$</Text>
-                          <Text style={[styles.transferCurrencyValue, { color: '#ffffff' }]}>
-                            {varianceData.breakdown.transfers.zig.actual > 0 ? varianceData.breakdown.transfers.zig.actual.toFixed(2) : '—'}
-                          </Text>
-                        </View>
-                        <View style={styles.transferCurrencyItem}>
-                          <Text style={[styles.transferCurrencyLabel, { color: '#ffaa00' }]}>TRANSFER R</Text>
-                          <Text style={[styles.transferCurrencyValue, { color: '#ffaa00' }]}>
-                            {varianceData.breakdown.transfers.rand.actual > 0 ? varianceData.breakdown.transfers.rand.actual.toFixed(2) : '—'}
-                          </Text>
-                        </View>
+                      <View style={styles.tapToCountRow}>
+                        <Icon name="touch-app" size={24} color="#00f5ff" />
+                        <Text style={styles.tapToCountText}>TAP HERE TO COUNT CASH</Text>
                       </View>
                     )}
                     
@@ -2341,6 +2311,27 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginLeft: 8,
     letterSpacing: 1,
+  },
+  // Prominent Tap to Count Row
+  tapToCountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 245, 255, 0.2)',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    marginTop: 16,
+    marginBottom: 8,
+    borderWidth: 2,
+    borderColor: '#00f5ff',
+  },
+  tapToCountText: {
+    color: '#00f5ff',
+    fontSize: 16,
+    fontWeight: '900',
+    marginLeft: 12,
+    letterSpacing: 2,
   },
   
   // Neural Notes Section
