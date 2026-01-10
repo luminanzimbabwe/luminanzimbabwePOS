@@ -417,172 +417,34 @@ const OwnerDashboardScreen = () => {
           return;
         }
 
-        // If API returns zeroed aggregate cash_flow but includes drawer details,
-        // compute aggregated totals from drawer entries so the dashboard shows live numbers.
+        // Use the backend-calculated values directly - no frontend recalculation needed
+        // The backend now calculates everything correctly from the Sale table
         if (shop_status) {
+          // Backend already provides all the currency breakdowns we need
+          // Just ensure the values are properly formatted as numbers
           const cashFlow = shop_status.cash_flow || {};
-          const hasZeroAggregates = (Number(cashFlow.total_current_cash || 0) === 0 && Number(cashFlow.total_expected_cash || 0) === 0);
 
-          if (hasZeroAggregates && Array.isArray(shop_status.drawers) && shop_status.drawers.length > 0) {
-            const totalCurrent = shop_status.drawers.reduce((sum, d) => {
-              const c = d?.current_breakdown?.total ?? d?.current_breakdown?.cash ?? 0;
-              return sum + Number(c || 0);
-            }, 0);
-            const totalExpected = shop_status.drawers.reduce((sum, d) => {
-              return sum + Number(d?.eod_expectations?.expected_cash || 0);
-            }, 0);
-            const variance = totalCurrent - totalExpected;
+          // Ensure all currency values are numbers
+          shop_status.cash_flow = {
+            ...cashFlow,
+            current_usd: Number(cashFlow.current_usd || 0),
+            current_zig: Number(cashFlow.current_zig || 0),
+            current_rand: Number(cashFlow.current_rand || 0),
+            expected_usd: Number(cashFlow.expected_usd || 0),
+            expected_zig: Number(cashFlow.expected_zig || 0),
+            expected_rand: Number(cashFlow.expected_rand || 0),
+            transfer_usd: Number(cashFlow.transfer_usd || 0),
+            transfer_zig: Number(cashFlow.transfer_zig || 0),
+            transfer_rand: Number(cashFlow.transfer_rand || 0),
+            card_usd: Number(cashFlow.card_usd || 0),
+            card_zig: Number(cashFlow.card_zig || 0),
+            card_rand: Number(cashFlow.card_rand || 0),
+            usd_variance: Number(cashFlow.usd_variance || 0),
+            zig_variance: Number(cashFlow.zig_variance || 0),
+            rand_variance: Number(cashFlow.rand_variance || 0),
+          };
 
-            shop_status = {
-              ...shop_status,
-              cash_flow: {
-                total_expected_cash: totalExpected,
-                total_current_cash: totalCurrent,
-                variance: variance,
-              }
-            };
-          }
-          
-                      // Calculate multi-currency breakdowns from drawer data
-          if (Array.isArray(shop_status.drawers) && shop_status.drawers.length > 0) {
-            const currencyBreakdown = shop_status.drawers.reduce((acc, drawer) => {
-              // Expected amounts per currency
-              acc.expected_zig = (acc.expected_zig || 0) + Number(drawer?.eod_expectations?.expected_zig || 0);
-              acc.expected_usd = (acc.expected_usd || 0) + Number(drawer?.eod_expectations?.expected_cash || drawer?.eod_expectations?.expected_usd || 0);
-              acc.expected_rand = (acc.expected_rand || 0) + Number(drawer?.eod_expectations?.expected_rand || 0);
-              
-              // Current amounts per currency - use current_breakdown_by_currency from backend
-              const breakdownByCurrency = drawer?.current_breakdown_by_currency || {};
-              
-              // Get current total from current_breakdown_by_currency.zig.total or fallback to direct fields
-              acc.current_zig = (acc.current_zig || 0) + (Number(breakdownByCurrency?.zig?.total || 0) || Number(drawer?.current_total_zig || 0));
-              acc.current_usd = (acc.current_usd || 0) + (Number(breakdownByCurrency?.usd?.total || 0) || Number(drawer?.current_total_usd || 0));
-              acc.current_rand = (acc.current_rand || 0) + (Number(breakdownByCurrency?.rand?.total || 0) || Number(drawer?.current_total_rand || 0));
-              
-              // Transfer amounts per currency - extract from drawer transfer data
-              // Also try to extract from current_breakdown_by_currency
-              acc.transfer_zig = (acc.transfer_zig || 0) + (
-                Number(breakdownByCurrency?.zig?.transfer || 0) ||
-                Number(drawer?.transfer_zig || 0) ||
-                Number(drawer?.transfers?.zig || 0) ||
-                0
-              );
-              acc.transfer_usd = (acc.transfer_usd || 0) + (
-                Number(breakdownByCurrency?.usd?.transfer || 0) ||
-                Number(drawer?.transfer_usd || 0) ||
-                Number(drawer?.transfers?.usd || 0) ||
-                0
-              );
-              acc.transfer_rand = (acc.transfer_rand || 0) + (
-                Number(breakdownByCurrency?.rand?.transfer || 0) ||
-                Number(drawer?.transfer_rand || 0) ||
-                Number(drawer?.transfers?.rand || 0) ||
-                0
-              );
-              
-              // Card amounts per currency - extract from drawer card data
-              acc.card_zig = (acc.card_zig || 0) + (
-                Number(breakdownByCurrency?.zig?.card || 0) ||
-                Number(drawer?.card_zig || 0) ||
-                Number(drawer?.card_payments?.zig || 0) ||
-                0
-              );
-              acc.card_usd = (acc.card_usd || 0) + (
-                Number(breakdownByCurrency?.usd?.card || 0) ||
-                Number(drawer?.card_usd || 0) ||
-                Number(drawer?.card_payments?.usd || 0) ||
-                0
-              );
-              acc.card_rand = (acc.card_rand || 0) + (
-                Number(breakdownByCurrency?.rand?.card || 0) ||
-                Number(drawer?.card_rand || 0) ||
-                Number(drawer?.card_payments?.rand || 0) ||
-                0
-              );
-              
-              // Also track cash payments per currency (non-card, non-transfer)
-              acc.cash_zig = (acc.cash_zig || 0) + (
-                Number(breakdownByCurrency?.zig?.cash || 0) ||
-                Number(drawer?.cash_zig || 0) ||
-                0
-              );
-              acc.cash_usd = (acc.cash_usd || 0) + (
-                Number(breakdownByCurrency?.usd?.cash || 0) ||
-                Number(drawer?.cash_usd || 0) ||
-                0
-              );
-              acc.cash_rand = (acc.cash_rand || 0) + (
-                Number(breakdownByCurrency?.rand?.cash || 0) ||
-                Number(drawer?.cash_rand || 0) ||
-                0
-              );
-              
-              return acc;
-            }, {});
-            
-            // If transfers and cards are all 0, but we have current totals, 
-            // try to calculate them from the cash_flow if available
-            const totalTransfers = (currencyBreakdown.transfer_zig || 0) + (currencyBreakdown.transfer_usd || 0) + (currencyBreakdown.transfer_rand || 0);
-            const totalCards = (currencyBreakdown.card_zig || 0) + (currencyBreakdown.card_usd || 0) + (currencyBreakdown.card_rand || 0);
-            const totalCash = (currencyBreakdown.cash_zig || 0) + (currencyBreakdown.cash_usd || 0) + (currencyBreakdown.cash_rand || 0);
-            
-            // If all payment breakdowns are 0 but we have current totals, 
-            // use the current totals as fallback (user might have other payment methods)
-            if (totalTransfers === 0 && totalCards === 0 && totalCash === 0) {
-              const totalCurrent = (currencyBreakdown.current_zig || 0) + (currencyBreakdown.current_usd || 0) + (currencyBreakdown.current_rand || 0);
-              if (totalCurrent > 0) {
-                // Distribute proportionally or assign to cash as fallback
-                currencyBreakdown.cash_usd = currencyBreakdown.current_usd || 0;
-                currencyBreakdown.cash_zig = currencyBreakdown.current_zig || 0;
-                currencyBreakdown.cash_rand = currencyBreakdown.current_rand || 0;
-              }
-            }
-            
-            // Add fallback: calculate cash as current - transfers - cards if not provided
-            if ((currencyBreakdown.cash_usd || 0) === 0 && (currencyBreakdown.current_usd || 0) > 0) {
-              currencyBreakdown.cash_usd = (currencyBreakdown.current_usd || 0) - (currencyBreakdown.transfer_usd || 0) - (currencyBreakdown.card_usd || 0);
-            }
-            if ((currencyBreakdown.cash_zig || 0) === 0 && (currencyBreakdown.current_zig || 0) > 0) {
-              currencyBreakdown.cash_zig = (currencyBreakdown.current_zig || 0) - (currencyBreakdown.transfer_zig || 0) - (currencyBreakdown.card_zig || 0);
-            }
-            if ((currencyBreakdown.cash_rand || 0) === 0 && (currencyBreakdown.current_rand || 0) > 0) {
-              currencyBreakdown.cash_rand = (currencyBreakdown.current_rand || 0) - (currencyBreakdown.transfer_rand || 0) - (currencyBreakdown.card_rand || 0);
-            }
-            
-            // Ensure cash values are not negative
-            currencyBreakdown.cash_usd = Math.max(0, currencyBreakdown.cash_usd || 0);
-            currencyBreakdown.cash_zig = Math.max(0, currencyBreakdown.cash_zig || 0);
-            currencyBreakdown.cash_rand = Math.max(0, currencyBreakdown.cash_rand || 0);
-            
-            // Calculate variances per currency (current - expected)
-            const zigVariance = (currencyBreakdown.current_zig || 0) - (currencyBreakdown.expected_zig || 0);
-            const usdVariance = (currencyBreakdown.current_usd || 0) - (currencyBreakdown.expected_usd || 0);
-            const randVariance = (currencyBreakdown.current_rand || 0) - (currencyBreakdown.expected_rand || 0);
-            
-            // Calculate adjusted variance EXCLUDING transfers (transfers are intentional money movements, not surplus/deficit)
-            const adjustedZigVariance = zigVariance - (currencyBreakdown.transfer_zig || 0);
-            const adjustedUsdVariance = usdVariance - (currencyBreakdown.transfer_usd || 0);
-            const adjustedRandVariance = randVariance - (currencyBreakdown.transfer_rand || 0);
-            
-            // Also exclude card payments from variance (they don't go to drawer)
-            const finalZigVariance = adjustedZigVariance - (currencyBreakdown.card_zig || 0);
-            const finalUsdVariance = adjustedUsdVariance - (currencyBreakdown.card_usd || 0);
-            const finalRandVariance = adjustedRandVariance - (currencyBreakdown.card_rand || 0);
-            
-            shop_status.cash_flow = {
-              ...shop_status.cash_flow,
-              ...currencyBreakdown,
-              zig_variance: finalZigVariance,
-              usd_variance: finalUsdVariance,
-              rand_variance: finalRandVariance,
-              // Recalculate totals from currency breakdown (for display)
-              total_expected_cash: (currencyBreakdown.expected_zig || 0) + (currencyBreakdown.expected_usd || 0) + (currencyBreakdown.expected_rand || 0),
-              total_current_cash: (currencyBreakdown.current_zig || 0) + (currencyBreakdown.current_usd || 0) + (currencyBreakdown.current_rand || 0),
-              variance: finalZigVariance + finalUsdVariance + finalRandVariance,
-            };
-            
-            console.log('💰 Calculated currency breakdown:', currencyBreakdown);
-          }
+          console.log('💰 Using backend-calculated currency breakdown:', shop_status.cash_flow);
         }
 
         setDrawerStatus(shop_status);

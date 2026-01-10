@@ -2343,18 +2343,51 @@ const CashierDashboardScreen = () => {
   };
 
   // Print vintage receipt function
-  const printVintageReceipt = (saleData, total, received, currency = 'USD') => {
+  const printVintageReceipt = (saleData, total, received, currency = 'USD', isSplitPayment = false, splitPaymentsData = null, paymentMethod = 'cash', transferWallet = '', cardNetwork = '', cardLast4 = '') => {
     const now = new Date();
     const receiptNumber = saleData.id || 'N/A';
     const cashierName = cashierData?.name || 'Cashier';
-    
+
     // Calculate change properly
     const change = Math.max(0, (parseFloat(received) || 0) - total);
-    
+
     // Get payment method and currency for receipt - Multi-Currency Support
-    const receiptPaymentMethod = `${currency} CASH`;
-    const receiptCurrency = currency.toLowerCase();
-    
+    let receiptPaymentMethod = `${currency} CASH`;
+    let receiptCurrency = currency.toLowerCase();
+    let paymentIcon = '💵';
+
+    // Handle split payment details - Make more informative
+    if (isSplitPayment && splitPaymentsData) {
+      const splitDetails = splitPaymentsData
+        .filter(p => parseFloat(p.amount) > 0)
+        .map(p => {
+          if (p.paymentMethod === 'cash') {
+            return `${p.currency} CASH: ${formatCurrencyWithSymbol(parseFloat(p.amount), p.currency)}`;
+          } else if (p.paymentMethod === 'transfer') {
+            return `TRANSFER (${p.wallet || 'BANK'}): ${formatCurrencyWithSymbol(parseFloat(p.amount), p.currency)}`;
+          } else if (p.paymentMethod === 'card') {
+            return `CARD (${p.wallet || 'CARD'}): ${formatCurrencyWithSymbol(parseFloat(p.amount), p.currency)}`;
+          }
+          return `${p.paymentMethod.toUpperCase()}: ${formatCurrencyWithSymbol(parseFloat(p.amount), p.currency)}`;
+        })
+        .join('\n');
+      receiptPaymentMethod = `SPLIT PAYMENT\n${splitDetails}`;
+      receiptCurrency = 'usd'; // Use USD as base for split payments
+      paymentIcon = '💰';
+    } else {
+      // Single payment - show specific payment method details with more clarity
+      if (paymentMethod === 'cash') {
+        receiptPaymentMethod = `${currency} CASH PAYMENT`;
+        paymentIcon = '💵';
+      } else if (paymentMethod === 'transfer') {
+        receiptPaymentMethod = `TRANSFER PAYMENT\n${transferWallet || 'BANK TRANSFER'} (${currency})`;
+        paymentIcon = '📱';
+      } else if (paymentMethod === 'card') {
+        receiptPaymentMethod = `CARD PAYMENT\n${cardNetwork || 'CARD'} ****${cardLast4 || ''} (${currency})`;
+        paymentIcon = '💳';
+      }
+    }
+
     // Convert amounts to receipt currency for display
     // Note: received amount is NOT converted because cashier types it in the selected currency
     // Note: total is already converted by getTotalAmount(), so no conversion needed
@@ -2778,13 +2811,15 @@ const CashierDashboardScreen = () => {
           .payment-method {
             background: #e0f2fe;
             border: 1px solid #0ea5e9;
-            padding: 6px 12px;
-            border-radius: 4px;
+            padding: 8px 12px;
+            border-radius: 6px;
             font-size: 12px;
             font-weight: bold;
             color: #0c4a6e;
             text-align: center;
-            margin: 4px 0;
+            margin: 6px 0;
+            white-space: pre-line;
+            line-height: 1.4;
           }
         </style>
       </head>
@@ -2872,15 +2907,26 @@ const CashierDashboardScreen = () => {
                 <span>Subtotal:</span>
                 <span>${formatCurrencyWithSymbol(totalInReceiptCurrency, receiptCurrency)}</span>
               </div>
-              <div class="payment-method">💵 ${receiptPaymentMethod} PAYMENT</div>
-              <div class="total-line">
-                <span>Cash Received:</span>
-                <span>${formatCurrencyWithSymbol(receivedInReceiptCurrency, receiptCurrency)}</span>
-              </div>
-              <div class="total-line">
-                <span>Change Due:</span>
-                <span style="color: #059669;">${formatCurrencyWithSymbol(changeInReceiptCurrency, receiptCurrency)}</span>
-              </div>
+              <div class="payment-method">${paymentIcon} ${receiptPaymentMethod}</div>
+              ${isSplitPayment ?
+                `<div class="total-line">
+                  <span>Total Paid:</span>
+                  <span>${formatCurrencyWithSymbol(receivedInReceiptCurrency, receiptCurrency)}</span>
+                </div>` :
+                paymentMethod === 'cash' ?
+                `<div class="total-line">
+                  <span>Cash Received:</span>
+                  <span>${formatCurrencyWithSymbol(receivedInReceiptCurrency, receiptCurrency)}</span>
+                </div>
+                <div class="total-line">
+                  <span>Change Due:</span>
+                  <span style="color: #059669;">${formatCurrencyWithSymbol(changeInReceiptCurrency, receiptCurrency)}</span>
+                </div>` :
+                `<div class="total-line">
+                  <span>Amount Paid:</span>
+                  <span>${formatCurrencyWithSymbol(receivedInReceiptCurrency, receiptCurrency)}</span>
+                </div>`
+              }
               <div class="total-line grand-total">
                 <span>TOTAL:</span>
                 <span>${formatCurrencyWithSymbol(totalInReceiptCurrency, receiptCurrency)}</span>
@@ -3132,10 +3178,16 @@ const CashierDashboardScreen = () => {
         if (useSplitPayment) {
           // Generate split payment receipt
           printVintageReceipt(
-            response.data, 
-            getTotalAmount(), 
-            getSplitPaymentTotalUSD(), 
-            'USD'
+            response.data,
+            getTotalAmount(),
+            getSplitPaymentTotalUSD(),
+            'USD',
+            true, // isSplitPayment
+            splitPayments, // splitPaymentsData
+            'split',
+            '',
+            '',
+            ''
           );
           
           // Build payment method description for split payments
@@ -3170,7 +3222,7 @@ const CashierDashboardScreen = () => {
           );
         } else {
           // Original single payment receipt
-          printVintageReceipt(response.data, getTotalAmount(), receivedAmount, selectedCurrency);
+          printVintageReceipt(response.data, getTotalAmount(), receivedAmount, selectedCurrency, false, null, paymentMethod, transferWallet, cardNetwork, cardLast4);
           
           const calculatedChange = Math.max(0, receivedAmount - getTotalAmount());
           const updatedItems = cart.map(item => `${item.name}: ${item.stock_quantity - item.quantity} remaining`).join('\n');
