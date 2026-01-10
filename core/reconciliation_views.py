@@ -297,9 +297,14 @@ class EODReconciliationEnhancedView(APIView):
         cashier_counts = CashierCount.objects.filter(shop=shop, date=date)
         
         # Get original reconciliation data for expected amounts
+        # Create a minimal request-like object to avoid None query params
+        from django.test import RequestFactory
+        factory = RequestFactory()
+        original_request = factory.get('/api/v1/shop/reconciliation/', {'date': date.isoformat()})
+        
         from .sales_command_center_views import EODReconciliationView
         original_view = EODReconciliationView()
-        original_response = original_view.get(request)
+        original_response = original_view.get(original_request)
         
         if original_response.status_code == 200:
             original_data = original_response.data
@@ -316,7 +321,12 @@ class EODReconciliationEnhancedView(APIView):
                     'net_cash_sales': 0, 'net_card_sales': 0, 'net_ecocash_sales': 0
                 },
                 'expected_cash': {'opening_float': 0, 'cash_sales': 0, 'cash_refunds': 0, 'expected_total': 0},
-                'discrepancies': {'overage': 0, 'shortage': 0, 'variance': 0}
+                'discrepancies': {'overage': 0, 'shortage': 0, 'variance': 0},
+                'sales_by_currency': {
+                    'usd': {'cash_sales': 0, 'card_sales': 0, 'ecocash_sales': 0, 'transfer_sales': 0, 'total_sales': 0},
+                    'zig': {'cash_sales': 0, 'card_sales': 0, 'ecocash_sales': 0, 'transfer_sales': 0, 'total_sales': 0},
+                    'rand': {'cash_sales': 0, 'card_sales': 0, 'ecocash_sales': 0, 'transfer_sales': 0, 'total_sales': 0}
+                }
             }
         
         # Calculate actual totals from cashier counts

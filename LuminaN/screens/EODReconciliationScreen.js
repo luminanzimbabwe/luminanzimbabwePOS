@@ -40,18 +40,16 @@ const EODProductionScreen = () => {
   const [showModal, setShowModal] = useState(false);
   const [currentCashier, setCurrentCashier] = useState(null);
   
-  // Delete modal state
+  // Finalization confirmation modal state
+  const [showFinalizeModal, setShowFinalizeModal] = useState(false);
+  
+  // Delete confirmation modal state
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deletePassword, setDeletePassword] = useState('');
 
   const [inputs, setInputs] = useState({
     cash_zig: '',
     cash_usd: '',
     cash_rand: '',
-    card: '',
-    transfer_usd: '',
-    transfer_zig: '',
-    transfer_rand: '',
     notes: ''
   });
 
@@ -329,10 +327,11 @@ const EODProductionScreen = () => {
     const expectedUsd = drawer.eod_expectations.expected_cash || 0;
     const expectedRand = drawer.eod_expectations.expected_rand || 0;
     
-    // Get expected card from breakdown
-    const expectedCard = (drawer.current_breakdown_by_currency?.usd?.card || 0) + 
-                        (drawer.current_breakdown_by_currency?.zig?.card || 0) + 
-                        (drawer.current_breakdown_by_currency?.rand?.card || 0);
+    // Get expected card from breakdown (per currency)
+    const expectedCardUsd = drawer.current_breakdown_by_currency?.usd?.card || 0;
+    const expectedCardZig = drawer.current_breakdown_by_currency?.zig?.card || 0;
+    const expectedCardRand = drawer.current_breakdown_by_currency?.rand?.card || 0;
+    const expectedCard = expectedCardUsd + expectedCardZig + expectedCardRand;
     
     // Get transfer amounts from current_breakdown_by_currency
     const transferUsd = drawer.current_breakdown_by_currency?.usd?.transfer || 0;
@@ -340,8 +339,8 @@ const EODProductionScreen = () => {
     const transferRand = drawer.current_breakdown_by_currency?.rand?.transfer || 0;
     const totalTransfer = transferUsd + transferZig + transferRand;
     
-    // Total expected for this cashier (sum of all currencies)
-    const totalExpectedBeforeLunch = expectedZig + expectedUsd + expectedRand + expectedCard;
+    // Total expected for this cashier (cash only, NOT card or transfers - those are tracked separately)
+    const totalExpectedBeforeLunch = expectedZig + expectedUsd + expectedRand;
     
     // Subtract staff lunch deductions from expected amount
     // Staff lunches reduce the cash that should be in the drawer
@@ -362,9 +361,9 @@ const EODProductionScreen = () => {
     // Total actual for this cashier (excluding transfers for variance calculation)
     const totalActual = actualZig + actualUsd + actualRand + actualCard;
     
-    // Calculate variance EXCLUDING transfers (transfers are intentional money movements)
-    // Variance = actual - expected - transfers
-    const variance = totalActual - totalExpected - totalTransfer;
+    // Calculate variance for this cashier (cash only - transfers excluded as they're tracked separately)
+    // Variance = Actual Cash - Expected Cash (after lunch deductions)
+    const variance = totalActual - totalExpected;
     
     // Determine status
     let status = 'pending';
@@ -411,19 +410,11 @@ const EODProductionScreen = () => {
     let cash_zig = 0;
     let cash_usd = 0;
     let cash_rand = 0;
-    let card = 0;
-    let transfer_usd = 0;
-    let transfer_zig = 0;
-    let transfer_rand = 0;
 
     Object.values(cashierCounts).forEach(v => {
       cash_zig += v.cash_zig || 0;
       cash_usd += v.cash_usd || 0;
       cash_rand += v.cash_rand || 0;
-      card += v.card || 0;
-      transfer_usd += v.transfer_usd || 0;
-      transfer_zig += v.transfer_zig || 0;
-      transfer_rand += v.transfer_rand || 0;
     });
 
     // Calculate expected amounts from current drawer data
@@ -431,11 +422,16 @@ const EODProductionScreen = () => {
       cash_zig: 0,
       cash_usd: 0,
       cash_rand: 0,
-      card: 0,
+      card_usd: 0,
+      card_zig: 0,
+      card_rand: 0,
       total: 0
     };
     
     let transferTotal = 0;
+    let transfer_usd = 0;
+    let transfer_zig = 0;
+    let transfer_rand = 0;
 
     if (drawerStatus?.drawers && drawerStatus.drawers.length > 0) {
       // Sum up all drawer expected amounts using expected_cash which includes float + sales
@@ -447,8 +443,9 @@ const EODProductionScreen = () => {
         }
         // Get card from current_breakdown_by_currency
         const breakdownByCurrency = drawer?.current_breakdown_by_currency || {};
-        expected.card += breakdownByCurrency?.usd?.card || breakdownByCurrency?.zig?.card || 0;
-        expected.card += breakdownByCurrency?.rand?.card || 0;
+        expected.card_usd += breakdownByCurrency?.usd?.card || 0;
+        expected.card_zig += breakdownByCurrency?.zig?.card || 0;
+        expected.card_rand += breakdownByCurrency?.rand?.card || 0;
         
         // Get transfers from current_breakdown_by_currency
         transfer_usd += breakdownByCurrency?.usd?.transfer || 0;
@@ -456,7 +453,8 @@ const EODProductionScreen = () => {
         transfer_rand += breakdownByCurrency?.rand?.transfer || 0;
       });
       transferTotal = transfer_usd + transfer_zig + transfer_rand;
-      expected.total = expected.cash_zig + expected.cash_usd + expected.cash_rand + expected.card;
+      // Expected total should only include cash, not card (card is separate from cash in drawer)
+      expected.total = expected.cash_zig + expected.cash_usd + expected.cash_rand;
     } else {
       // Check for enhanced multi-currency expected amounts first
       const enhancedExpected = reconciliationData?.expected_amounts?.by_currency;
@@ -465,33 +463,40 @@ const EODProductionScreen = () => {
         expected.cash_zig = enhancedExpected?.zig?.expected_cash || 0;
         expected.cash_usd = enhancedExpected?.usd?.expected_cash || 0;
         expected.cash_rand = enhancedExpected?.rand?.expected_cash || 0;
-        // Sum up all card payments across currencies
-        expected.card = (enhancedExpected?.usd?.expected_card || 0) + 
-                       (enhancedExpected?.zig?.expected_card || 0) + 
-                       (enhancedExpected?.rand?.expected_card || 0);
-        expected.total = expected.cash_zig + expected.cash_usd + expected.cash_rand + expected.card;
+        // Get card payments by currency
+        expected.card_usd = enhancedExpected?.usd?.expected_card || 0;
+        expected.card_zig = enhancedExpected?.zig?.expected_card || 0;
+        expected.card_rand = enhancedExpected?.rand?.expected_card || 0;
+        // Expected total should only include cash, not card (card is separate from cash in drawer)
+        expected.total = expected.cash_zig + expected.cash_usd + expected.cash_rand;
       } else {
         // Fallback to legacy format
         const legacyExpected = reconciliationData?.expected_amounts || {};
         expected.cash_zig = legacyExpected.cash_zig || 0;
         expected.cash_usd = legacyExpected.cash_usd || 0;
         expected.cash_rand = legacyExpected.cash_rand || 0;
-        expected.card = legacyExpected.card || 0;
+        expected.card_usd = legacyExpected.card || 0;
+        expected.card_zig = 0;
+        expected.card_rand = 0;
         expected.total = legacyExpected.total || 0;
       }
     }
 
-    const actual = cash_zig + cash_usd + cash_rand + card;
-    const variance = actual - (expected.total - staffLunchMetrics.totalValue) - transferTotal;
+    const actual = cash_zig + cash_usd + cash_rand;
+    const totalExpectedCard = (expected.card_usd || 0) + (expected.card_zig || 0) + (expected.card_rand || 0);
+    // Variance = Actual Cash Count - Expected Cash (after lunch deductions)
+    // Transfers are excluded from variance since they're intentional money movements
+    const variance = actual - (expected.total - staffLunchMetrics.totalValue);
 
     return { 
-      cash_zig, cash_usd, cash_rand, card, expected, actual, variance,
+      cash_zig, cash_usd, cash_rand, expected, actual, variance,
       verifiedCash: cash_zig + cash_usd + cash_rand,
       expectedAfterLunch: expected.total - staffLunchMetrics.totalValue,
       transferTotal,
       transfer_usd,
       transfer_zig,
-      transfer_rand
+      transfer_rand,
+      totalCard: totalExpectedCard
     };
   }, [cashierCounts, reconciliationData, drawerStatus]);
 
@@ -504,13 +509,9 @@ const EODProductionScreen = () => {
             cash_zig: String(existing.cash_zig || ''),
             cash_usd: String(existing.cash_usd || ''),
             cash_rand: String(existing.cash_rand || ''),
-            card: String(existing.card || ''),
-            transfer_usd: String(existing.transfer_usd || ''),
-            transfer_zig: String(existing.transfer_zig || ''),
-            transfer_rand: String(existing.transfer_rand || ''),
             notes: existing.notes || ''
           }
-        : { cash_zig: '', cash_usd: '', cash_rand: '', card: '', transfer_usd: '', transfer_zig: '', transfer_rand: '', notes: '' }
+        : { cash_zig: '', cash_usd: '', cash_rand: '', notes: '' }
     );
     setShowModal(true);
   };
@@ -519,9 +520,6 @@ const EODProductionScreen = () => {
     const cash_zig = parseFloat(inputs.cash_zig) || 0;
     const cash_usd = parseFloat(inputs.cash_usd) || 0;
     const cash_rand = parseFloat(inputs.cash_rand) || 0;
-    const transfer_usd = parseFloat(inputs.transfer_usd) || 0;
-    const transfer_zig = parseFloat(inputs.transfer_zig) || 0;
-    const transfer_rand = parseFloat(inputs.transfer_rand) || 0;
     
     if (cash_zig === 0 && cash_usd === 0 && cash_rand === 0) {
       Alert.alert('Invalid Cash', 'Enter a valid cash amount in at least one currency');
@@ -536,10 +534,6 @@ const EODProductionScreen = () => {
         cash_zig,
         cash_usd,
         cash_rand,
-        card: parseFloat(inputs.card || 0),
-        transfer_usd,
-        transfer_zig,
-        transfer_rand,
         notes: inputs.notes,
         timestamp: new Date().toISOString()
       }
@@ -556,10 +550,6 @@ const EODProductionScreen = () => {
         expected_cash: cash_zig,
         expected_cash_usd: cash_usd,
         expected_cash_rand: cash_rand,
-        expected_card: parseFloat(inputs.card || 0),
-        transfer_usd,
-        transfer_zig,
-        transfer_rand,
         notes: inputs.notes,
         status: 'IN_PROGRESS'
       });
@@ -793,7 +783,7 @@ const EODProductionScreen = () => {
           </View>
         </View>
 
-        {/* Neural Financial Overview */}
+        {/* Financial Neural Grid - Consolidated Expected Amounts */}
         <View style={styles.neuralFinancialSection}>
           <View style={styles.neuralFinancialHeader}>
             <Icon name="account-balance" size={28} color="#00ff88" />
@@ -812,74 +802,111 @@ const EODProductionScreen = () => {
             </Text>
           </View>
           
-          {/* Enterprise Financial Overview - Multi-Currency */}
+          {/* Expected Cash Section */}
+          <Text style={styles.sectionSubtitle}>EXPECTED CASH</Text>
           <View style={styles.neuralMetricsGrid}>
             <View style={styles.neuralMetricCard}>
               <View style={styles.neuralMetricHeader}>
                 <Icon name="attach-money" size={24} color="#f59e0b" />
-                <Text style={styles.neuralMetricTitle}>EXPECTED CASH ZW$</Text>
+                <Text style={styles.neuralMetricTitle}>ZW$ CASH</Text>
               </View>
               <Text style={styles.neuralMetricValue}>ZW${(stats.expected.cash_zig || 0).toLocaleString()}</Text>
-              <Text style={styles.neuralMetricSubtitle}>System calculated</Text>
             </View>
             
             <View style={styles.neuralMetricCard}>
               <View style={styles.neuralMetricHeader}>
                 <Icon name="attach-money" size={24} color="#00f5ff" />
-                <Text style={styles.neuralMetricTitle}>EXPECTED CASH USD</Text>
+                <Text style={styles.neuralMetricTitle}>USD CASH</Text>
               </View>
               <Text style={styles.neuralMetricValue}>${((stats.expected.cash_usd || 0) - staffLunchMetrics.totalValue).toLocaleString()}</Text>
-              <Text style={styles.neuralMetricSubtitle}>After lunch: ${staffLunchMetrics.totalValue.toFixed(2)}</Text>
+              <Text style={styles.neuralMetricSubtitle}>After lunch: -${staffLunchMetrics.totalValue.toFixed(2)}</Text>
             </View>
             
             <View style={styles.neuralMetricCard}>
               <View style={styles.neuralMetricHeader}>
                 <Icon name="attach-money" size={24} color="#ffaa00" />
-                <Text style={styles.neuralMetricTitle}>EXPECTED CASH R</Text>
+                <Text style={styles.neuralMetricTitle}>RAND CASH</Text>
               </View>
               <Text style={styles.neuralMetricValue}>R{(stats.expected.cash_rand || 0).toLocaleString()}</Text>
-              <Text style={styles.neuralMetricSubtitle}>System calculated</Text>
-            </View>
-            
-            <View style={styles.neuralMetricCard}>
-              <View style={styles.neuralMetricHeader}>
-                <Icon name="swap-horiz" size={24} color="#00f5ff" />
-                <Text style={styles.neuralMetricTitle}>TRANSFERS</Text>
-              </View>
-              <Text style={[styles.neuralMetricValue, { color: '#00f5ff' }]}>${(stats.transferTotal || 0).toLocaleString()}</Text>
-              <Text style={styles.neuralMetricSubtitle}>Transfer payments</Text>
-            </View>
-            
-            <View style={styles.neuralMetricCard}>
-              <View style={styles.neuralMetricHeader}>
-                <Icon name="calculate" size={24} color="#8b5cf6" />
-                <Text style={styles.neuralMetricTitle}>VERIFIED TOTAL</Text>
-              </View>
-              <Text style={styles.neuralMetricValue}>${(stats.actual || 0).toLocaleString()}</Text>
-              <Text style={styles.neuralMetricSubtitle}>All currencies + card</Text>
             </View>
           </View>
           
-          {/* Variance Analysis - Neural Style */}
-          <View style={[styles.neuralVarianceCard, { borderLeftColor: varianceColor }]}>
+          {/* Transfers Section */}
+          <Text style={[styles.sectionSubtitle, { marginTop: 16 }]}>EXPECTED TRANSFERS</Text>
+          <View style={styles.neuralMetricsGrid}>
+            <View style={styles.neuralMetricCard}>
+              <View style={styles.neuralMetricHeader}>
+                <Icon name="swap-horiz" size={24} color="#00f5ff" />
+                <Text style={styles.neuralMetricTitle}>USD TRANSFER</Text>
+              </View>
+              <Text style={[styles.neuralMetricValue, { color: '#00f5ff' }]}>${(stats.transfer_usd || 0).toFixed(2)}</Text>
+            </View>
+            
+            <View style={styles.neuralMetricCard}>
+              <View style={styles.neuralMetricHeader}>
+                <Icon name="swap-horiz" size={24} color="#ffffff" />
+                <Text style={styles.neuralMetricTitle}>ZW$ TRANSFER</Text>
+              </View>
+              <Text style={styles.neuralMetricValue}>ZW${(stats.transfer_zig || 0).toLocaleString()}</Text>
+            </View>
+            
+            <View style={styles.neuralMetricCard}>
+              <View style={styles.neuralMetricHeader}>
+                <Icon name="swap-horiz" size={24} color="#ffaa00" />
+                <Text style={styles.neuralMetricTitle}>RAND TRANSFER</Text>
+              </View>
+              <Text style={styles.neuralMetricValue}>R{(stats.transfer_rand || 0).toFixed(2)}</Text>
+            </View>
+          </View>
+          
+          {/* Card Section */}
+          <Text style={[styles.sectionSubtitle, { marginTop: 16 }]}>EXPECTED CARD</Text>
+          <View style={styles.neuralMetricsGrid}>
+            <View style={styles.neuralMetricCard}>
+              <View style={styles.neuralMetricHeader}>
+                <Icon name="credit-card" size={24} color="#10b981" />
+                <Text style={styles.neuralMetricTitle}>USD CARD</Text>
+              </View>
+              <Text style={[styles.neuralMetricValue, { color: '#10b981' }]}>${(stats.expected.card_usd || 0).toFixed(2)}</Text>
+            </View>
+            
+            <View style={styles.neuralMetricCard}>
+              <View style={styles.neuralMetricHeader}>
+                <Icon name="credit-card" size={24} color="#ffffff" />
+                <Text style={styles.neuralMetricTitle}>ZW$ CARD</Text>
+              </View>
+              <Text style={styles.neuralMetricValue}>ZW${(stats.expected.card_zig || 0).toLocaleString()}</Text>
+            </View>
+            
+            <View style={styles.neuralMetricCard}>
+              <View style={styles.neuralMetricHeader}>
+                <Icon name="credit-card" size={24} color="#ffaa00" />
+                <Text style={styles.neuralMetricTitle}>RAND CARD</Text>
+              </View>
+              <Text style={styles.neuralMetricValue}>R{(stats.expected.card_rand || 0).toFixed(2)}</Text>
+            </View>
+          </View>
+          
+          {/* Variance Display */}
+          <View style={[styles.neuralVarianceCard, { borderLeftColor: varianceColor, marginTop: 16 }]}>
             <View style={styles.neuralVarianceIconContainer}>
               <Icon name="analytics" size={32} color={varianceColor} />
             </View>
             <View style={styles.neuralVarianceContent}>
               <Text style={styles.neuralVarianceTitle}>
-                {stats.variance === 0 ? '⚡ PERFECT BALANCE DETECTED' : stats.variance < 0 ? '⚠️ CASH SHORTAGE DETECTED' : '✅ CASH OVERAGE DETECTED'}
+                {stats.variance === 0 ? '⚡ PERFECT BALANCE' : stats.variance < 0 ? '⚠️ CASH SHORTAGE' : '✅ CASH OVERAGE'}
               </Text>
               <Text style={[styles.neuralVarianceAmount, { color: varianceColor }]}>
                 ${Math.abs(stats.variance).toFixed(2)}
               </Text>
               <Text style={styles.neuralVarianceSubtitle}>
-                {stats.variance === 0 ? 'All counts match perfectly - Neural validation passed' : stats.variance < 0 ? 'Shortage detected - Investigation required' : 'Overpayment identified - Review recommended'}
+                (Excludes ${(stats.transferTotal || 0).toFixed(2)} transfers)
+                (Excludes ${(stats.totalCard || 0).toFixed(2)} card)
               </Text>
             </View>
-            <View style={[styles.neuralVariancePulse, { backgroundColor: varianceColor }]} />
           </View>
           
-          {/* Progress Bar - Neural Style */}
+          {/* Progress Bar */}
           <View style={styles.neuralProgressContainer}>
             <View style={styles.neuralProgressHeader}>
               <Icon name="timeline" size={20} color="#00f5ff" />
@@ -927,7 +954,7 @@ const EODProductionScreen = () => {
             
             <View style={styles.neuralMetricCard}>
               <View style={styles.neuralMetricHeader}>
-                <Icon name="attach-money" size={24} color="#00f5ff" />
+                <Icon name="attach-money" size={24} color="#ff4444" />
                 <Text style={styles.neuralMetricTitle}>TOTAL DEDUCTIONS</Text>
               </View>
               <Text style={[styles.neuralMetricValue, { color: '#ff4444' }]}>${staffLunchMetrics.totalValue.toFixed(2)}</Text>
@@ -943,43 +970,100 @@ const EODProductionScreen = () => {
             <View style={styles.neuralVarianceContent}>
               <Text style={styles.neuralVarianceTitle}>EXPECTED AFTER LUNCH DEDUCTIONS</Text>
               <Text style={[styles.neuralVarianceAmount, { color: '#00ff88' }]}>
-                ${((stats.expected.cash_usd || 0) - staffLunchMetrics.totalValue).toFixed(2)}
+                ${(stats.expectedAfterLunch || 0).toFixed(2)}
               </Text>
               <Text style={styles.neuralVarianceSubtitle}>
-                USD Expected: ${(stats.expected.cash_usd || 0).toFixed(2)} - Staff Lunch: ${staffLunchMetrics.totalValue.toFixed(2)}
+                Total: ${(stats.expected.total || 0).toFixed(2)} - Lunch: ${staffLunchMetrics.totalValue.toFixed(2)}
               </Text>
             </View>
             <View style={[styles.neuralVariancePulse, { backgroundColor: '#00ff88' }]} />
           </View>
+        </View>
+
+        {/* Variance Matrix - Simplified */}
+        <View style={styles.neuralFinancialSection}>
+          <View style={styles.neuralFinancialHeader}>
+            <Icon name="grid-on" size={28} color="#ff0080" />
+            <Text style={styles.neuralFinancialTitle}>VARIANCE MATRIX</Text>
+          </View>
           
-          {/* Recent Staff Lunch Activity */}
-          {staffLunchMetrics.recentActivity.length > 0 && (
-            <View style={styles.neuralSummaryCard}>
-              <View style={styles.neuralSummaryHeader}>
-                <Icon name="history" size={20} color="#ffaa00" />
-                <Text style={styles.neuralSummaryTitle}>RECENT LUNCH ACTIVITY</Text>
-              </View>
-              {staffLunchMetrics.recentActivity.slice(0, 3).map((lunch, index) => (
-                <View key={lunch.id || index} style={styles.neuralSummaryContent}>
-                  <View style={styles.neuralSummaryItem}>
-                    <Text style={styles.neuralSummaryLabel}>
-                      {lunch.notes?.includes('Staff:') 
-                        ? lunch.notes.match(/Staff:\s*([^,]+)/)?.[1] || 'Staff'
-                        : 'Staff Member'}
-                    </Text>
-                    <Text style={styles.neuralSummaryValue}>
-                      ${lunch.notes?.includes('CASH LUNCH') && lunch.notes?.includes('Amount:')
-                        ? (lunch.notes.match(/Amount: \$([0-9.]+)/)?.[1] || '0.00')
-                        : parseFloat(lunch.total_cost || 0).toFixed(2)}
-                    </Text>
-                  </View>
-                  {index < Math.min(staffLunchMetrics.recentActivity.length - 1, 2) && (
-                    <View style={styles.neuralSummaryDivider} />
-                  )}
-                </View>
-              ))}
+          {/* Current Holdings */}
+          <View style={styles.neuralSummaryCard}>
+            <View style={styles.neuralSummaryHeader}>
+              <Icon name="account-balance-wallet" size={20} color="#00f5ff" />
+              <Text style={styles.neuralSummaryTitle}>CURRENT HOLDINGS</Text>
             </View>
-          )}
+            <View style={styles.neuralSummaryContent}>
+              <View style={styles.neuralSummaryItem}>
+                <Text style={styles.neuralSummaryLabel}>ZW$</Text>
+                <Text style={[styles.neuralSummaryValue, { color: '#f59e0b' }]}>ZW${(stats.expected.cash_zig || 0).toLocaleString()}</Text>
+              </View>
+              <View style={styles.neuralSummaryDivider} />
+              <View style={styles.neuralSummaryItem}>
+                <Text style={styles.neuralSummaryLabel}>USD</Text>
+                <Text style={[styles.neuralSummaryValue, { color: '#00f5ff' }]}>${(stats.expected.cash_usd || 0).toLocaleString()}</Text>
+              </View>
+              <View style={styles.neuralSummaryDivider} />
+              <View style={styles.neuralSummaryItem}>
+                <Text style={styles.neuralSummaryLabel}>RAND</Text>
+                <Text style={[styles.neuralSummaryValue, { color: '#ffaa00' }]}>R{(stats.expected.cash_rand || 0).toLocaleString()}</Text>
+              </View>
+            </View>
+          </View>
+          
+          {/* Transfers Total */}
+          <View style={styles.neuralSummaryCard}>
+            <View style={styles.neuralSummaryHeader}>
+              <Icon name="swap-horiz" size={20} color="#00f5ff" />
+              <Text style={styles.neuralSummaryTitle}>TRANSFERS TOTAL</Text>
+            </View>
+            <View style={styles.neuralSummaryContent}>
+              <View style={styles.neuralSummaryItem}>
+                <Text style={styles.neuralSummaryLabel}>USD</Text>
+                <Text style={[styles.neuralSummaryValue, { color: '#00f5ff' }]}>${(stats.transfer_usd || 0).toFixed(2)}</Text>
+              </View>
+              <View style={styles.neuralSummaryDivider} />
+              <View style={styles.neuralSummaryItem}>
+                <Text style={styles.neuralSummaryLabel}>ZW$</Text>
+                <Text style={[styles.neuralSummaryValue, { color: '#ffffff' }]}>ZW${(stats.transfer_zig || 0).toLocaleString()}</Text>
+              </View>
+              <View style={styles.neuralSummaryDivider} />
+              <View style={styles.neuralSummaryItem}>
+                <Text style={styles.neuralSummaryLabel}>RAND</Text>
+                <Text style={[styles.neuralSummaryValue, { color: '#ffaa00' }]}>R{(stats.transfer_rand || 0).toFixed(2)}</Text>
+              </View>
+            </View>
+            <View style={{ marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#ffaa00', flexDirection: 'row', justifyContent: 'center' }}>
+              <Text style={{ color: '#00ff88', fontSize: 16, fontWeight: 'bold' }}>TOTAL TRANSFERS: ${(stats.transferTotal || 0).toFixed(2)}</Text>
+            </View>
+          </View>
+          
+          {/* Card Payments Total */}
+          <View style={styles.neuralSummaryCard}>
+            <View style={styles.neuralSummaryHeader}>
+              <Icon name="credit-card" size={20} color="#10b981" />
+              <Text style={styles.neuralSummaryTitle}>CARD PAYMENTS</Text>
+            </View>
+            <View style={styles.neuralSummaryContent}>
+              <View style={styles.neuralSummaryItem}>
+                <Text style={styles.neuralSummaryLabel}>USD</Text>
+                <Text style={[styles.neuralSummaryValue, { color: '#10b981' }]}>${(stats.expected.card_usd || 0).toFixed(2)}</Text>
+              </View>
+              <View style={styles.neuralSummaryDivider} />
+              <View style={styles.neuralSummaryItem}>
+                <Text style={styles.neuralSummaryLabel}>ZW$</Text>
+                <Text style={[styles.neuralSummaryValue, { color: '#ffffff' }]}>ZW${(stats.expected.card_zig || 0).toLocaleString()}</Text>
+              </View>
+              <View style={styles.neuralSummaryDivider} />
+              <View style={styles.neuralSummaryItem}>
+                <Text style={styles.neuralSummaryLabel}>RAND</Text>
+                <Text style={[styles.neuralSummaryValue, { color: '#ffaa00' }]}>R{(stats.expected.card_rand || 0).toFixed(2)}</Text>
+              </View>
+            </View>
+            <View style={{ marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#ffaa00', flexDirection: 'row', justifyContent: 'center' }}>
+              <Text style={{ color: '#10b981', fontSize: 16, fontWeight: 'bold' }}>TOTAL CARD: ${((stats.expected.card_usd || 0) + (stats.expected.card_zig || 0) + (stats.expected.card_rand || 0)).toFixed(2)}</Text>
+            </View>
+          </View>
         </View>
 
         {/* Neural Cashier Verification Section */}
@@ -1034,7 +1118,7 @@ const EODProductionScreen = () => {
                       <Text style={styles.cashierBigName}>{d.cashier}</Text>
                       <View style={[styles.cashierStatusBadge, { backgroundColor: statusColor }]}>
                         <Text style={styles.cashierStatusText}>
-                          {varianceData.varianceType === 'pending' ? 'PENDING' : 
+                          {varianceData.varianceType === 'pending' ? 'TAP TO COUNT' : 
                            varianceData.varianceType === 'perfect' ? 'BALANCED' : 
                            varianceData.varianceType === 'short' ? 'SHORT' : 'OVER'}
                         </Text>
@@ -1122,6 +1206,14 @@ const EODProductionScreen = () => {
                         </Text>
                       </View>
                     </View>
+                    
+                    {/* Tap Instruction */}
+                    {varianceData.varianceType === 'pending' && (
+                      <View style={styles.tapInstructionRow}>
+                        <Icon name="touch-app" size={16} color="#00f5ff" />
+                        <Text style={styles.tapInstructionText}>TAP HERE TO COUNT CASH</Text>
+                      </View>
+                    )}
                     
                     {/* Transfer breakdown */}
                     {varianceData.totalTransfer > 0 && (
@@ -1238,11 +1330,7 @@ const EODProductionScreen = () => {
                 (verifiedCount !== totalCashiers || finalizing || closing) && styles.neuralDisabledButton
               ]}
               disabled={verifiedCount !== totalCashiers || finalizing || closing}
-              onPress={() => {
-                alert('FINAL TEST: Calling finalizeDay() NOW');
-                finalizeDay();
-                alert(' finalizeDay() returned ');
-              }}
+              onPress={() => setShowFinalizeModal(true)}
             >
               <View style={styles.neuralButtonGlow} />
               <Icon name="delete-forever" size={28} color="#ffffff" style={styles.neuralButtonIcon} />
@@ -1321,66 +1409,6 @@ const EODProductionScreen = () => {
                   placeholderTextColor="#6b7280"
                 />
               </View>
-              
-              <View style={styles.modalCurrencyCard}>
-                <Icon name="credit-card" size={28} color="#8b5cf6" />
-                <Text style={styles.modalCurrencyLabel}>Card Payments</Text>
-                <TextInput
-                  style={styles.modalAmountInput}
-                  keyboardType="decimal-pad"
-                  value={inputs.card}
-                  onChangeText={v => setInputs({ ...inputs, card: v })}
-                  placeholder="0.00"
-                  placeholderTextColor="#6b7280"
-                />
-              </View>
-            </View>
-
-            {/* Transfer Payments Section */}
-            <View style={styles.modalSectionHeader}>
-              <Icon name="swap-horiz" size={24} color="#00f5ff" />
-              <Text style={styles.modalSectionTitle}>💸 Transfer Payments</Text>
-            </View>
-            
-            <View style={styles.modalCurrencyGrid}>
-              <View style={styles.modalCurrencyCard}>
-                <Icon name="attach-money" size={28} color="#00f5ff" />
-                <Text style={styles.modalCurrencyLabel}>Transfer USD</Text>
-                <TextInput
-                  style={styles.modalAmountInput}
-                  keyboardType="decimal-pad"
-                  value={inputs.transfer_usd}
-                  onChangeText={v => setInputs({ ...inputs, transfer_usd: v })}
-                  placeholder="0.00"
-                  placeholderTextColor="#6b7280"
-                />
-              </View>
-              
-              <View style={styles.modalCurrencyCard}>
-                <Icon name="attach-money" size={28} color="#ffffff" />
-                <Text style={styles.modalCurrencyLabel}>Transfer ZW$</Text>
-                <TextInput
-                  style={styles.modalAmountInput}
-                  keyboardType="decimal-pad"
-                  value={inputs.transfer_zig}
-                  onChangeText={v => setInputs({ ...inputs, transfer_zig: v })}
-                  placeholder="0.00"
-                  placeholderTextColor="#6b7280"
-                />
-              </View>
-              
-              <View style={styles.modalCurrencyCard}>
-                <Icon name="attach-money" size={28} color="#ffaa00" />
-                <Text style={styles.modalCurrencyLabel}>Transfer Rand</Text>
-                <TextInput
-                  style={styles.modalAmountInput}
-                  keyboardType="decimal-pad"
-                  value={inputs.transfer_rand}
-                  onChangeText={v => setInputs({ ...inputs, transfer_rand: v })}
-                  placeholder="0.00"
-                  placeholderTextColor="#6b7280"
-                />
-              </View>
             </View>
 
             <View style={styles.modalNotesSection}>
@@ -1443,6 +1471,62 @@ const EODProductionScreen = () => {
               >
                 <Icon name="delete-forever" size={20} color="#ffffff" />
                 <Text style={styles.deleteModalConfirmText}>DELETE</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* FINALIZE DAY CONFIRMATION MODAL */}
+      <Modal visible={showFinalizeModal} animationType="fade" transparent={true}>
+        <View style={styles.deleteModalOverlay}>
+          <View style={styles.deleteModalContent}>
+            <View style={styles.deleteModalHeader}>
+              <Icon name="warning" size={40} color="#ffaa00" />
+              <Text style={styles.deleteModalTitle}>⚠️ FINALIZE END OF DAY</Text>
+            </View>
+            
+            <View style={styles.finalizeModalSummary}>
+              <Text style={styles.finalizeModalSummaryTitle}>DAY SUMMARY</Text>
+              <View style={styles.finalizeModalRow}>
+                <Text style={styles.finalizeModalLabel}>Verified:</Text>
+                <Text style={styles.finalizeModalValue}>{verifiedCount}/{totalCashiers} Cashiers</Text>
+              </View>
+              <View style={styles.finalizeModalRow}>
+                <Text style={styles.finalizeModalLabel}>Variance:</Text>
+                <Text style={[styles.finalizeModalValue, { color: varianceColor }]}>${Math.abs(stats.variance).toFixed(2)}</Text>
+              </View>
+              <View style={styles.finalizeModalRow}>
+                <Text style={styles.finalizeModalLabel}>Transfers:</Text>
+                <Text style={styles.finalizeModalValue}>${(stats.transferTotal || 0).toFixed(2)}</Text>
+              </View>
+              <View style={styles.finalizeModalRow}>
+                <Text style={styles.finalizeModalLabel}>Card:</Text>
+                <Text style={styles.finalizeModalValue}>${(stats.totalCard || 0).toFixed(2)}</Text>
+              </View>
+            </View>
+            
+            <Text style={styles.deleteModalWarning}>
+              ⚠️ This will PERMANENTLY DELETE all sales for today, reset all drawers to zero, and log out all users.\n\nThis action cannot be undone!
+            </Text>
+            
+            <View style={styles.deleteModalButtons}>
+              <TouchableOpacity
+                style={styles.deleteModalCancelButton}
+                onPress={() => setShowFinalizeModal(false)}
+              >
+                <Text style={styles.deleteModalCancelText}>CANCEL</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={styles.deleteModalConfirmButton}
+                onPress={() => {
+                  setShowFinalizeModal(false);
+                  finalizeDay();
+                }}
+              >
+                <Icon name="delete-forever" size={20} color="#ffffff" />
+                <Text style={styles.deleteModalConfirmText}>FINALIZE DAY</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1843,6 +1927,13 @@ const styles = StyleSheet.create({
     color: '#888',
     letterSpacing: 1,
   },
+  sectionSubtitle: {
+    color: '#ffaa00',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 12,
+    letterSpacing: 1,
+  },
   neuralVarianceCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2229,6 +2320,27 @@ const styles = StyleSheet.create({
     height: 40,
     backgroundColor: '#ffaa00',
     opacity: 0.5,
+  },
+  
+  // Tap Instruction Styles
+  tapInstructionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 245, 255, 0.15)',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#00f5ff',
+  },
+  tapInstructionText: {
+    color: '#00f5ff',
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginLeft: 8,
+    letterSpacing: 1,
   },
   
   // Neural Notes Section
@@ -2746,6 +2858,44 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     letterSpacing: 1,
   },
+  
+  // Finalize Modal Styles
+  finalizeModalSummary: {
+    backgroundColor: 'rgba(0, 245, 255, 0.1)',
+    borderRadius: 12,
+    padding: 16,
+    width: '100%',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 245, 255, 0.3)',
+  },
+  finalizeModalSummaryTitle: {
+    color: '#00f5ff',
+    fontSize: 14,
+    fontWeight: 'bold',
+    letterSpacing: 1,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  finalizeModalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  finalizeModalLabel: {
+    color: '#888',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  finalizeModalValue: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
 });
 
 export default EODProductionScreen;
+

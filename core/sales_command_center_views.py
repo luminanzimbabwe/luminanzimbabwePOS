@@ -834,7 +834,7 @@ class EODReconciliationView(APIView):
         ).select_related('cashier')
         
         # Get all sales for today using shop_day and opened_at for session-aware filtering
-        if current_shop_day:
+        if current_shop_day and current_shop_day.opened_at:
             # Filter by shop_day AND by created_at >= opened_at to ensure we only get sales from THIS session
             # This handles the case where shop was closed and reopened on the same day
             today_sales = Sale.objects.filter(

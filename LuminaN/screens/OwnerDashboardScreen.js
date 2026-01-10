@@ -460,12 +460,99 @@ const OwnerDashboardScreen = () => {
               acc.current_rand = (acc.current_rand || 0) + (Number(breakdownByCurrency?.rand?.total || 0) || Number(drawer?.current_total_rand || 0));
               
               // Transfer amounts per currency - extract from drawer transfer data
-              acc.transfer_zig = (acc.transfer_zig || 0) + Number(breakdownByCurrency?.zig?.transfer || 0);
-              acc.transfer_usd = (acc.transfer_usd || 0) + Number(breakdownByCurrency?.usd?.transfer || 0);
-              acc.transfer_rand = (acc.transfer_rand || 0) + Number(breakdownByCurrency?.rand?.transfer || 0);
+              // Also try to extract from current_breakdown_by_currency
+              acc.transfer_zig = (acc.transfer_zig || 0) + (
+                Number(breakdownByCurrency?.zig?.transfer || 0) ||
+                Number(drawer?.transfer_zig || 0) ||
+                Number(drawer?.transfers?.zig || 0) ||
+                0
+              );
+              acc.transfer_usd = (acc.transfer_usd || 0) + (
+                Number(breakdownByCurrency?.usd?.transfer || 0) ||
+                Number(drawer?.transfer_usd || 0) ||
+                Number(drawer?.transfers?.usd || 0) ||
+                0
+              );
+              acc.transfer_rand = (acc.transfer_rand || 0) + (
+                Number(breakdownByCurrency?.rand?.transfer || 0) ||
+                Number(drawer?.transfer_rand || 0) ||
+                Number(drawer?.transfers?.rand || 0) ||
+                0
+              );
+              
+              // Card amounts per currency - extract from drawer card data
+              acc.card_zig = (acc.card_zig || 0) + (
+                Number(breakdownByCurrency?.zig?.card || 0) ||
+                Number(drawer?.card_zig || 0) ||
+                Number(drawer?.card_payments?.zig || 0) ||
+                0
+              );
+              acc.card_usd = (acc.card_usd || 0) + (
+                Number(breakdownByCurrency?.usd?.card || 0) ||
+                Number(drawer?.card_usd || 0) ||
+                Number(drawer?.card_payments?.usd || 0) ||
+                0
+              );
+              acc.card_rand = (acc.card_rand || 0) + (
+                Number(breakdownByCurrency?.rand?.card || 0) ||
+                Number(drawer?.card_rand || 0) ||
+                Number(drawer?.card_payments?.rand || 0) ||
+                0
+              );
+              
+              // Also track cash payments per currency (non-card, non-transfer)
+              acc.cash_zig = (acc.cash_zig || 0) + (
+                Number(breakdownByCurrency?.zig?.cash || 0) ||
+                Number(drawer?.cash_zig || 0) ||
+                0
+              );
+              acc.cash_usd = (acc.cash_usd || 0) + (
+                Number(breakdownByCurrency?.usd?.cash || 0) ||
+                Number(drawer?.cash_usd || 0) ||
+                0
+              );
+              acc.cash_rand = (acc.cash_rand || 0) + (
+                Number(breakdownByCurrency?.rand?.cash || 0) ||
+                Number(drawer?.cash_rand || 0) ||
+                0
+              );
               
               return acc;
             }, {});
+            
+            // If transfers and cards are all 0, but we have current totals, 
+            // try to calculate them from the cash_flow if available
+            const totalTransfers = (currencyBreakdown.transfer_zig || 0) + (currencyBreakdown.transfer_usd || 0) + (currencyBreakdown.transfer_rand || 0);
+            const totalCards = (currencyBreakdown.card_zig || 0) + (currencyBreakdown.card_usd || 0) + (currencyBreakdown.card_rand || 0);
+            const totalCash = (currencyBreakdown.cash_zig || 0) + (currencyBreakdown.cash_usd || 0) + (currencyBreakdown.cash_rand || 0);
+            
+            // If all payment breakdowns are 0 but we have current totals, 
+            // use the current totals as fallback (user might have other payment methods)
+            if (totalTransfers === 0 && totalCards === 0 && totalCash === 0) {
+              const totalCurrent = (currencyBreakdown.current_zig || 0) + (currencyBreakdown.current_usd || 0) + (currencyBreakdown.current_rand || 0);
+              if (totalCurrent > 0) {
+                // Distribute proportionally or assign to cash as fallback
+                currencyBreakdown.cash_usd = currencyBreakdown.current_usd || 0;
+                currencyBreakdown.cash_zig = currencyBreakdown.current_zig || 0;
+                currencyBreakdown.cash_rand = currencyBreakdown.current_rand || 0;
+              }
+            }
+            
+            // Add fallback: calculate cash as current - transfers - cards if not provided
+            if ((currencyBreakdown.cash_usd || 0) === 0 && (currencyBreakdown.current_usd || 0) > 0) {
+              currencyBreakdown.cash_usd = (currencyBreakdown.current_usd || 0) - (currencyBreakdown.transfer_usd || 0) - (currencyBreakdown.card_usd || 0);
+            }
+            if ((currencyBreakdown.cash_zig || 0) === 0 && (currencyBreakdown.current_zig || 0) > 0) {
+              currencyBreakdown.cash_zig = (currencyBreakdown.current_zig || 0) - (currencyBreakdown.transfer_zig || 0) - (currencyBreakdown.card_zig || 0);
+            }
+            if ((currencyBreakdown.cash_rand || 0) === 0 && (currencyBreakdown.current_rand || 0) > 0) {
+              currencyBreakdown.cash_rand = (currencyBreakdown.current_rand || 0) - (currencyBreakdown.transfer_rand || 0) - (currencyBreakdown.card_rand || 0);
+            }
+            
+            // Ensure cash values are not negative
+            currencyBreakdown.cash_usd = Math.max(0, currencyBreakdown.cash_usd || 0);
+            currencyBreakdown.cash_zig = Math.max(0, currencyBreakdown.cash_zig || 0);
+            currencyBreakdown.cash_rand = Math.max(0, currencyBreakdown.cash_rand || 0);
             
             // Calculate variances per currency (current - expected)
             const zigVariance = (currencyBreakdown.current_zig || 0) - (currencyBreakdown.expected_zig || 0);
@@ -477,17 +564,24 @@ const OwnerDashboardScreen = () => {
             const adjustedUsdVariance = usdVariance - (currencyBreakdown.transfer_usd || 0);
             const adjustedRandVariance = randVariance - (currencyBreakdown.transfer_rand || 0);
             
+            // Also exclude card payments from variance (they don't go to drawer)
+            const finalZigVariance = adjustedZigVariance - (currencyBreakdown.card_zig || 0);
+            const finalUsdVariance = adjustedUsdVariance - (currencyBreakdown.card_usd || 0);
+            const finalRandVariance = adjustedRandVariance - (currencyBreakdown.card_rand || 0);
+            
             shop_status.cash_flow = {
               ...shop_status.cash_flow,
               ...currencyBreakdown,
-              zig_variance: adjustedZigVariance,
-              usd_variance: adjustedUsdVariance,
-              rand_variance: adjustedRandVariance,
+              zig_variance: finalZigVariance,
+              usd_variance: finalUsdVariance,
+              rand_variance: finalRandVariance,
               // Recalculate total from currency breakdown (excluding transfers for variance)
               total_expected_cash: (currencyBreakdown.expected_zig || 0) + (currencyBreakdown.expected_usd || 0) + (currencyBreakdown.expected_rand || 0),
               total_current_cash: (currencyBreakdown.current_zig || 0) + (currencyBreakdown.current_usd || 0) + (currencyBreakdown.current_rand || 0),
-              variance: adjustedZigVariance + adjustedUsdVariance + adjustedRandVariance,
+              variance: finalZigVariance + finalUsdVariance + finalRandVariance,
             };
+            
+            console.log('💰 Calculated currency breakdown:', currencyBreakdown);
           }
         }
 
@@ -1563,29 +1657,49 @@ const OwnerDashboardScreen = () => {
           
           {/* Multi-Currency Financial Display - Clean Layout */}
           <View style={styles.financialMetricsMatrix}>
-            {/* Expected Total Row - Show expected AFTER staff lunch deductions */}
-            <View style={styles.currencyTotalRow}>
-              <View style={styles.currencyTotalLabelBox}>
-                <Text style={styles.currencyTotalLabelText}>EXPECTED TOTAL</Text>
-                {staffLunchMetrics.totalValue > 0 && (
+            {/* Staff Lunch Deduction Row */}
+            {staffLunchMetrics.totalValue > 0 && (
+              <View style={[styles.currencyTotalRow, { backgroundColor: 'rgba(255, 68, 68, 0.1)', borderColor: 'rgba(255, 68, 68, 0.3)' }]}>
+                <View style={[styles.currencyTotalLabelBox, { backgroundColor: 'rgba(255, 68, 68, 0.2)', borderColor: 'rgba(255, 68, 68, 0.4)' }]}>
+                  <Text style={[styles.currencyTotalLabelText, { color: '#ff4444' }]}>-STAFF LUNCH</Text>
                   <Text style={{ fontSize: 9, color: '#ff4444', marginTop: 4 }}>
                     -${staffLunchMetrics.totalValue.toFixed(2)} lunch
                   </Text>
-                )}
+                </View>
+                <View style={styles.currencyTotalValuesRow}>
+                  <View style={styles.currencyTotalItem}>
+                    <Text style={styles.currencyTotalValueZig}>ZW$0</Text>
+                  </View>
+                  <View style={styles.currencyTotalItem}>
+                    <Text style={[styles.currencyTotalValueUsd, { color: '#ff4444' }]}>
+                      -${staffLunchMetrics.totalValue.toFixed(2)}
+                    </Text>
+                  </View>
+                  <View style={styles.currencyTotalItem}>
+                    <Text style={[styles.currencyTotalValueRand, { color: '#ff4444' }]}>R0</Text>
+                  </View>
+                </View>
+              </View>
+            )}
+            
+            {/* Expected After Lunch Row */}
+            <View style={[styles.currencyTotalRow, { backgroundColor: 'rgba(0, 255, 136, 0.1)', borderColor: 'rgba(0, 255, 136, 0.3)' }]}>
+              <View style={[styles.currencyTotalLabelBoxCurrent, { backgroundColor: 'rgba(0, 255, 136, 0.2)', borderColor: 'rgba(0, 255, 136, 0.4)' }]}>
+                <Text style={[styles.currencyTotalLabelTextCurrent, { color: '#00ff88' }]}>AFTER LUNCH</Text>
               </View>
               <View style={styles.currencyTotalValuesRow}>
                 <View style={styles.currencyTotalItem}>
-                  <Text style={styles.currencyTotalValueZig}>
+                  <Text style={[styles.currencyTotalValueZig, { color: '#00ff88' }]}>
                     ZW${(drawerStatus.cash_flow?.expected_zig || 0).toLocaleString()}
                   </Text>
                 </View>
                 <View style={styles.currencyTotalItem}>
-                  <Text style={styles.currencyTotalValueUsd}>
+                  <Text style={[styles.currencyTotalValueUsd, { color: '#00ff88' }]}>
                     ${Math.max(0, (drawerStatus.cash_flow?.expected_usd || 0) - staffLunchMetrics.totalValue).toLocaleString()}
                   </Text>
                 </View>
                 <View style={styles.currencyTotalItem}>
-                  <Text style={styles.currencyTotalValueRand}>
+                  <Text style={[styles.currencyTotalValueRand, { color: '#00ff88' }]}>
                     R{(drawerStatus.cash_flow?.expected_rand || 0).toLocaleString()}
                   </Text>
                 </View>
@@ -1622,6 +1736,68 @@ const OwnerDashboardScreen = () => {
               <Text style={styles.realTimeTotalValue}>
                 ${(drawerStatus.cash_flow?.total_current_cash || 0).toLocaleString()}
               </Text>
+            </View>
+            
+            {/* CASH Section - Shows actual cash in drawer (total minus transfers and cards) */}
+            <View style={styles.cashSection}>
+              <View style={styles.cashHeaderRow}>
+                <Icon name="payments" size={20} color="#00ff88" />
+                <Text style={styles.cashTitle}>CASH</Text>
+              </View>
+              
+              {/* USD Cash Row - Actual cash = current holding - transfers - cards */}
+              <View style={styles.cashRow}>
+                <View style={styles.cashCurrencyBadge}>
+                  <Text style={styles.cashCurrencyText}>USD</Text>
+                </View>
+                <Text style={styles.cashLabel}>USD CASH</Text>
+                <Text style={[
+                  styles.cashValue,
+                  { color: '#00f5ff' }
+                ]}>
+                  ${((drawerStatus.cash_flow?.current_usd || 0) - (drawerStatus.cash_flow?.transfer_usd || 0) - (drawerStatus.cash_flow?.card_usd || 0)).toLocaleString()}
+                </Text>
+              </View>
+              
+              {/* ZIG Cash Row */}
+              <View style={styles.cashRow}>
+                <View style={[styles.cashCurrencyBadge, { borderColor: '#ffffff' }]}>
+                  <Text style={[styles.cashCurrencyText, { color: '#ffffff' }]}>ZIG</Text>
+                </View>
+                <Text style={styles.cashLabel}>ZIG CASH</Text>
+                <Text style={[
+                  styles.cashValue,
+                  { color: '#ffffff' }
+                ]}>
+                  ZW${((drawerStatus.cash_flow?.current_zig || 0) - (drawerStatus.cash_flow?.transfer_zig || 0) - (drawerStatus.cash_flow?.card_zig || 0)).toLocaleString()}
+                </Text>
+              </View>
+              
+              {/* Rand Cash Row */}
+              <View style={styles.cashRow}>
+                <View style={[styles.cashCurrencyBadge, { borderColor: '#ffaa00' }]}>
+                  <Text style={[styles.cashCurrencyText, { color: '#ffaa00' }]}>RAND</Text>
+                </View>
+                <Text style={styles.cashLabel}>RAND CASH</Text>
+                <Text style={[
+                  styles.cashValue,
+                  { color: '#ffaa00' }
+                ]}>
+                  R{((drawerStatus.cash_flow?.current_rand || 0) - (drawerStatus.cash_flow?.transfer_rand || 0) - (drawerStatus.cash_flow?.card_rand || 0)).toLocaleString()}
+                </Text>
+              </View>
+              
+              {/* Total Cash Value */}
+              <View style={styles.totalCashRow}>
+                <Text style={styles.totalCashLabel}>TOTAL CASH</Text>
+                <Text style={styles.totalCashValue}>
+                  ${(
+                    ((drawerStatus.cash_flow?.current_usd || 0) - (drawerStatus.cash_flow?.transfer_usd || 0) - (drawerStatus.cash_flow?.card_usd || 0)) +
+                    ((drawerStatus.cash_flow?.current_zig || 0) - (drawerStatus.cash_flow?.transfer_zig || 0) - (drawerStatus.cash_flow?.card_zig || 0)) +
+                    ((drawerStatus.cash_flow?.current_rand || 0) - (drawerStatus.cash_flow?.transfer_rand || 0) - (drawerStatus.cash_flow?.card_rand || 0))
+                  ).toLocaleString()}
+                </Text>
+              </View>
             </View>
             
             {/* Transfer Categories Section */}
@@ -1682,13 +1858,77 @@ const OwnerDashboardScreen = () => {
               </View>
             </View>
             
-            {/* Variance Matrix - Calculate based on expected AFTER lunch deductions and EXCLUDING transfers */}
+            {/* Card Payments Section - Similar to Transfers */}
+            <View style={styles.cardPaymentsSection}>
+              <View style={styles.cardHeaderRow}>
+                <Icon name="credit-card" size={20} color="#ff0080" />
+                <Text style={styles.cardTitle}>CARD PAYMENTS</Text>
+              </View>
+              
+              {/* USD Card Row */}
+              <View style={styles.cardRow}>
+                <View style={styles.cardCurrencyBadge}>
+                  <Text style={styles.cardCurrencyText}>USD</Text>
+                </View>
+                <Text style={styles.cardLabel}>USD CARD</Text>
+                <Text style={[
+                  styles.cardValue,
+                  { color: '#00f5ff' }
+                ]}>
+                  ${(drawerStatus.cash_flow?.card_usd || 0).toLocaleString()}
+                </Text>
+              </View>
+              
+              {/* ZIG Card Row */}
+              <View style={styles.cardRow}>
+                <View style={[styles.cardCurrencyBadge, { borderColor: '#ffffff' }]}>
+                  <Text style={[styles.cardCurrencyText, { color: '#ffffff' }]}>ZIG</Text>
+                </View>
+                <Text style={styles.cardLabel}>ZIG CARD</Text>
+                <Text style={[
+                  styles.cardValue,
+                  { color: '#ffffff' }
+                ]}>
+                  ZW${(drawerStatus.cash_flow?.card_zig || 0).toLocaleString()}
+                </Text>
+              </View>
+              
+              {/* Rand Card Row */}
+              <View style={styles.cardRow}>
+                <View style={[styles.cardCurrencyBadge, { borderColor: '#ffaa00' }]}>
+                  <Text style={[styles.cardCurrencyText, { color: '#ffaa00' }]}>RAND</Text>
+                </View>
+                <Text style={styles.cardLabel}>RAND CARD</Text>
+                <Text style={[
+                  styles.cardValue,
+                  { color: '#ffaa00' }
+                ]}>
+                  R{(drawerStatus.cash_flow?.card_rand || 0).toLocaleString()}
+                </Text>
+              </View>
+              
+              {/* Total Card Value */}
+              <View style={styles.totalCardRow}>
+                <Text style={styles.totalCardLabel}>TOTAL CARD</Text>
+                <Text style={styles.totalCardValue}>
+                  ${((drawerStatus.cash_flow?.card_usd || 0) + (drawerStatus.cash_flow?.card_zig || 0) + (drawerStatus.cash_flow?.card_rand || 0)).toLocaleString()}
+                </Text>
+              </View>
+            </View>
+            
+            {/* Variance Matrix - Calculate based on expected AFTER lunch deductions and EXCLUDING transfers (card payments are tracked separately and don't affect cash variance) */}
             {(() => {
               const expectedAfterLunch = (drawerStatus.cash_flow?.total_expected_cash || 0) - staffLunchMetrics.totalValue;
               const currentTotal = drawerStatus.cash_flow?.total_current_cash || 0;
               const totalTransfers = (drawerStatus.cash_flow?.transfer_usd || 0) + 
                                      (drawerStatus.cash_flow?.transfer_zig || 0) + 
                                      (drawerStatus.cash_flow?.transfer_rand || 0);
+              const totalCardPayments = (drawerStatus.cash_flow?.card_usd || 0) + 
+                                        (drawerStatus.cash_flow?.card_zig || 0) + 
+                                        (drawerStatus.cash_flow?.card_rand || 0);
+              
+              // Variance = current cash (after transfers removed) - expected (after lunch deductions)
+              // Card payments don't go to drawer, so they're excluded from variance calculation
               const variance = currentTotal - Math.max(0, expectedAfterLunch) - totalTransfers;
               const isSurplus = variance >= 0;
               return (
@@ -1714,6 +1954,11 @@ const OwnerDashboardScreen = () => {
                   {totalTransfers > 0 && (
                     <Text style={{ fontSize: 10, color: '#00f5ff', marginTop: 4, textAlign: 'center' }}>
                       (Excludes ${totalTransfers.toFixed(2)} in transfers)
+                    </Text>
+                  )}
+                  {totalCardPayments > 0 && (
+                    <Text style={{ fontSize: 10, color: '#ff0080', marginTop: 4, textAlign: 'center' }}>
+                      (Excludes ${totalCardPayments.toFixed(2)} in card payments)
                     </Text>
                   )}
                 </View>
@@ -3602,6 +3847,89 @@ const styles = StyleSheet.create({
     textShadowRadius: 8,
   },
   
+  // Card Payments Section Styles
+  cardPaymentsSection: {
+    backgroundColor: 'rgba(255, 0, 128, 0.08)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 0, 128, 0.3)',
+  },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  cardTitle: {
+    color: '#ff0080',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginLeft: 10,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  cardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+  },
+  cardCurrencyBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ff0080',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  cardCurrencyText: {
+    color: '#ff0080',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  cardLabel: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
+    flex: 1,
+  },
+  cardValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    letterSpacing: 1,
+  },
+  totalCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255, 0, 128, 0.15)',
+    borderRadius: 10,
+    padding: 14,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 0, 128, 0.4)',
+  },
+  totalCardLabel: {
+    color: '#ff0080',
+    fontSize: 12,
+    fontWeight: 'bold',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  totalCardValue: {
+    color: '#ff0080',
+    fontSize: 20,
+    fontWeight: '900',
+    textShadowColor: '#ff0080',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
+  },
+  
   // Cash Handover Section Styles
   cashHandoverSection: {
     padding: 20,
@@ -4921,6 +5249,89 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginLeft: 12,
     letterSpacing: 1,
+  },
+  
+  // Cash Section Styles
+  cashSection: {
+    backgroundColor: 'rgba(0, 255, 136, 0.08)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 136, 0.3)',
+  },
+  cashHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  cashTitle: {
+    color: '#00ff88',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginLeft: 10,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  cashRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+  },
+  cashCurrencyBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#00ff88',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  cashCurrencyText: {
+    color: '#00ff88',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  cashLabel: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
+    flex: 1,
+  },
+  cashValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    letterSpacing: 1,
+  },
+  totalCashRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(0, 255, 136, 0.15)',
+    borderRadius: 10,
+    padding: 14,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 136, 0.4)',
+  },
+  totalCashLabel: {
+    color: '#00ff88',
+    fontSize: 12,
+    fontWeight: 'bold',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  totalCashValue: {
+    color: '#00ff88',
+    fontSize: 20,
+    fontWeight: '900',
+    textShadowColor: '#00ff88',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
   },
   
 });
