@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.db.models import Sum, F
 from django.utils import timezone
 from datetime import timedelta
-from .models import ShopConfiguration, Cashier, Product, Sale, SaleItem, Customer, Discount, Shift, Expense, StaffLunch, StockTake, StockTakeItem, InventoryLog, StockTransfer
+from .models import ShopConfiguration, Cashier, Product, Sale, SaleItem, Customer, Discount, Shift, Expense, StaffLunch, StockTake, StockTakeItem, InventoryLog, StockTransfer, SalePayment
 
 class ShopConfigurationSerializer(serializers.ModelSerializer):
     shop_owner_master_password = serializers.CharField(write_only=True, required=False)
@@ -152,6 +152,12 @@ class SaleSerializer(serializers.ModelSerializer):
                   'items', 'created_at']
         read_only_fields = ['id', 'status', 'refund_reason', 'refund_type', 'refund_amount', 'refunded_at', 'refunded_by', 'refunded_by_name', 'created_at']
 
+class SalePaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SalePayment
+        fields = ['payment_method', 'currency', 'amount']
+        read_only_fields = ['id', 'sale', 'exchange_rate_to_usd', 'amount_usd_equivalent', 'is_change_given', 'change_amount', 'created_at']
+
 class CreateSaleSerializer(serializers.Serializer):
     cashier_id = serializers.IntegerField()
     items = serializers.ListField(
@@ -159,28 +165,56 @@ class CreateSaleSerializer(serializers.Serializer):
             child=serializers.CharField()
         )
     )
-    payment_method = serializers.ChoiceField(choices=[
-        ('cash', 'Cash'),
-        ('ecocash', 'EcoCash'),
-        ('card', 'Card'),
-        ('transfer', 'Bank Transfer'),
-    ])
-    # CRITICAL FIX: product_price_currency is always USD (products are priced in USD in database)
-    product_price_currency = serializers.ChoiceField(choices=[
-        ('USD', 'US Dollar'),
-        ('ZIG', 'Zimbabwe Gold'),
-        ('RAND', 'South African Rand'),
-    ], default='USD', required=False)
-    # CRITICAL FIX: payment_currency is what the customer actually paid in
-    payment_currency = serializers.ChoiceField(choices=[
-        ('USD', 'US Dollar'),
-        ('ZIG', 'Zimbabwe Gold'),
-        ('RAND', 'South African Rand'),
-    ], default='USD', required=False)
-    # CRITICAL FIX: total_amount is in payment_currency (converted from USD product prices)
+    # Legacy single payment method (for backward compatibility)
+    payment_method = serializers.ChoiceField(
+        choices=['cash', 'ecocash', 'card', 'transfer', 'split'],
+        required=False,
+        allow_null=True
+    )
+    # Legacy single payment currency (for backward compatibility)
+    payment_currency = serializers.ChoiceField(
+        choices=['USD', 'ZIG', 'RAND'],
+        default='USD',
+        required=False
+    )
+    # Legacy total amount (for backward compatibility)
     total_amount = serializers.DecimalField(max_digits=15, decimal_places=2, required=False)
+
+    # SPLIT PAYMENT SUPPORT: List of payments for multi-currency payments
+    # Example: [{'payment_method': 'cash', 'currency': 'USD', 'amount': 5.00}, {'payment_method': 'cash', 'currency': 'ZIG', 'amount': 1000.00}]
+    payments = SalePaymentSerializer(many=True, required=False, allow_null=True)
+    
     customer_name = serializers.CharField(required=False, allow_blank=True)
     customer_phone = serializers.CharField(required=False, allow_blank=True)
+    
+    def validate(self, data):
+        """Validate payment structure: split payments use 'payments' array, single payments use legacy fields"""
+        payment_method = data.get('payment_method')
+        has_payments = data.get('payments') is not None and len(data.get('payments', [])) > 0
+        has_single_payment_fields = data.get('payment_currency') is not None or data.get('total_amount') is not None
+
+        # If payment_method is 'split', must use payments array
+        if payment_method == 'split':
+            if not has_payments:
+                raise serializers.ValidationError(
+                    "Split payment method requires 'payments' array with payment details."
+                )
+            # Allow single payment fields to be present for backward compatibility - just ignore them
+        else:
+            # For non-split payments, use legacy single payment fields
+            if has_payments:
+                raise serializers.ValidationError(
+                    "Non-split payment methods should not include 'payments' array. Use payment_currency and total_amount."
+                )
+            if not has_single_payment_fields:
+                raise serializers.ValidationError(
+                    "Single payment requires payment_currency and total_amount fields."
+                )
+
+        # For split payments, validation is complete
+        # Wallet account is handled at the Sale level, not individual payments
+
+        return data
 
     def validate_register_id(self, value):
         if not value.isdigit() or len(value) != 5:

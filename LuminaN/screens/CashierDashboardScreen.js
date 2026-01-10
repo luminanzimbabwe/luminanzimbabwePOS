@@ -50,62 +50,24 @@ const CashierDashboardScreen = () => {
   const [showTransferWalletModal, setShowTransferWalletModal] = useState(false);
   const [cardNetwork, setCardNetwork] = useState('');
   
-  // Available transfer wallets - Comprehensive list for Zimbabwe and regional payments
+  // Available transfer wallets - Most used in Zimbabwe
   const transferWallets = [
     // ===== ZIG CURRENCY WALLETS =====
     { id: 'ecocash', name: 'EcoCash', currency: 'ZIG', icon: '📱' },
     { id: 'onemoney', name: 'OneMoney', currency: 'ZIG', icon: '💰' },
     { id: 'innbucks', name: 'InnBucks', currency: 'ZIG', icon: '💳' },
     { id: 'telecash', name: 'Telecash', currency: 'ZIG', icon: '📞' },
-    { id: 'sadzaim', name: 'Sadzaim', currency: 'ZIG', icon: '🍲' },
-    { id: 'mpesa_zig', name: 'M-Pesa ZW', currency: 'ZIG', icon: '📲' },
-    { id: 'impesa', name: 'Impesa', currency: 'ZIG', icon: '💸' },
-    { id: 'zemax', name: 'Zemax Pay', currency: 'ZIG', icon: '🔶' },
-    { id: 'pauCash', name: 'PauCash', currency: 'ZIG', icon: '💴' },
-    { id: 'cashtech', name: 'CashTech', currency: 'ZIG', icon: '💵' },
-    { id: 'hughespay', name: 'HughesPay', currency: 'ZIG', icon: '🏦' },
-    { id: 'saspay', name: 'SasPay', currency: 'ZIG', icon: '💳' },
-    { id: 'vipcash', name: 'VIP Cash', currency: 'ZIG', icon: '⭐' },
-    { id: 'freecash', name: 'FreeCash', currency: 'ZIG', icon: '🆓' },
-    { id: 'zimbocash', name: 'ZimboCash', currency: 'ZIG', icon: '💰' },
-    { id: 'pocketvending', name: 'PocketVending', currency: 'ZIG', icon: '📱' },
-    
+
     // ===== USD CURRENCY WALLETS/ACCOUNTS =====
     { id: 'ecocash_usd', name: 'EcoCash USD', currency: 'USD', icon: '📱' },
     { id: 'onemoney_usd', name: 'OneMoney USD', currency: 'USD', icon: '💰' },
-    { id: 'visa', name: 'Visa Card', currency: 'USD', icon: '💳' },
-    { id: 'mastercard', name: 'Mastercard', currency: 'USD', icon: '💳' },
-    { id: 'amex', name: 'Amex Card', currency: 'USD', icon: '💳' },
     { id: 'zimswitch', name: 'ZimSwitch', currency: 'USD', icon: '🔄' },
-    { id: 'visa_debit', name: 'Visa Debit', currency: 'USD', icon: '💳' },
-    { id: 'mastercard_debit', name: 'Mastercard Debit', currency: 'USD', icon: '💳' },
-    { id: 'intl_card', name: 'International Card', currency: 'USD', icon: '🌍' },
-    { id: 'paypal', name: 'PayPal', currency: 'USD', icon: '🅿️' },
-    { id: 'skrill', name: 'Skrill', currency: 'USD', icon: '💸' },
-    { id: 'neteller', name: 'Neteller', currency: 'USD', icon: '💳' },
-    { id: 'wise', name: 'Wise', currency: 'USD', icon: '🌐' },
-    { id: 'payoneer', name: 'Payoneer', currency: 'USD', icon: '💼' },
-    { id: 'stripe', name: 'Stripe', currency: 'USD', icon: '💳' },
-    { id: 'bank_transfer_usd', name: 'Bank Transfer USD', currency: 'USD', icon: '🏦' },
-    { id: 'swift_usd', name: 'SWIFT USD', currency: 'USD', icon: '🌍' },
-    { id: 'westernunion', name: 'Western Union', currency: 'USD', icon: '💸' },
-    { id: 'moneygram', name: 'MoneyGram', currency: 'USD', icon: '💰' },
-    
+
     // ===== RAND CURRENCY WALLETS/ACCOUNTS =====
     { id: 'ecocash_rand', name: 'EcoCash Rand', currency: 'RAND', icon: '📱' },
     { id: 'onemoney_rand', name: 'OneMoney Rand', currency: 'RAND', icon: '💰' },
-    { id: 'visa_rand', name: 'Visa Card Rand', currency: 'RAND', icon: '💳' },
-    { id: 'mastercard_rand', name: 'Mastercard Rand', currency: 'RAND', icon: '💳' },
     { id: 'snapscan', name: 'SnapScan', currency: 'RAND', icon: '📸' },
     { id: 'zapper', name: 'Zapper', currency: 'RAND', icon: '📱' },
-    { id: 'fnb', name: 'FNB Account', currency: 'RAND', icon: '🏦' },
-    { id: 'standard_bank', name: 'Standard Bank', currency: 'RAND', icon: '🏦' },
-    { id: 'absa_rand', name: 'ABSA Rand', currency: 'RAND', icon: '🏦' },
-    { id: 'nedbank_rand', name: 'Nedbank Rand', currency: 'RAND', icon: '🏦' },
-    { id: 'capitec_rand', name: 'Capitec Rand', currency: 'RAND', icon: '🏦' },
-    { id: 'ozow', name: 'Ozow', currency: 'RAND', icon: '💳' },
-    { id: 'peachpayments', name: 'Peach Payments', currency: 'RAND', icon: '🍑' },
-    { id: 'bank_transfer_rand', name: 'Bank Transfer Rand', currency: 'RAND', icon: '🏦' },
   ];
   
   const cardNetworks = [
@@ -172,6 +134,15 @@ const CashierDashboardScreen = () => {
   const [amountReceived, setAmountReceived] = useState('');
   const [productsLoading, setProductsLoading] = useState(false);
   const [processingSale, setProcessingSale] = useState(false);
+  
+  // ========== SPLIT PAYMENT STATE ==========
+  const [useSplitPayment, setUseSplitPayment] = useState(false);
+  const [splitPayments, setSplitPayments] = useState([
+    { id: 1, paymentMethod: 'cash', currency: 'USD', amount: '', wallet: '' }
+  ]);
+  const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
+  const [showSplitPaymentModal, setShowSplitPaymentModal] = useState(false);
+  // ==========================================
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [filteredProducts, setFilteredProducts] = useState([]);
@@ -2006,6 +1977,90 @@ const CashierDashboardScreen = () => {
     return Math.max(0, received - total);
   };
 
+  // ========== SPLIT PAYMENT HELPER FUNCTIONS ==========
+  
+  // Add a new payment to the split payments array
+  const addPaymentToSplit = () => {
+    const newId = Math.max(...splitPayments.map(p => p.id), 0) + 1;
+    setSplitPayments([
+      ...splitPayments,
+      { id: newId, paymentMethod: 'cash', currency: 'USD', amount: '', wallet: '' }
+    ]);
+  };
+
+  // Remove a payment from the split payments array
+  const removePaymentFromSplit = (id) => {
+    if (splitPayments.length <= 1) {
+      Alert.alert(
+        '⚠️ Cannot Remove',
+        'You need at least one payment method for split payments.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    setSplitPayments(splitPayments.filter(p => p.id !== id));
+  };
+
+  // Update a specific payment in the split payments array
+  const updateSplitPayment = (id, field, value) => {
+    setSplitPayments(splitPayments.map(p => 
+      p.id === id ? { ...p, [field]: value } : p
+    ));
+  };
+
+  // Get total amount paid across all split payments (in USD equivalent)
+  const getSplitPaymentTotalUSD = () => {
+    return splitPayments.reduce((total, payment) => {
+      const amount = parseFloat(payment.amount) || 0;
+      if (payment.currency === 'USD') {
+        return total + amount;
+      } else if (payment.currency === 'ZIG') {
+        return total + (amount / (exchangeRates?.usd_to_zig || 24.50));
+      } else if (payment.currency === 'RAND') {
+        return total + (amount / (exchangeRates?.usd_to_rand || 18.20));
+      }
+      return total;
+    }, 0);
+  };
+
+  // Get total amount paid in original currencies (for display)
+  const getSplitPaymentTotalDisplay = () => {
+    const totalUSD = getSplitPaymentTotalUSD();
+    const totalZIG = convertToCurrency(totalUSD, 'ZIG');
+    const totalRAND = convertToCurrency(totalUSD, 'RAND');
+    return {
+      usd: splitPayments.filter(p => p.currency === 'USD').reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0),
+      zig: splitPayments.filter(p => p.currency === 'ZIG').reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0),
+      rand: splitPayments.filter(p => p.currency === 'RAND').reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0),
+      usdEquivalent: totalUSD,
+      zigEquivalent: totalZIG,
+      randEquivalent: totalRAND
+    };
+  };
+
+  // Check if split payments cover the total amount
+  const isSplitPaymentComplete = () => {
+    const totalUSD = getTotalAmount();
+    const paidUSD = getSplitPaymentTotalUSD();
+    return paidUSD >= totalUSD;
+  };
+
+  // Get remaining amount needed (in USD)
+  const getRemainingSplitAmount = () => {
+    const totalUSD = getTotalAmount();
+    const paidUSD = getSplitPaymentTotalUSD();
+    return Math.max(0, totalUSD - paidUSD);
+  };
+
+  // Reset split payments to default
+  const resetSplitPayments = () => {
+    setUseSplitPayment(false);
+    setSplitPayments([
+      { id: 1, paymentMethod: 'cash', currency: 'USD', amount: '', wallet: '' }
+    ]);
+  };
+  // ====================================================
+
   // Handle barcode scan - Auto add to cart
   const handleBarcodeScan = (barcode) => {
     const product = products.find(p => p.line_code === barcode || p.barcode === barcode);
@@ -2893,162 +2948,170 @@ const CashierDashboardScreen = () => {
   const processSale = async () => {
     console.log('SALE BUTTON PRESSED!');
     
-    // Show immediate feedback
-    Alert.alert(
-      'Processing Sale...', 
-      'Please wait while we process your sale.',
-      [{ text: 'OK' }]
-    );
+    // Check if using split payment
+    if (useSplitPayment) {
+      // Validate split payments
+      const validPayments = splitPayments.filter(p => {
+        const amount = parseFloat(p.amount);
+        return amount > 0 && !isNaN(amount);
+      });
+      
+      if (validPayments.length === 0) {
+        showError(
+          '⚠️ NO PAYMENTS ENTERED', 
+          'Please enter at least one payment amount for split payments.',
+          'warning'
+        );
+        return;
+      }
+      
+      if (!isSplitPaymentComplete()) {
+        showError(
+          '⚠️ INSUFFICIENT PAYMENT', 
+          `The total paid (${formatCurrency(getSplitPaymentTotalUSD())} USD) is less than the total amount (${formatCurrency(getTotalAmount())} USD).\n\nPlease collect ${formatCurrency(getRemainingSplitAmount())} more.`,
+          'warning'
+        );
+        return;
+      }
+    } else {
+      // Original single payment validation
+      if (cart.length === 0) {
+        showError(
+          '⚠️ NO ITEMS IN CART', 
+          'Please add items to the cart before processing the sale.\n\nClick on products to add them to the cart.',
+          'warning'
+        );
+        return;
+      }
+
+      // Validate card payment
+      if (paymentMethod === 'card') {
+        if (!cardNetwork) {
+          Alert.alert(
+            '⚠️ CARD NETWORK REQUIRED',
+            'Please select the card network (Visa, Mastercard, etc.)',
+            [{ text: 'OK' }]
+          );
+          return;
+        }
+        if (!cardLast4 || cardLast4.length !== 4) {
+          Alert.alert(
+            '⚠️ CARD NUMBER REQUIRED',
+            'Please enter the last 4 digits of the card',
+            [{ text: 'OK' }]
+          );
+          return;
+        }
+      }
+
+      // Validate transfer payment
+      if (paymentMethod === 'transfer') {
+        if (!transferWallet) {
+          Alert.alert(
+            '⚠️ TRANSFER METHOD REQUIRED',
+            'Please select a transfer wallet or bank account from the modal',
+            [{ text: 'OK', onPress: () => setShowTransferWalletModal(true) }]
+          );
+          return;
+        }
+      }
+
+      // For cash payments, require amount received
+      if (paymentMethod === 'cash') {
+        const received = parseFloat(amountReceived) || 0;
+        if (received <= 0) {
+          Alert.alert(
+            '⚠️ PAYMENT REQUIRED',
+            `Please enter the amount received from customer before processing the sale.\n\nTotal Amount: ${formatCurrency(getTotalAmount())}`,
+            [{ text: 'OK', style: 'default' }]
+          );
+          return;
+        }
+
+        // Check if sufficient amount received
+        if (received < getTotalAmount()) {
+          const shortage = getTotalAmount() - received;
+          Alert.alert(
+            '⚠️ INSUFFICIENT PAYMENT',
+            `Insufficient amount received for ${selectedCurrency} cash payment.\n\nTotal Amount: ${formatCurrency(getTotalAmount())}\nAmount Received: ${formatCurrency(received, selectedCurrency)}\nShort Amount: ${formatCurrency(shortage, selectedCurrency)}\n\nPlease collect the remaining amount from customer.\n\nTip: Use the SPLIT PAYMENT button to accept multiple currencies!`,
+            [{ text: 'OK', style: 'default' }]
+          );
+          return;
+        }
+      }
+    }
     
-    if (cart.length === 0) {
-      showError(
-        '⚠️ NO ITEMS IN CART', 
-        'Please add items to the cart before processing the sale.\n\nClick on products to add them to the cart.',
-        'warning'
-      );
-      return;
-    }
-
-    // Validate card payment
-    if (paymentMethod === 'card') {
-      if (!cardNetwork) {
-        Alert.alert(
-          '⚠️ CARD NETWORK REQUIRED',
-          'Please select the card network (Visa, Mastercard, etc.)',
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-      if (!cardLast4 || cardLast4.length !== 4) {
-        Alert.alert(
-          '⚠️ CARD NUMBER REQUIRED',
-          'Please enter the last 4 digits of the card',
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-    }
-
-    // Validate transfer payment
-    if (paymentMethod === 'transfer') {
-      if (!transferWallet) {
-        Alert.alert(
-          '⚠️ TRANSFER METHOD REQUIRED',
-          'Please select a transfer wallet or bank account from the modal',
-          [{ text: 'OK', onPress: () => setShowTransferWalletModal(true) }]
-        );
-        return;
-      }
-    }
-
-    // For cash payments, require amount received
-    if (paymentMethod === 'cash') {
-      const received = parseFloat(amountReceived) || 0;
-      if (received <= 0) {
-        Alert.alert(
-          '⚠️ PAYMENT REQUIRED',
-          `Please enter the amount received from customer before processing the sale.\n\nTotal Amount: ${formatCurrency(getTotalAmount())}`,
-          [{ text: 'OK', style: 'default' }]
-        );
-        setTimeout(() => {
-          const amountInput = document.querySelector('input[placeholder="0.00"]');
-          if (amountInput) amountInput.focus();
-        }, 100);
-        return;
-      }
-
-      // Check if sufficient amount received
-      if (received < getTotalAmount()) {
-        const shortage = getTotalAmount() - received;
-        Alert.alert(
-          '⚠️ INSUFFICIENT PAYMENT',
-          `Insufficient amount received for ${selectedCurrency} cash payment.\n\nTotal Amount: ${formatCurrency(getTotalAmount())}\nAmount Received: ${formatCurrency(received, selectedCurrency)}\nShort Amount: ${formatCurrency(shortage, selectedCurrency)}\n\nPlease collect the remaining amount from customer.`,
-          [{ text: 'OK', style: 'default' }]
-        );
-        return;
-      }
-
-      // Check for overpayment
-      if (received > getTotalAmount()) {
-        const overpayment = received - getTotalAmount();
-        console.log('OVERPAYMENT DETECTED - ALLOWING WITH WARNING');
-        Alert.alert(
-          'Overpayment Detected',
-          `Overpayment detected!\n\nTotal: ${formatCurrency(getTotalAmount())}\nReceived: ${formatCurrency(received, selectedCurrency)}\nChange: ${formatCurrency(overpayment, selectedCurrency)}\n\nPlease verify the amount with customer before proceeding.`,
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Proceed Anyway',
-              onPress: () => {
-                console.log('Overpayment confirmed by cashier');
-              }
-            }
-          ]
-        );
-      }
-    }
-
     console.log('Starting sale processing...');
     
-    // Final validation summary
-    const saleSummary = {
-      items: cart.length,
-      total: formatCurrency(getTotalAmount()),
-      paymentMethod: paymentMethod.toUpperCase(),
-      ...(paymentMethod === 'cash' && {
-        received: formatCurrency(parseFloat(amountReceived) || 0),
-        change: formatCurrency(getChange())
-      }),
-      ...(paymentMethod === 'transfer' && {
-        transferWallet: transferWallet,
-        transferReference: transferReference
-      }),
-      ...(paymentMethod === 'card' && {
-        cardNetwork: cardNetwork,
-        cardLast4: cardLast4
-      })
-    };
-    console.log('Sale summary:', saleSummary);
-    
-    // Prepare sale data - Multi-Currency Support with Transfer/Card
-    // Determine the specific payment type for proper tracking
-    let paymentType = paymentMethod;
-    let walletAccount = transferWallet || 'bank';
-    
-    // For transfer payments, use the wallet ID for precise tracking
-    if (paymentMethod === 'transfer' && transferWallet) {
-      const selectedWallet = transferWallets.find(w => w.name === transferWallet);
-      if (selectedWallet) {
-        walletAccount = selectedWallet.id; // Use the wallet ID (e.g., 'ecocash', 'ecocash_usd')
-      }
-    }
-    
-    // Calculate total with proper rounding to avoid floating-point precision issues
+    // Prepare sale data - Multi-Currency Support with Split Payments
     const roundedTotal = Math.round(getTotalAmount() * 100) / 100;
     
-    const saleData = {
-      cashier_id: cashierData?.cashier_info?.id || cashierData?.id || cashierData?.cashier_id || 1,
-      items: cart.map(item => ({
-        product_id: item.id.toString(),
-        quantity: item.price_type === 'unit' ? item.quantity.toString() : (item.weight || 0).toString(),
-        unit_price: convertToCurrency(item.price, selectedCurrency).toString()
-      })),
-      payment_method: paymentType, // cash, card, transfer
-      payment_currency: selectedCurrency,
-      product_price_currency: 'USD',
-      customer_name: '',
-      customer_phone: '',
-      total_amount: roundedTotal.toString(),
-      // Transfer/Card specific fields
-      ...(paymentMethod === 'transfer' && {
-        wallet_account: walletAccount, // Now contains specific wallet ID like 'ecocash', 'ecocash_usd', 'onemoney', etc.
-        transfer_reference: transferReference
-      }),
-      ...(paymentMethod === 'card' && {
-        card_network: cardNetwork,
-        card_last_4: cardLast4
-      })
-    };
+    let saleData;
+    
+    if (useSplitPayment) {
+      // Build payments array for split payment
+      const payments = splitPayments
+        .filter(p => {
+          const amount = parseFloat(p.amount);
+          return amount > 0 && !isNaN(amount);
+        })
+        .map(p => ({
+          payment_method: p.paymentMethod,
+          currency: p.currency,
+          amount: parseFloat(p.amount).toString(),
+          wallet_account: p.wallet || ''
+        }));
+      
+      saleData = {
+        cashier_id: cashierData?.cashier_info?.id || cashierData?.id || cashierData?.cashier_id || 1,
+        items: cart.map(item => ({
+          product_id: item.id.toString(),
+          quantity: item.price_type === 'unit' ? item.quantity.toString() : (item.weight || 0).toString(),
+          unit_price: convertToCurrency(item.price, selectedCurrency).toString()
+        })),
+        payment_method: 'split', // Mark as split payment
+        payment_currency: 'USD', // Base currency for total
+        product_price_currency: 'USD',
+        customer_name: '',
+        customer_phone: '',
+        total_amount: roundedTotal.toString(),
+        payments: payments // Array of individual payments
+      };
+    } else {
+      // Single payment (original logic)
+      let paymentType = paymentMethod;
+      let walletAccount = transferWallet || 'bank';
+      
+      if (paymentMethod === 'transfer' && transferWallet) {
+        const selectedWallet = transferWallets.find(w => w.name === transferWallet);
+        if (selectedWallet) {
+          walletAccount = selectedWallet.id;
+        }
+      }
+      
+      saleData = {
+        cashier_id: cashierData?.cashier_info?.id || cashierData?.id || cashierData?.cashier_id || 1,
+        items: cart.map(item => ({
+          product_id: item.id.toString(),
+          quantity: item.price_type === 'unit' ? item.quantity.toString() : (item.weight || 0).toString(),
+          unit_price: convertToCurrency(item.price, selectedCurrency).toString()
+        })),
+        payment_method: paymentType,
+        payment_currency: selectedCurrency,
+        product_price_currency: 'USD',
+        customer_name: '',
+        customer_phone: '',
+        total_amount: roundedTotal.toString(),
+        ...(paymentMethod === 'transfer' && {
+          wallet_account: walletAccount,
+          transfer_reference: transferReference
+        }),
+        ...(paymentMethod === 'card' && {
+          card_network: cardNetwork,
+          card_last_4: cardLast4
+        })
+      };
+    }
     
     console.log('🔍 SALE ATTRIBUTION DEBUG:', {
       cashierId: cashierData?.cashier_info?.id || cashierData?.id || cashierData?.cashier_id || 1,
@@ -3065,45 +3128,86 @@ const CashierDashboardScreen = () => {
       if (response?.data) {
         // Process automatic receipt generation - Multi-Currency Support
         const receivedAmount = parseFloat(amountReceived) || 0;
-        printVintageReceipt(response.data, getTotalAmount(), receivedAmount, selectedCurrency);
         
-        // Calculate change first
-        const calculatedChange = Math.max(0, receivedAmount - getTotalAmount());
-        const updatedItems = cart.map(item => `${item.name}: ${item.stock_quantity - item.quantity} remaining`).join('\n');
+        if (useSplitPayment) {
+          // Generate split payment receipt
+          printVintageReceipt(
+            response.data, 
+            getTotalAmount(), 
+            getSplitPaymentTotalUSD(), 
+            'USD'
+          );
+          
+          // Build payment method description for split payments
+          const paymentMethodDesc = splitPayments
+            .filter(p => parseFloat(p.amount) > 0)
+            .map(p => `${formatCurrencyWithSymbol(parseFloat(p.amount), p.currency)} (${p.paymentMethod} ${p.currency})`)
+            .join(' + ');
 
-        // Build payment method description
-        let paymentMethodDesc = '';
-        if (paymentMethod === 'cash') {
-          paymentMethodDesc = `Currency: ${selectedCurrency}\nCash Received: ${formatCurrency(receivedAmount, selectedCurrency)}\nChange: ${formatCurrency(calculatedChange, selectedCurrency)}`;
-        } else if (paymentMethod === 'transfer') {
-          paymentMethodDesc = `Transfer (${transferWallet}): ${transferReference}`;
-        } else if (paymentMethod === 'card') {
-          paymentMethodDesc = `Card: ${cardNetwork?.toUpperCase()}\nLast 4: ****${cardLast4}`;
-        }
-
-        Alert.alert(
-          'SALE COMPLETED!',
-          `Sale #${response.data.id} completed successfully!\n\n` +
-          `Total: ${formatCurrency(getTotalAmount(), selectedCurrency)}\n` +
-          `${paymentMethodDesc}\n\n` +
-          `Stock Updated:\n${updatedItems}`,
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                setCart([]);
-                setAmountReceived('');
-                setPaymentMethod('cash');
-                setCardLast4('');
-                setCardNetwork('');
-                setTransferWallet('');
-                setTransferReference('');
-                loadProducts();
-                setProcessingSale(false);
+          Alert.alert(
+            '✅ SALE COMPLETED! (SPLIT PAYMENT)',
+            `Sale #${response.data.id} completed successfully!\n\n` +
+            `Total: ${formatCurrency(getTotalAmount())}\n\n` +
+            `Payments:\n${paymentMethodDesc}\n\n` +
+            `USD Equivalent: ${formatCurrency(getSplitPaymentTotalUSD())}`,
+            [
+              {
+                text: 'OK',
+                onPress: () => {
+                  setCart([]);
+                  setAmountReceived('');
+                  setPaymentMethod('cash');
+                  setCardLast4('');
+                  setCardNetwork('');
+                  setTransferWallet('');
+                  setTransferReference('');
+                  resetSplitPayments();
+                  loadProducts();
+                  setProcessingSale(false);
+                }
               }
-            }
-          ]
-        );
+            ]
+          );
+        } else {
+          // Original single payment receipt
+          printVintageReceipt(response.data, getTotalAmount(), receivedAmount, selectedCurrency);
+          
+          const calculatedChange = Math.max(0, receivedAmount - getTotalAmount());
+          const updatedItems = cart.map(item => `${item.name}: ${item.stock_quantity - item.quantity} remaining`).join('\n');
+
+          let paymentMethodDesc = '';
+          if (paymentMethod === 'cash') {
+            paymentMethodDesc = `Currency: ${selectedCurrency}\nCash Received: ${formatCurrency(receivedAmount, selectedCurrency)}\nChange: ${formatCurrency(calculatedChange, selectedCurrency)}`;
+          } else if (paymentMethod === 'transfer') {
+            paymentMethodDesc = `Transfer (${transferWallet}): ${transferReference}`;
+          } else if (paymentMethod === 'card') {
+            paymentMethodDesc = `Card: ${cardNetwork?.toUpperCase()}\nLast 4: ****${cardLast4}`;
+          }
+
+          Alert.alert(
+            'SALE COMPLETED!',
+            `Sale #${response.data.id} completed successfully!\n\n` +
+            `Total: ${formatCurrency(getTotalAmount(), selectedCurrency)}\n` +
+            `${paymentMethodDesc}\n\n` +
+            `Stock Updated:\n${updatedItems}`,
+            [
+              {
+                text: 'OK',
+                onPress: () => {
+                  setCart([]);
+                  setAmountReceived('');
+                  setPaymentMethod('cash');
+                  setCardLast4('');
+                  setCardNetwork('');
+                  setTransferWallet('');
+                  setTransferReference('');
+                  loadProducts();
+                  setProcessingSale(false);
+                }
+              }
+            ]
+          );
+        }
       }
     } catch (error) {
       let errorMessage = 'Failed to process sale';
@@ -4059,6 +4163,65 @@ const CashierDashboardScreen = () => {
                 />
               </View>
             )}
+
+            {/* ========== SPLIT PAYMENT UI ========== */}
+            {useSplitPayment && (
+              <View style={styles.splitPaymentContainer}>
+                <View style={styles.splitPaymentHeader}>
+                  <Text style={styles.splitPaymentTitle}>💰 SPLIT PAYMENT</Text>
+                  <TouchableOpacity
+                    style={styles.splitPaymentCloseButton}
+                    onPress={resetSplitPayments}
+                  >
+                    <Text style={styles.splitPaymentCloseButtonText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Split Payment Summary */}
+                <View style={styles.splitPaymentSummary}>
+                  <View style={styles.splitPaymentSummaryRow}>
+                    <Text style={styles.splitPaymentSummaryLabel}>Total Amount:</Text>
+                    <Text style={styles.splitPaymentSummaryValue}>{formatCurrency(getTotalAmount())}</Text>
+                  </View>
+                  <View style={styles.splitPaymentSummaryRow}>
+                    <Text style={styles.splitPaymentSummaryLabel}>Amount Paid:</Text>
+                    <Text style={[
+                      styles.splitPaymentSummaryValue,
+                      isSplitPaymentComplete() ? styles.splitPaymentComplete : styles.splitPaymentIncomplete
+                    ]}>
+                      {formatCurrency(getSplitPaymentTotalUSD())} USD equiv.
+                    </Text>
+                  </View>
+                  <View style={styles.splitPaymentSummaryRow}>
+                    <Text style={styles.splitPaymentSummaryLabel}>Remaining:</Text>
+                    <Text style={[
+                      styles.splitPaymentSummaryValue,
+                      getRemainingSplitAmount() > 0 ? styles.splitPaymentIncomplete : styles.splitPaymentComplete
+                    ]}>
+                      {formatCurrency(getRemainingSplitAmount())} USD
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Display totals by currency */}
+                <View style={styles.splitPaymentTotalsDisplay}>
+                  <Text style={styles.splitPaymentTotalsTitle}>💰 TOTALS BY CURRENCY</Text>
+                  <View style={styles.splitPaymentTotalsRow}>
+                    <Text style={styles.splitPaymentTotalsLabel}>USD:</Text>
+                    <Text style={styles.splitPaymentTotalsValue}>{formatCurrencyWithSymbol(getSplitPaymentTotalDisplay().usd, 'USD')}</Text>
+                  </View>
+                  <View style={styles.splitPaymentTotalsRow}>
+                    <Text style={styles.splitPaymentTotalsLabel}>ZIG:</Text>
+                    <Text style={styles.splitPaymentTotalsValue}>{formatCurrencyWithSymbol(getSplitPaymentTotalDisplay().zig, 'ZIG')}</Text>
+                  </View>
+                  <View style={styles.splitPaymentTotalsRow}>
+                    <Text style={styles.splitPaymentTotalsLabel}>RAND:</Text>
+                    <Text style={styles.splitPaymentTotalsValue}>{formatCurrencyWithSymbol(getSplitPaymentTotalDisplay().rand, 'RAND')}</Text>
+                  </View>
+                </View>
+              </View>
+            )}
+            {/* ===================================== */}
           </View>
 
           {/* Amount Received - Multi-Currency Support */}
@@ -4114,10 +4277,10 @@ const CashierDashboardScreen = () => {
                 <Text style={styles.actionButtonText}>REFRESH</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.actionButton, styles.voidButton]}
-                onPress={voidSale}
+                style={[styles.actionButton, styles.splitPaymentButton, useSplitPayment && styles.splitPaymentButtonActive]}
+                onPress={() => setShowSplitPaymentModal(true)}
               >
-                <Text style={styles.actionButtonText}>VOID</Text>
+                <Text style={styles.actionButtonText}>💰 SPLIT</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[
@@ -4340,38 +4503,6 @@ const CashierDashboardScreen = () => {
                 </View>
               </View>
               
-              {/* Cards Section */}
-              <View style={styles.transferWalletSection}>
-                <View style={styles.transferWalletSectionHeader}>
-                  <Text style={styles.transferWalletSectionIcon}>💳</Text>
-                  <Text style={styles.transferWalletSectionTitle}>CARDS</Text>
-                </View>
-                <View style={styles.transferWalletGridCompact}>
-                  {cardNetworks.map((network) => (
-                    <TouchableOpacity
-                      key={network.id}
-                      style={[
-                        styles.transferWalletButtonCompact,
-                        transferWallet === `Card ${network.name}` && styles.transferWalletButtonActive
-                      ]}
-                      onPress={() => {
-                        setTransferWallet(`Card ${network.name}`);
-                        if (network.id === 'visa_zig') {
-                          setSelectedCurrency('ZIG');
-                        } else if (network.id === 'visa_rand') {
-                          setSelectedCurrency('RAND');
-                        } else {
-                          setSelectedCurrency('USD');
-                        }
-                        setShowTransferWalletModal(false);
-                      }}
-                    >
-                      <Text style={styles.transferWalletIconCompact}>{network.icon}</Text>
-                      <Text style={styles.transferWalletNameCompact}>{network.name}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
               
               <View style={styles.transferWalletModalFooterSpacer} />
             </ScrollView>
@@ -4392,6 +4523,347 @@ const CashierDashboardScreen = () => {
           </View>
         </View>
       )}
+
+      {/* ========== SPLIT PAYMENT MODAL ========== */}
+      {showSplitPaymentModal && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.splitPaymentModalContainer}>
+            <View style={styles.splitPaymentModalHeader}>
+              <View style={styles.splitPaymentModalHeaderContent}>
+                <Text style={styles.splitPaymentModalTitle}>💰 SPLIT PAYMENT</Text>
+                <Text style={styles.splitPaymentModalSubtitle}>
+                  Total Due: {formatCurrency(getTotalAmount())}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.splitPaymentModalCloseButton}
+                onPress={() => {
+                  setShowSplitPaymentModal(false);
+                  setUseSplitPayment(false);
+                }}
+              >
+                <Text style={styles.splitPaymentModalCloseButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            {/* Split Payment Summary */}
+            <View style={styles.splitPaymentModalSummary}>
+              <View style={styles.splitPaymentModalSummaryRow}>
+                <Text style={styles.splitPaymentModalSummaryLabel}>Total Due:</Text>
+                <Text style={styles.splitPaymentModalSummaryValue}>{formatCurrency(getTotalAmount())}</Text>
+              </View>
+              <View style={styles.splitPaymentModalSummaryRow}>
+                <Text style={styles.splitPaymentModalSummaryLabel}>Collected:</Text>
+                <Text style={[
+                  styles.splitPaymentModalSummaryValue,
+                  isSplitPaymentComplete() ? styles.splitPaymentComplete : styles.splitPaymentIncomplete
+                ]}>
+                  {formatCurrency(getSplitPaymentTotalUSD())} USD equiv.
+                </Text>
+              </View>
+              <View style={styles.splitPaymentModalSummaryRow}>
+                <Text style={styles.splitPaymentModalSummaryLabel}>Remaining:</Text>
+                <Text style={[
+                  styles.splitPaymentModalSummaryValue,
+                  getRemainingSplitAmount() > 0 ? styles.splitPaymentIncomplete : styles.splitPaymentComplete
+                ]}>
+                  {formatCurrency(getRemainingSplitAmount())} USD
+                </Text>
+              </View>
+            </View>
+            
+            <ScrollView 
+              style={styles.splitPaymentModalBody}
+              showsVerticalScrollIndicator={true}
+              nestedScrollEnabled={true}
+            >
+              {/* USD Cash Section */}
+              <View style={styles.splitPaymentSection}>
+                <View style={styles.splitPaymentSectionHeader}>
+                  <Text style={styles.splitPaymentSectionIcon}>💵</Text>
+                  <Text style={styles.splitPaymentSectionTitle}>USD CASH</Text>
+                </View>
+                <View style={styles.splitPaymentGrid}>
+                  {splitPayments.filter(p => p.currency === 'USD').map((payment) => (
+                    <View key={payment.id} style={styles.splitPaymentItem}>
+                      <View style={styles.splitPaymentItemHeader}>
+                        <Text style={styles.splitPaymentItemLabel}>USD Cash</Text>
+                        <TouchableOpacity
+                          style={styles.splitPaymentRemoveButton}
+                          onPress={() => removePaymentFromSplit(payment.id)}
+                        >
+                          <Text style={styles.splitPaymentRemoveButtonText}>✕</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <TextInput
+                        style={styles.splitPaymentAmountInput}
+                        value={payment.amount}
+                        onChangeText={(text) => updateSplitPayment(payment.id, 'amount', text)}
+                        keyboardType="numeric"
+                        placeholder="0.00"
+                        placeholderTextColor="#6b7280"
+                      />
+                    </View>
+                  ))}
+                </View>
+                <TouchableOpacity
+                  style={styles.addSplitPaymentButton}
+                  onPress={() => {
+                    const newId = Math.max(...splitPayments.map(p => p.id), 0) + 1;
+                    setSplitPayments([...splitPayments, { id: newId, paymentMethod: 'cash', currency: 'USD', amount: '', wallet: '' }]);
+                  }}
+                >
+                  <Text style={styles.addSplitPaymentButtonText}>+ Add USD Cash</Text>
+                </TouchableOpacity>
+              </View>
+              
+              {/* ZIG Cash Section */}
+              <View style={styles.splitPaymentSection}>
+                <View style={styles.splitPaymentSectionHeader}>
+                  <Text style={styles.splitPaymentSectionIcon}>💰</Text>
+                  <Text style={styles.splitPaymentSectionTitle}>ZIG CASH</Text>
+                </View>
+                <View style={styles.splitPaymentGrid}>
+                  {splitPayments.filter(p => p.currency === 'ZIG').map((payment) => (
+                    <View key={payment.id} style={styles.splitPaymentItem}>
+                      <View style={styles.splitPaymentItemHeader}>
+                        <Text style={styles.splitPaymentItemLabel}>ZIG Cash</Text>
+                        <TouchableOpacity
+                          style={styles.splitPaymentRemoveButton}
+                          onPress={() => removePaymentFromSplit(payment.id)}
+                        >
+                          <Text style={styles.splitPaymentRemoveButtonText}>✕</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <TextInput
+                        style={styles.splitPaymentAmountInput}
+                        value={payment.amount}
+                        onChangeText={(text) => updateSplitPayment(payment.id, 'amount', text)}
+                        keyboardType="numeric"
+                        placeholder="0.00"
+                        placeholderTextColor="#6b7280"
+                      />
+                    </View>
+                  ))}
+                </View>
+                <TouchableOpacity
+                  style={styles.addSplitPaymentButton}
+                  onPress={() => {
+                    const newId = Math.max(...splitPayments.map(p => p.id), 0) + 1;
+                    setSplitPayments([...splitPayments, { id: newId, paymentMethod: 'cash', currency: 'ZIG', amount: '', wallet: '' }]);
+                  }}
+                >
+                  <Text style={styles.addSplitPaymentButtonText}>+ Add ZIG Cash</Text>
+                </TouchableOpacity>
+              </View>
+              
+              {/* RAND Cash Section */}
+              <View style={styles.splitPaymentSection}>
+                <View style={styles.splitPaymentSectionHeader}>
+                  <Text style={styles.splitPaymentSectionIcon}>💸</Text>
+                  <Text style={styles.splitPaymentSectionTitle}>RAND CASH</Text>
+                </View>
+                <View style={styles.splitPaymentGrid}>
+                  {splitPayments.filter(p => p.currency === 'RAND').map((payment) => (
+                    <View key={payment.id} style={styles.splitPaymentItem}>
+                      <View style={styles.splitPaymentItemHeader}>
+                        <Text style={styles.splitPaymentItemLabel}>RAND Cash</Text>
+                        <TouchableOpacity
+                          style={styles.splitPaymentRemoveButton}
+                          onPress={() => removePaymentFromSplit(payment.id)}
+                        >
+                          <Text style={styles.splitPaymentRemoveButtonText}>✕</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <TextInput
+                        style={styles.splitPaymentAmountInput}
+                        value={payment.amount}
+                        onChangeText={(text) => updateSplitPayment(payment.id, 'amount', text)}
+                        keyboardType="numeric"
+                        placeholder="0.00"
+                        placeholderTextColor="#6b7280"
+                      />
+                    </View>
+                  ))}
+                </View>
+                <TouchableOpacity
+                  style={styles.addSplitPaymentButton}
+                  onPress={() => {
+                    const newId = Math.max(...splitPayments.map(p => p.id), 0) + 1;
+                    setSplitPayments([...splitPayments, { id: newId, paymentMethod: 'cash', currency: 'RAND', amount: '', wallet: '' }]);
+                  }}
+                >
+                  <Text style={styles.addSplitPaymentButtonText}>+ Add RAND Cash</Text>
+                </TouchableOpacity>
+              </View>
+              
+              {/* ZIG Transfer Wallets Section */}
+              <View style={styles.splitPaymentSection}>
+                <View style={styles.splitPaymentSectionHeader}>
+                  <Text style={styles.splitPaymentSectionIcon}>📱</Text>
+                  <Text style={styles.splitPaymentSectionTitle}>ZIG TRANSFER WALLETS</Text>
+                </View>
+                <View style={styles.splitPaymentWalletGrid}>
+                  {transferWallets.filter(w => w.currency === 'ZIG').map((wallet) => (
+                    <TouchableOpacity
+                      key={wallet.id}
+                      style={[
+                        styles.splitPaymentWalletButton,
+                        splitPayments.some(p => p.wallet === wallet.name) && styles.splitPaymentWalletButtonActive
+                      ]}
+                      onPress={() => {
+                        const existingPayment = splitPayments.find(p => p.wallet === wallet.name);
+                        if (existingPayment) {
+                          removePaymentFromSplit(existingPayment.id);
+                        } else {
+                          const newId = Math.max(...splitPayments.map(p => p.id), 0) + 1;
+                          setSplitPayments([...splitPayments, {
+                            id: newId,
+                            paymentMethod: 'transfer',
+                            currency: 'ZIG',
+                            amount: '',
+                            wallet: wallet.name
+                          }]);
+                        }
+                      }}
+                    >
+                      <Text style={styles.splitPaymentWalletIcon}>{wallet.icon}</Text>
+                      <Text style={styles.splitPaymentWalletName}>{wallet.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+              
+              {/* USD Transfer/Cards Section */}
+              <View style={styles.splitPaymentSection}>
+                <View style={styles.splitPaymentSectionHeader}>
+                  <Text style={styles.splitPaymentSectionIcon}>💳</Text>
+                  <Text style={styles.splitPaymentSectionTitle}>USD TRANSFER & CARDS</Text>
+                </View>
+                <View style={styles.splitPaymentWalletGrid}>
+                  {transferWallets.filter(w => w.currency === 'USD' || cardNetworks.some(c => c.id.includes('visa') || c.id.includes('mastercard'))).slice(0, 12).map((wallet) => (
+                    <TouchableOpacity
+                      key={wallet.id}
+                      style={[
+                        styles.splitPaymentWalletButton,
+                        splitPayments.some(p => p.wallet === wallet.name) && styles.splitPaymentWalletButtonActive
+                      ]}
+                      onPress={() => {
+                        const existingPayment = splitPayments.find(p => p.wallet === wallet.name);
+                        if (existingPayment) {
+                          removePaymentFromSplit(existingPayment.id);
+                        } else {
+                          const newId = Math.max(...splitPayments.map(p => p.id), 0) + 1;
+                          setSplitPayments([...splitPayments, {
+                            id: newId,
+                            paymentMethod: wallet.currency === 'USD' ? 'transfer' : 'card',
+                            currency: 'USD',
+                            amount: '',
+                            wallet: wallet.name
+                          }]);
+                        }
+                      }}
+                    >
+                      <Text style={styles.splitPaymentWalletIcon}>{wallet.icon}</Text>
+                      <Text style={styles.splitPaymentWalletName}>{wallet.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+              
+              {/* RAND Transfer Section */}
+              <View style={styles.splitPaymentSection}>
+                <View style={styles.splitPaymentSectionHeader}>
+                  <Text style={styles.splitPaymentSectionIcon}>🏦</Text>
+                  <Text style={styles.splitPaymentSectionTitle}>RAND TRANSFER</Text>
+                </View>
+                <View style={styles.splitPaymentWalletGrid}>
+                  {transferWallets.filter(w => w.currency === 'RAND').map((wallet) => (
+                    <TouchableOpacity
+                      key={wallet.id}
+                      style={[
+                        styles.splitPaymentWalletButton,
+                        splitPayments.some(p => p.wallet === wallet.name) && styles.splitPaymentWalletButtonActive
+                      ]}
+                      onPress={() => {
+                        const existingPayment = splitPayments.find(p => p.wallet === wallet.name);
+                        if (existingPayment) {
+                          removePaymentFromSplit(existingPayment.id);
+                        } else {
+                          const newId = Math.max(...splitPayments.map(p => p.id), 0) + 1;
+                          setSplitPayments([...splitPayments, {
+                            id: newId,
+                            paymentMethod: 'transfer',
+                            currency: 'RAND',
+                            amount: '',
+                            wallet: wallet.name
+                          }]);
+                        }
+                      }}
+                    >
+                      <Text style={styles.splitPaymentWalletIcon}>{wallet.icon}</Text>
+                      <Text style={styles.splitPaymentWalletName}>{wallet.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+              
+              {/* Current Payments List */}
+              {splitPayments.filter(p => parseFloat(p.amount) > 0).length > 0 && (
+                <View style={styles.splitPaymentCurrentList}>
+                  <Text style={styles.splitPaymentCurrentListTitle}>💰 Current Payments:</Text>
+                  {splitPayments.filter(p => parseFloat(p.amount) > 0).map((payment) => (
+                    <View key={payment.id} style={styles.splitPaymentCurrentItem}>
+                      <Text style={styles.splitPaymentCurrentItemText}>
+                        {formatCurrencyWithSymbol(parseFloat(payment.amount), payment.currency)} {payment.wallet ? `(${payment.wallet})` : ''}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.splitPaymentCurrentRemoveButton}
+                        onPress={() => updateSplitPayment(payment.id, 'amount', '')}
+                      >
+                        <Text style={styles.splitPaymentCurrentRemoveButtonText}>✕</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              )}
+              
+              <View style={styles.splitPaymentModalFooterSpacer} />
+            </ScrollView>
+            
+            <View style={styles.splitPaymentModalFooter}>
+              <TouchableOpacity
+                style={styles.splitPaymentCancelButton}
+                onPress={() => {
+                  setShowSplitPaymentModal(false);
+                  setUseSplitPayment(false);
+                  resetSplitPayments();
+                }}
+              >
+                <Text style={styles.splitPaymentCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.splitPaymentConfirmButton,
+                  !isSplitPaymentComplete() && styles.splitPaymentConfirmButtonDisabled
+                ]}
+                onPress={() => {
+                  if (isSplitPaymentComplete()) {
+                    setUseSplitPayment(true);
+                    setShowSplitPaymentModal(false);
+                  }
+                }}
+                disabled={!isSplitPaymentComplete()}
+              >
+                <Text style={styles.splitPaymentConfirmButtonText}>
+                  {isSplitPaymentComplete() ? '✓ Confirm Split Payment' : `Collect ${formatCurrency(getRemainingSplitAmount())} more`}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+      {/* ===================================== */}
 
       {/* Currency Modals Removed - USD Only */}
 
@@ -6519,6 +6991,562 @@ const styles = StyleSheet.create({
   },
   voidButton: {
     backgroundColor: '#ef4444',
+  },
+  splitPaymentButton: {
+    backgroundColor: '#7c3aed',
+  },
+  splitPaymentButtonActive: {
+    backgroundColor: '#a78bfa',
+    borderWidth: 2,
+    borderColor: '#c4b5fd',
+  },
+  
+  // Split Payment UI Styles
+  splitPaymentContainer: {
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: '#7c3aed',
+  },
+  splitPaymentHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#4b5563',
+    paddingBottom: 8,
+  },
+  splitPaymentTitle: {
+    color: '#a78bfa',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  splitPaymentCloseButton: {
+    backgroundColor: '#ef4444',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 4,
+  },
+  splitPaymentCloseButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  splitPaymentSummary: {
+    backgroundColor: '#374151',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  splitPaymentSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  splitPaymentSummaryLabel: {
+    color: '#9ca3af',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  splitPaymentSummaryValue: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  splitPaymentComplete: {
+    color: '#10b981',
+  },
+  splitPaymentIncomplete: {
+    color: '#f59e0b',
+  },
+
+  // Split Payment Modal Styles
+  splitPaymentModalContainer: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 20,
+    padding: 0,
+    maxWidth: 500,
+    width: '95%',
+    maxHeight: '90vh',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 15,
+    borderWidth: 3,
+    borderColor: '#7c3aed',
+    alignSelf: 'center',
+    overflow: 'hidden',
+  },
+  splitPaymentModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 20,
+    paddingTop: 24,
+    backgroundColor: 'linear-gradient(135deg, #4c1d95 0%, #7c3aed 100%)',
+    borderBottomWidth: 2,
+    borderBottomColor: '#a78bfa',
+  },
+  splitPaymentModalHeaderContent: {
+    flex: 1,
+  },
+  splitPaymentModalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  splitPaymentModalSubtitle: {
+    fontSize: 14,
+    color: '#e9d5ff',
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  splitPaymentModalCloseButton: {
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 25,
+    minWidth: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  splitPaymentModalCloseButtonText: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  splitPaymentModalSummary: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 12,
+    padding: 16,
+    margin: 20,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: '#7c3aed',
+  },
+  splitPaymentModalSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  splitPaymentModalSummaryLabel: {
+    color: '#a78bfa',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  splitPaymentModalSummaryValue: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  splitPaymentModalBody: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  splitPaymentModalFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 20,
+    backgroundColor: '#1a1a1a',
+    borderTopWidth: 1,
+    borderTopColor: '#374151',
+  },
+  splitPaymentModalFooterSpacer: {
+    height: 20,
+  },
+  splitPaymentCancelButton: {
+    backgroundColor: '#6b7280',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 120,
+    flex: 1,
+    marginRight: 8,
+  },
+  splitPaymentConfirmButton: {
+    backgroundColor: '#7c3aed',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 120,
+    flex: 1,
+    marginLeft: 8,
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  splitPaymentConfirmButtonDisabled: {
+    backgroundColor: '#4b5563',
+    opacity: 0.6,
+    shadowOpacity: 0,
+  },
+  splitPaymentConfirmButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  splitPaymentCancelButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+
+  // Split Payment Modal Section Styles
+  splitPaymentSection: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#404040',
+  },
+  splitPaymentSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#4b5563',
+  },
+  splitPaymentSectionIcon: {
+    fontSize: 18,
+    marginRight: 8,
+    color: '#a78bfa',
+  },
+  splitPaymentSectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#a78bfa',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  splitPaymentGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  splitPaymentItem: {
+    backgroundColor: '#374151',
+    borderRadius: 8,
+    padding: 12,
+    width: '48%',
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  splitPaymentItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  splitPaymentItemLabel: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  splitPaymentRemoveButton: {
+    backgroundColor: '#ef4444',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 4,
+  },
+  splitPaymentRemoveButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  splitPaymentAmountInput: {
+    backgroundColor: '#1f2937',
+    borderWidth: 1,
+    borderColor: '#4b5563',
+    borderRadius: 6,
+    padding: 10,
+    fontSize: 16,
+    color: '#ffffff',
+    textAlign: 'center',
+    fontWeight: 'bold',
+  },
+  addSplitPaymentButton: {
+    backgroundColor: '#7c3aed',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 8,
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  addSplitPaymentButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  splitPaymentTotalsDisplay: {
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 16,
+    borderWidth: 2,
+    borderColor: '#7c3aed',
+  },
+  splitPaymentTotalsTitle: {
+    color: '#a78bfa',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 12,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  splitPaymentTotalsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  splitPaymentTotalsLabel: {
+    color: '#9ca3af',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  splitPaymentTotalsValue: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  splitPaymentWalletGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  splitPaymentWalletButton: {
+    backgroundColor: '#374151',
+    borderRadius: 10,
+    padding: 12,
+    width: '31%',
+    marginBottom: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#4b5563',
+    minHeight: 70,
+  },
+  splitPaymentWalletButtonActive: {
+    backgroundColor: '#7c3aed',
+    borderColor: '#a78bfa',
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  splitPaymentWalletIcon: {
+    fontSize: 20,
+    marginBottom: 6,
+    color: '#ffffff',
+  },
+  splitPaymentWalletName: {
+    color: '#e5e7eb',
+    fontSize: 11,
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 13,
+  },
+  splitPaymentCurrentList: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: '#7c3aed',
+  },
+  splitPaymentCurrentListTitle: {
+    color: '#a78bfa',
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  splitPaymentCurrentItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#374151',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+  },
+  splitPaymentCurrentItemText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+  },
+  splitPaymentCurrentRemoveButton: {
+    backgroundColor: '#ef4444',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  splitPaymentCurrentRemoveButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  splitPaymentEntry: {
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  splitPaymentEntryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  splitPaymentEntryNumber: {
+    color: '#a78bfa',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  splitPaymentRemoveButton: {
+    backgroundColor: '#ef4444',
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    borderRadius: 4,
+  },
+  splitPaymentRemoveButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  splitPaymentCurrencyRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  splitPaymentCurrencyButton: {
+    flex: 1,
+    backgroundColor: '#374151',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+    marginHorizontal: 2,
+    alignItems: 'center',
+  },
+  splitPaymentCurrencyButtonActive: {
+    backgroundColor: '#3b82f6',
+    borderColor: '#2563eb',
+  },
+  splitPaymentCurrencyButtonText: {
+    color: '#9ca3af',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  splitPaymentMethodRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  splitPaymentMethodButton: {
+    flex: 1,
+    backgroundColor: '#374151',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#4b5563',
+    marginHorizontal: 2,
+    alignItems: 'center',
+  },
+  splitPaymentMethodButtonActive: {
+    backgroundColor: '#7c3aed',
+    borderColor: '#6d28d9',
+  },
+  splitPaymentMethodButtonText: {
+    color: '#9ca3af',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  splitPaymentAmountInput: {
+    backgroundColor: '#374151',
+    borderWidth: 1,
+    borderColor: '#4b5563',
+    padding: 10,
+    fontSize: 16,
+    color: '#ffffff',
+    borderRadius: 6,
+    textAlign: 'center',
+  },
+  addSplitPaymentButton: {
+    backgroundColor: '#7c3aed',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  addSplitPaymentButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  splitPaymentTotalsDisplay: {
+    backgroundColor: '#111827',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#7c3aed',
+  },
+  splitPaymentTotalsTitle: {
+    color: '#a78bfa',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  splitPaymentTotalsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  splitPaymentTotalsLabel: {
+    color: '#9ca3af',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  splitPaymentTotalsValue: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
   },
   saleButton: {
     backgroundColor: '#10b981',

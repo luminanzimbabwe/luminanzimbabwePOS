@@ -20,24 +20,24 @@ def generate_money_report():
     """Generate a comprehensive report of all money in the system"""
     
     print("=" * 70)
-    print("💰 SYSTEM MONEY STATUS REPORT")
+    print("SYSTEM MONEY STATUS REPORT")
     print("=" * 70)
     print(f"Generated: {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print()
     
     try:
         shop = ShopConfiguration.objects.get()
-        print(f"🏪 Shop: {shop.name}")
+        print(f"Shop: {shop.name}")
         print()
-        
+
         # Check if shop is open
         shop_day = ShopDay.get_current_day(shop)
-        print(f"📅 Shop Status: {'OPEN' if shop_day.is_open else 'CLOSED'}")
+        print(f"Shop Status: {'OPEN' if shop_day.is_open else 'CLOSED'}")
         print()
-        
+
         # ===== WALLET BALANCE =====
         print("-" * 50)
-        print("💳 CURRENCY WALLET BALANCE")
+        print("CURRENCY WALLET BALANCE")
         print("-" * 50)
         
         wallet, created = CurrencyWallet.objects.get_or_create(shop=shop)
@@ -49,29 +49,30 @@ def generate_money_report():
         
         # ===== TODAY'S SALES =====
         print("-" * 50)
-        print("📊 TODAY'S SALES")
+        print("TODAY'S SALES")
         print("-" * 50)
-        
+
         today = timezone.now().date()
         today_sales = Sale.objects.filter(
-            shop=shop, 
+            shop=shop,
             created_at__date=today,
             status='completed'
         )
-        
+
         sales_by_currency = {
             'USD': {'cash': 0, 'card': 0, 'ecocash': 0, 'transfer': 0, 'total': 0, 'count': 0},
             'ZIG': {'cash': 0, 'card': 0, 'ecocash': 0, 'transfer': 0, 'total': 0, 'count': 0},
             'RAND': {'cash': 0, 'card': 0, 'ecocash': 0, 'transfer': 0, 'total': 0, 'count': 0},
         }
-        
-        for sale in today_sales:
+
+        # Process single payments (non-split)
+        for sale in today_sales.filter(payment_method__in=['cash', 'card', 'ecocash', 'transfer']):
             currency = sale.payment_currency.upper() if sale.payment_currency else 'USD'
             if currency not in sales_by_currency:
                 currency = 'USD'
-            
+
             payment_method = sale.payment_method
-            
+
             if payment_method == 'cash':
                 sales_by_currency[currency]['cash'] += float(sale.total_amount)
             elif payment_method == 'card':
@@ -80,9 +81,30 @@ def generate_money_report():
                 sales_by_currency[currency]['ecocash'] += float(sale.total_amount)
             elif payment_method == 'transfer':
                 sales_by_currency[currency]['transfer'] += float(sale.total_amount)
-            
+
             sales_by_currency[currency]['total'] += float(sale.total_amount)
             sales_by_currency[currency]['count'] += 1
+
+        # Process split payments - aggregate from SalePayment records
+        from core.models import SalePayment
+        split_sales = today_sales.filter(payment_method='split')
+        for sale in split_sales:
+            # Get all payments for this sale
+            sale_payments = SalePayment.objects.filter(sale=sale)
+            for payment in sale_payments:
+                currency = payment.currency
+                method = payment.payment_method
+                amount = float(payment.amount)
+
+                if currency in sales_by_currency and method in sales_by_currency[currency]:
+                    sales_by_currency[currency][method] += amount
+                    sales_by_currency[currency]['total'] += amount
+
+            # Count the sale once per currency that received payment
+            currencies_used = set([p.currency for p in sale_payments])
+            for currency in currencies_used:
+                if currency in sales_by_currency:
+                    sales_by_currency[currency]['count'] += 1
         
         print(f"Total Transactions: {today_sales.count()}")
         print()
@@ -94,13 +116,13 @@ def generate_money_report():
                 print(f"    Card:      ${data['card']:.2f}")
                 print(f"    EcoCash:   ${data['ecocash']:.2f}")
                 print(f"    Transfer:  ${data['transfer']:.2f}")
-                print(f"    ─────────────────")
+                print(f"    -----------------")
                 print(f"    TOTAL:     ${data['total']:.2f} ({data['count']} sales)")
                 print()
         
         # ===== STAFF LUNCHES =====
         print("-" * 50)
-        print("🍽️ TODAY'S STAFF LUNCHES (Money Deductions)")
+        print("TODAY'S STAFF LUNCHES (Money Deductions)")
         print("-" * 50)
         
         today_lunches = StaffLunch.objects.filter(
@@ -124,7 +146,7 @@ def generate_money_report():
         
         # ===== DRAWER STATUS =====
         print("-" * 50)
-        print("🧮 DRAWER STATUS (All Cashiers)")
+        print("DRAWER STATUS (All Cashiers)")
         print("-" * 50)
         
         drawers = CashFloat.objects.filter(shop=shop, date=today)
@@ -141,7 +163,7 @@ def generate_money_report():
         
         # ===== SUMMARY =====
         print("=" * 70)
-        print("📈 SUMMARY")
+        print("SUMMARY")
         print("=" * 70)
         
         usd_total_sales = sales_by_currency['USD']['total']
@@ -149,7 +171,7 @@ def generate_money_report():
         
         print(f"Today's USD Sales:         ${usd_total_sales:.2f}")
         print(f"Staff Lunch Deductions:    -${usd_lunch_deduction:.2f}")
-        print(f"─────────────────────────────")
+        print(f"-----------------------------")
         print(f"Net USD in Drawer:         ${usd_total_sales - usd_lunch_deduction:.2f}")
         print()
         print(f"Wallet Balance:            ${float(wallet.balance_usd):.2f}")
@@ -157,9 +179,9 @@ def generate_money_report():
         print("=" * 70)
         
     except ShopConfiguration.DoesNotExist:
-        print("❌ No shop configured!")
+        print("ERROR: No shop configured!")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"ERROR: {e}")
         import traceback
         traceback.print_exc()
 

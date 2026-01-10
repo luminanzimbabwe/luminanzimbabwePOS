@@ -12,7 +12,7 @@ from django.db.models import Sum, F, Q
 from django.db.models.functions import Cast
 from datetime import timedelta
 from decimal import Decimal
-from .models import ShopConfiguration, Cashier, Product, Sale, SaleItem, Customer, Discount, Shift, Expense, StaffLunch, StockTake, StockTakeItem, InventoryLog, StockTransfer, Waste, ShopDay, CurrencyWallet, CurrencyTransaction
+from .models import ShopConfiguration, Cashier, Product, Sale, SaleItem, Customer, Discount, Shift, Expense, StaffLunch, StockTake, StockTakeItem, InventoryLog, StockTransfer, Waste, ShopDay, CurrencyWallet, CurrencyTransaction, SalePayment
 from .serializers import ShopConfigurationSerializer, ShopLoginSerializer, ResetPasswordSerializer, CashierSerializer, CashierLoginSerializer, ProductSerializer, SaleSerializer, CreateSaleSerializer, ExpenseSerializer, StockValuationSerializer, StaffLunchSerializer, BulkProductSerializer, CustomerSerializer, DiscountSerializer, StockTakeSerializer, StockTakeItemSerializer, CreateStockTakeSerializer, AddStockTakeItemSerializer, BulkAddStockTakeItemsSerializer, CashierResetPasswordSerializer, InventoryLogSerializer, StockTransferSerializer
 from django.db import transaction
 from django.shortcuts import get_object_or_404
@@ -577,21 +577,22 @@ class SaleListView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         items_data = serializer.validated_data['items']
-        payment_method = serializer.validated_data['payment_method']
-        # CRITICAL FIX: product_price_currency is always USD (products are priced in USD in database)
-        product_price_currency = serializer.validated_data.get('product_price_currency', 'USD')
-        # CRITICAL FIX: payment_currency is what the customer actually paid in
-        payment_currency = serializer.validated_data.get('payment_currency', product_price_currency)
         customer_name = serializer.validated_data.get('customer_name', '')
         customer_phone = serializer.validated_data.get('customer_phone', '')
         
-        # CRITICAL FIX: Get the total amount from frontend in the payment currency
-        # The frontend already converts product prices to the selected payment currency
-        # We trust the frontend's calculation when payment_currency is provided
-        frontend_total = serializer.validated_data.get('total_amount')
+        # Check if this is a split payment or single payment
+        is_split_payment = serializer.validated_data.get('payments') is not None and len(serializer.validated_data.get('payments', [])) > 0
+        
+        # Get exchange rates for currency conversion
+        exchange_rates = None
+        try:
+            from .models_exchange_rates import ExchangeRate
+            exchange_rates = ExchangeRate.get_current_rates()
+        except Exception as e:
+            print(f"WARNING: Could not get exchange rates: {e}")
         
         with transaction.atomic():
-            total_amount = 0
+            total_usd_amount = 0
             sale_items = []
 
             for item_data in items_data:
@@ -611,10 +612,9 @@ class SaleListView(APIView):
                     return Response({"error": f"Cannot sell {product.name} - price is zero"}, status=status.HTTP_400_BAD_REQUEST)
 
                 # Allow overselling - no stock quantity check
-
                 unit_price = product.price
                 total_price = unit_price * quantity
-                total_amount += total_price
+                total_usd_amount += total_price
 
                 sale_items.append({
                     'product': product,
@@ -623,108 +623,195 @@ class SaleListView(APIView):
                     'total_price': total_price
                 })
 
-            # Get exchange rates for currency conversion
-            try:
-                from .models_exchange_rates import ExchangeRate
-                exchange_rates = ExchangeRate.get_current_rates()
+            if is_split_payment:
+                # ========== SPLIT PAYMENT LOGIC ==========
+                print(f"DEBUG: Processing split payment with {len(serializer.validated_data['payments'])} payments")
+
+                payments_data = serializer.validated_data['payments']
+                total_paid_usd = Decimal('0.00')
+
+                # Calculate total paid in USD first
+                for payment_data in payments_data:
+                    payment_method = payment_data['payment_method']
+                    currency = payment_data['currency']
+                    amount = Decimal(str(payment_data['amount']))
+
+                    # Convert to USD equivalent
+                    amount_usd = amount
+                    if currency != 'USD' and exchange_rates:
+                        try:
+                            amount_usd = exchange_rates.convert_amount(amount, currency, 'USD')
+                            print(f"DEBUG: Converted {amount} {currency} to {amount_usd} USD")
+                        except Exception as e:
+                            print(f"WARNING: Could not convert {currency} to USD: {e}")
+
+                    total_paid_usd += amount_usd
+
+                # Determine sale status based on payment
+                sale_status = 'completed' if total_paid_usd >= total_usd_amount else 'pending_payment'
+
+                # Create sale with split payment info FIRST
+                sale = Sale.objects.create(
+                    shop=shop,
+                    cashier=cashier,
+                    total_amount=total_usd_amount,
+                    currency='USD',  # Product prices are in USD
+                    payment_currency='SPLIT',  # Multiple currencies
+                    payment_method='split',  # Multiple payment methods
+                    customer_name=customer_name,
+                    customer_phone=customer_phone,
+                    wallet_account='USD',  # Primary wallet (USD equivalent)
+                    exchange_rate_used=exchange_rates.convert_amount(1, 'USD', 'USD') if exchange_rates else Decimal('1.00'),
+                    status=sale_status
+                )
+
+                # Now create SalePayment records with sale reference
+                sale_payments = []
+                total_paid_usd = Decimal('0.00')  # Recalculate for accuracy
+
+                for payment_data in payments_data:
+                    payment_method = payment_data['payment_method']
+                    currency = payment_data['currency']
+                    amount = Decimal(str(payment_data['amount']))
+
+                    # Convert to USD equivalent
+                    amount_usd = amount
+                    exchange_rate_to_usd = None
+                    if currency != 'USD' and exchange_rates:
+                        try:
+                            exchange_rate_to_usd = exchange_rates.convert_amount(1, currency, 'USD')
+                            amount_usd = exchange_rates.convert_amount(amount, currency, 'USD')
+                        except Exception as e:
+                            print(f"WARNING: Could not convert {currency} to USD: {e}")
+
+                    total_paid_usd += amount_usd
+
+                    # Create SalePayment record with sale reference
+                    sale_payment = SalePayment.objects.create(
+                        sale=sale,
+                        payment_method=payment_method,
+                        currency=currency,
+                        amount=amount,
+                        exchange_rate_to_usd=exchange_rate_to_usd,
+                        amount_usd_equivalent=amount_usd
+                    )
+                    sale_payments.append(sale_payment)
+
+                    # Update wallet for this currency
+                    try:
+                        wallet, _ = CurrencyWallet.objects.get_or_create(shop=shop)
+                        balance_before = wallet.get_balance(currency)
+                        balance_after = wallet.add_amount(amount, currency)
+
+                        CurrencyTransaction.objects.create(
+                            shop=shop,
+                            wallet=wallet,
+                            transaction_type='SALE',
+                            currency=currency,
+                            amount=amount,
+                            reference_type='Sale',
+                            reference_id=sale.id,
+                            description=f"Sale #{sale.id} - Split payment - {payment_method}",
+                            exchange_rate_used=exchange_rate_to_usd,
+                            balance_after=balance_after,
+                            performed_by=cashier
+                        )
+                        print(f"✅ WALLET UPDATE: Added {amount} {currency} to wallet (balance: {balance_after})")
+                    except Exception as wallet_error:
+                        print(f"⚠️ WARNING: Failed to update wallet for {currency}: {wallet_error}")
+
+                # Update sale status based on final payment calculation
+                if total_paid_usd < total_usd_amount:
+                    sale.status = 'pending_payment'
+                    sale.save()
+                    print(f"⚠️ SPLIT PAYMENT INCOMPLETE: Paid {total_paid_usd} USD, Required {total_usd_amount} USD")
+                else:
+                    sale.status = 'completed'
+                    sale.save()
+                    print(f"✅ SPLIT PAYMENT COMPLETE: Paid {total_paid_usd} USD for {total_usd_amount} USD sale")
+
+                print(f"🔍 SALE ATTRIBUTION LOG: Sale #{sale.id} created (Split Payment)")
+                print(f"   Cashier ID: {cashier.id}")
+                print(f"   Cashier Name: {cashier.name}")
+                print(f"   Amount: ${total_usd_amount} USD")
+                print(f"   Status: {sale_status}")
+                
+            else:
+                # ========== LEGACY SINGLE PAYMENT LOGIC ==========
+                payment_method = serializer.validated_data.get('payment_method')
+                product_price_currency = serializer.validated_data.get('product_price_currency', 'USD')
+                payment_currency = serializer.validated_data.get('payment_currency', product_price_currency)
+                frontend_total = serializer.validated_data.get('total_amount')
+                
                 exchange_rate_used = None
-                
-                # Determine wallet currency (which currency wallet gets the money)
-                # wallet_currency is the currency the customer paid in
                 wallet_currency = payment_currency if payment_currency else product_price_currency
+                final_amount = total_usd_amount
                 
-                # CRITICAL FIX: When payment_currency is different from product currency (USD),
-                # we need to convert the USD total to the payment currency
-                final_amount = total_amount
-                if product_price_currency != wallet_currency:
-                    # Convert amount from product currency (USD) to wallet currency (ZIG/RAND)
-                    final_amount = exchange_rates.convert_amount(total_amount, product_price_currency, wallet_currency)
+                if product_price_currency != wallet_currency and exchange_rates:
+                    final_amount = exchange_rates.convert_amount(total_usd_amount, product_price_currency, wallet_currency)
                     exchange_rate_used = exchange_rates.convert_amount(1, product_price_currency, wallet_currency)
-                    print(f"DEBUG: Currency conversion - {total_amount} {product_price_currency} -> {final_amount} {wallet_currency} (rate: {exchange_rate_used})")
+                    print(f"DEBUG: Currency conversion - {total_usd_amount} {product_price_currency} -> {final_amount} {wallet_currency} (rate: {exchange_rate_used})")
                 elif frontend_total and payment_currency and payment_currency != 'USD':
-                    # CRITICAL FIX: Frontend already sent the converted amount in payment_currency
-                    # Use that amount directly instead of recalculating from USD prices
                     final_amount = Decimal(str(frontend_total))
                     wallet_currency = payment_currency
-                    print(f"DEBUG: Using frontend total amount: {final_amount} {wallet_currency} (frontend already converted)")
+                    print(f"DEBUG: Using frontend total amount: {final_amount} {wallet_currency}")
                 
-            except Exception as e:
-                print(f"WARNING: Could not get exchange rates: {e}")
-                exchange_rates = None
-                exchange_rate_used = None
-                wallet_currency = currency
-                final_amount = total_amount
-
-            # Create sale
-            sale = Sale.objects.create(
-                shop=shop,
-                cashier=cashier,
-                total_amount=final_amount,  # Use the final converted amount
-                currency=product_price_currency,  # Product price currency (always USD)
-                payment_currency=wallet_currency,  # Currency actually received
-                payment_method=payment_method,
-                customer_name=customer_name,
-                customer_phone=customer_phone,
-                wallet_account=wallet_currency,
-                exchange_rate_used=exchange_rate_used
-            )
-            
-            # Log sale attribution for debugging
-            print(f"🔍 SALE ATTRIBUTION LOG: Sale #{sale.id} created")
-            print(f"   Cashier ID: {cashier.id}")
-            print(f"   Cashier Name: {cashier.name}")
-            print(f"   Amount: ${final_amount}")
-            print(f"   Currency: {wallet_currency}")
-            print(f"   Payment Method: {payment_method}")
-            print(f"   Timestamp: {sale.created_at}")
-
-            # Route sale to correct currency wallet and create transaction record
-            try:
-                from .models import CurrencyWallet, CurrencyTransaction
-                
-                # Get or create wallet for this shop
-                wallet, created = CurrencyWallet.objects.get_or_create(shop=shop)
-                
-                # Get balance before transaction
-                balance_before = wallet.get_balance(wallet_currency)
-                
-                # Add amount to wallet
-                balance_after = wallet.add_amount(final_amount, wallet_currency)
-                
-                # Create transaction record
-                CurrencyTransaction.objects.create(
+                # Create sale
+                sale = Sale.objects.create(
                     shop=shop,
-                    wallet=wallet,
-                    transaction_type='SALE',
-                    currency=wallet_currency,
-                    amount=final_amount,
-                    reference_type='Sale',
-                    reference_id=sale.id,
-                    description=f"Sale #{sale.id} - {len(sale_items)} items - {payment_method}",
+                    cashier=cashier,
+                    total_amount=final_amount,
+                    currency=product_price_currency,
+                    payment_currency=wallet_currency,
+                    payment_method=payment_method,
+                    customer_name=customer_name,
+                    customer_phone=customer_phone,
+                    wallet_account=wallet_currency,
                     exchange_rate_used=exchange_rate_used,
-                    balance_after=balance_after,
-                    performed_by=cashier
+                    status='completed'
                 )
                 
-                print(f"✅ WALLET UPDATE: Added {final_amount} {wallet_currency} to wallet (balance: {balance_after})")
+                print(f"🔍 SALE ATTRIBUTION LOG: Sale #{sale.id} created")
+                print(f"   Cashier ID: {cashier.id}")
+                print(f"   Cashier Name: {cashier.name}")
+                print(f"   Amount: ${final_amount}")
+                print(f"   Currency: {wallet_currency}")
+                print(f"   Payment Method: {payment_method}")
                 
-            except Exception as wallet_error:
-                print(f"⚠️ WARNING: Failed to update wallet: {wallet_error}")
-                # Don't fail the sale if wallet update fails
-
-            # NOTE: Drawer is now updated automatically via Django signals
-            # Manual drawer updates removed to prevent double-counting
-            # The signal handler in core/signals.py will handle drawer updates automatically
+                # Route sale to correct currency wallet
+                try:
+                    wallet, _ = CurrencyWallet.objects.get_or_create(shop=shop)
+                    balance_before = wallet.get_balance(wallet_currency)
+                    balance_after = wallet.add_amount(final_amount, wallet_currency)
+                    
+                    CurrencyTransaction.objects.create(
+                        shop=shop,
+                        wallet=wallet,
+                        transaction_type='SALE',
+                        currency=wallet_currency,
+                        amount=final_amount,
+                        reference_type='Sale',
+                        reference_id=sale.id,
+                        description=f"Sale #{sale.id} - {len(sale_items)} items - {payment_method}",
+                        exchange_rate_used=exchange_rate_used,
+                        balance_after=balance_after,
+                        performed_by=cashier
+                    )
+                    
+                    print(f"✅ WALLET UPDATE: Added {final_amount} {wallet_currency} to wallet (balance: {balance_after})")
+                    
+                except Exception as wallet_error:
+                    print(f"⚠️ WARNING: Failed to update wallet: {wallet_error}")
+            
+            # Update drawer via signal
             try:
                 from .models import CashFloat
                 drawer = CashFloat.get_active_drawer(shop, cashier)
                 if drawer.status != 'ACTIVE':
                     drawer.activate_drawer(cashier)
-                # REMOVED: drawer.add_sale(total_amount, payment_method) - Now handled by signal
                 print(f"INFO: Drawer will be updated automatically via signal handler")
             except Exception as drawer_error:
                 print(f"⚠️ WARNING: Failed to access drawer: {drawer_error}")
-                # Don't fail the sale if drawer access fails
 
             # Create sale items and update stock
             for item_data in sale_items:
@@ -755,7 +842,7 @@ class SaleListView(APIView):
                     cost_price=item_data['product'].cost_price
                 )
 
-            print(f"✅ SALE COMPLETE: Sale #{sale.id} processed successfully with wallet update")
+            print(f"✅ SALE COMPLETE: Sale #{sale.id} processed successfully")
             serializer = SaleSerializer(sale)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 

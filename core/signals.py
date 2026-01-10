@@ -122,67 +122,101 @@ def update_cash_float_on_sale(sender, instance, created, **kwargs):
                 created_at__range=[day_start, day_end],
                 status='completed'
             )
+
+            logger.info(f"Signal processing {actual_sales_today.count()} sales for {cashier.name} on {today}")
+            for sale in actual_sales_today:
+                logger.info(f"  Sale {sale.id}: {sale.payment_method} {sale.payment_currency} ${sale.total_amount}")
             
             logger.info(f"Found {actual_sales_today.count()} completed sales for today ({today})")
             
             # Calculate actual totals from database by payment_currency and payment method
-            # CRITICAL FIX: Use payment_currency to determine which bank the money went to
+            # CRITICAL FIX: Handle both single payments and split payments
+            from .models import SalePayment
+
+            # Initialize currency totals
+            currency_totals = {
+                'USD': {'cash': Decimal('0.00'), 'card': Decimal('0.00'), 'ecocash': Decimal('0.00'), 'transfer': Decimal('0.00'), 'total': Decimal('0.00')},
+                'ZIG': {'cash': Decimal('0.00'), 'card': Decimal('0.00'), 'ecocash': Decimal('0.00'), 'transfer': Decimal('0.00'), 'total': Decimal('0.00')},
+                'RAND': {'cash': Decimal('0.00'), 'card': Decimal('0.00'), 'ecocash': Decimal('0.00'), 'transfer': Decimal('0.00'), 'total': Decimal('0.00')}
+            }
+
+            # Process single payments (non-split)
             for currency_code in ['USD', 'ZIG', 'RAND']:
                 currency_sales = actual_sales_today.filter(payment_currency=currency_code)
-                
+
                 # Calculate by payment method for this currency
                 cash_sales = currency_sales.filter(payment_method='cash').aggregate(
                     total=Sum('total_amount')
                 )['total'] or Decimal('0.00')
-                
+
                 card_sales = currency_sales.filter(payment_method='card').aggregate(
                     total=Sum('total_amount')
                 )['total'] or Decimal('0.00')
-                
+
                 ecocash_sales = currency_sales.filter(payment_method='ecocash').aggregate(
                     total=Sum('total_amount')
                 )['total'] or Decimal('0.00')
-                
+
                 transfer_sales = currency_sales.filter(payment_method='transfer').aggregate(
                     total=Sum('total_amount')
                 )['total'] or Decimal('0.00')
-                
-                total_sales = cash_sales + card_sales + ecocash_sales + transfer_sales
-                
-                # Update drawer currency-specific fields
+
+                # Add to currency totals
+                currency_totals[currency_code]['cash'] += cash_sales
+                currency_totals[currency_code]['card'] += card_sales
+                currency_totals[currency_code]['ecocash'] += ecocash_sales
+                currency_totals[currency_code]['transfer'] += transfer_sales
+                currency_totals[currency_code]['total'] += cash_sales + card_sales + ecocash_sales + transfer_sales
+
+            # Process split payments - aggregate from SalePayment records
+            split_sales = actual_sales_today.filter(payment_method='split')
+            for sale in split_sales:
+                # Get all payments for this sale
+                sale_payments = SalePayment.objects.filter(sale=sale)
+                for payment in sale_payments:
+                    currency = payment.currency
+                    method = payment.payment_method
+                    amount = payment.amount
+
+                    if currency in currency_totals and method in currency_totals[currency]:
+                        currency_totals[currency][method] += amount
+                        currency_totals[currency]['total'] += amount
+
+            # Update drawer currency-specific fields
+            for currency_code, totals in currency_totals.items():
                 if currency_code == 'USD':
-                    drawer.session_cash_sales_usd = cash_sales
-                    drawer.session_card_sales_usd = card_sales
-                    drawer.session_ecocash_sales_usd = ecocash_sales
-                    drawer.session_transfer_sales_usd = transfer_sales
-                    drawer.session_total_sales_usd = total_sales
-                    drawer.current_cash_usd = cash_sales
-                    drawer.current_card_usd = card_sales
-                    drawer.current_ecocash_usd = ecocash_sales
-                    drawer.current_transfer_usd = transfer_sales
-                    drawer.current_total_usd = total_sales
+                    drawer.session_cash_sales_usd = totals['cash']
+                    drawer.session_card_sales_usd = totals['card']
+                    drawer.session_ecocash_sales_usd = totals['ecocash']
+                    drawer.session_transfer_sales_usd = totals['transfer']
+                    drawer.session_total_sales_usd = totals['total']
+                    drawer.current_cash_usd = totals['cash']
+                    drawer.current_card_usd = totals['card']
+                    drawer.current_ecocash_usd = totals['ecocash']
+                    drawer.current_transfer_usd = totals['transfer']
+                    drawer.current_total_usd = totals['total']
                 elif currency_code == 'ZIG':
-                    drawer.session_cash_sales_zig = cash_sales
-                    drawer.session_card_sales_zig = card_sales
-                    drawer.session_ecocash_sales_zig = ecocash_sales
-                    drawer.session_transfer_sales_zig = transfer_sales
-                    drawer.session_total_sales_zig = total_sales
-                    drawer.current_cash_zig = cash_sales
-                    drawer.current_card_zig = card_sales
-                    drawer.current_ecocash_zig = ecocash_sales
-                    drawer.current_transfer_zig = transfer_sales
-                    drawer.current_total_zig = total_sales
+                    drawer.session_cash_sales_zig = totals['cash']
+                    drawer.session_card_sales_zig = totals['card']
+                    drawer.session_ecocash_sales_zig = totals['ecocash']
+                    drawer.session_transfer_sales_zig = totals['transfer']
+                    drawer.session_total_sales_zig = totals['total']
+                    drawer.current_cash_zig = totals['cash']
+                    drawer.current_card_zig = totals['card']
+                    drawer.current_ecocash_zig = totals['ecocash']
+                    drawer.current_transfer_zig = totals['transfer']
+                    drawer.current_total_zig = totals['total']
                 elif currency_code == 'RAND':
-                    drawer.session_cash_sales_rand = cash_sales
-                    drawer.session_card_sales_rand = card_sales
-                    drawer.session_ecocash_sales_rand = ecocash_sales
-                    drawer.session_transfer_sales_rand = transfer_sales
-                    drawer.session_total_sales_rand = total_sales
-                    drawer.current_cash_rand = cash_sales
-                    drawer.current_card_rand = card_sales
-                    drawer.current_ecocash_rand = ecocash_sales
-                    drawer.current_transfer_rand = transfer_sales
-                    drawer.current_total_rand = total_sales
+                    drawer.session_cash_sales_rand = totals['cash']
+                    drawer.session_card_sales_rand = totals['card']
+                    drawer.session_ecocash_sales_rand = totals['ecocash']
+                    drawer.session_transfer_sales_rand = totals['transfer']
+                    drawer.session_total_sales_rand = totals['total']
+                    drawer.current_cash_rand = totals['cash']
+                    drawer.current_card_rand = totals['card']
+                    drawer.current_ecocash_rand = totals['ecocash']
+                    drawer.current_transfer_rand = totals['transfer']
+                    drawer.current_total_rand = totals['total']
             
             # Update legacy fields for backward compatibility using PRIMARY CURRENCY
             # Determine primary currency based on total sales

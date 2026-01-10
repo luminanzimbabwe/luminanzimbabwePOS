@@ -734,6 +734,7 @@ class Sale(models.Model):
         ('ecocash', 'EcoCash'),
         ('card', 'Card'),
         ('transfer', 'Bank Transfer'),
+        ('split', 'Split Payment'),
     ]
 
     REFUND_TYPE_CHOICES = [
@@ -763,6 +764,7 @@ class Sale(models.Model):
     customer_phone = models.CharField(max_length=20, blank=True)
     status = models.CharField(max_length=20, default='completed', choices=[
         ('pending', 'Pending Confirmation'),
+        ('pending_payment', 'Pending Payment'),  # For split payments - not fully paid yet
         ('completed', 'Completed'),
         ('refunded', 'Refunded')
     ])
@@ -854,6 +856,68 @@ class SaleItem(models.Model):
         self.product.save()
 
         return True, f"Successfully refunded {quantity} x {self.product.name}"
+
+
+class SalePayment(models.Model):
+    """
+    Sale Payment - Tracks individual payments for a sale (supports split payments)
+    Example: Customer pays $5 USD + 100 ZIG for a $15 product
+    """
+    PAYMENT_METHOD_CHOICES = [
+        ('cash', 'Cash'),
+        ('ecocash', 'EcoCash'),
+        ('card', 'Card'),
+        ('transfer', 'Bank Transfer'),
+    ]
+    
+    sale = models.ForeignKey(Sale, on_delete=models.CASCADE, related_name='payments')
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES)
+    currency = models.CharField(max_length=4, choices=Product.CURRENCY_CHOICES, default='USD')
+    amount = models.DecimalField(max_digits=15, decimal_places=2, help_text="Amount in the payment currency")
+    
+    # Exchange rate used to convert this payment to the sale's base currency (USD)
+    # This helps track the original currency amounts
+    exchange_rate_to_usd = models.DecimalField(
+        max_digits=10, 
+        decimal_places=6, 
+        null=True, 
+        blank=True,
+        help_text="Exchange rate to convert this payment to USD (for multi-currency tracking)"
+    )
+    
+    # Amount in USD equivalent (for reporting)
+    amount_usd_equivalent = models.DecimalField(
+        max_digits=15, 
+        decimal_places=2, 
+        null=True, 
+        blank=True,
+        help_text="Payment amount converted to USD equivalent for reporting"
+    )
+    
+    is_change_given = models.BooleanField(default=False, help_text="Whether change was given for this payment")
+    change_amount = models.DecimalField(max_digits=15, decimal_places=2, default=0, help_text="Change given back to customer")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        verbose_name = "Sale Payment"
+        verbose_name_plural = "Sale Payments"
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['sale', 'created_at']),
+            models.Index(fields=['currency']),
+        ]
+    
+    def __str__(self):
+        return f"Payment {self.id}: {self.amount} {self.currency} ({self.payment_method}) for Sale #{self.sale.id}"
+    
+    @property
+    def is_cash(self):
+        return self.payment_method == 'cash'
+    
+    @property
+    def is_electronic(self):
+        return self.payment_method in ['ecocash', 'card', 'transfer']
 
 class Cashier(models.Model):
     STATUS_CHOICES = [
@@ -3466,7 +3530,7 @@ def get_all_drawers_session(request):
         # IMPORTANT: Always calculate from Sale table, NOT from drawer fields
         # This ensures we only show today's sales regardless of drawer state
         drawers_list = []
-        
+
         # Get exchange rates for multi-currency conversion
         try:
             from .models_exchange_rates import ExchangeRate
@@ -3482,7 +3546,7 @@ def get_all_drawers_session(request):
         except Exception:
             usd_to_zig = 1.0
             usd_to_rand = 1.0
-        
+
         for cashier in cashiers:
             # Calculate sales from Sale table for TODAY ONLY - THIS IS THE SOURCE OF TRUTH
             # CRITICAL FIX: Use proper timezone-aware datetime range instead of __date lookup
@@ -3492,35 +3556,62 @@ def get_all_drawers_session(request):
                 created_at__range=[day_start, day_end],
                 status='completed'
             )
-            
+
             # Calculate totals by currency and payment method from Sale table
             sales_by_currency = {
                 'usd': {'cash': 0, 'card': 0, 'ecocash': 0, 'transfer': 0, 'total': 0, 'count': 0},
                 'zig': {'cash': 0, 'card': 0, 'ecocash': 0, 'transfer': 0, 'total': 0, 'count': 0},
                 'rand': {'cash': 0, 'card': 0, 'ecocash': 0, 'transfer': 0, 'total': 0, 'count': 0}
             }
-            
+
             for sale in today_sales:
-                currency = sale.payment_currency.upper() if sale.payment_currency else 'USD'
-                payment_method = sale.payment_method
-                
-                # Convert to lowercase for dictionary key lookup
-                currency_key = currency.lower()
-                if currency_key not in sales_by_currency:
-                    currency_key = 'usd'
-                
-                # Add to appropriate payment method
-                if payment_method == 'cash':
-                    sales_by_currency[currency_key]['cash'] += float(sale.total_amount)
-                elif payment_method == 'card':
-                    sales_by_currency[currency_key]['card'] += float(sale.total_amount)
-                elif payment_method == 'ecocash':
-                    sales_by_currency[currency_key]['ecocash'] += float(sale.total_amount)
-                elif payment_method == 'transfer':
-                    sales_by_currency[currency_key]['transfer'] += float(sale.total_amount)
-                
-                sales_by_currency[currency_key]['total'] += float(sale.total_amount)
-                sales_by_currency[currency_key]['count'] += 1
+                # Handle split payments differently - use SalePayment records
+                if sale.payment_method == 'split':
+                    # For split payments, get individual payment components
+                    sale_payments = SalePayment.objects.filter(sale=sale)
+                    for payment in sale_payments:
+                        currency = payment.currency.upper()
+                        payment_method = payment.payment_method
+
+                        # Convert to lowercase for dictionary key lookup
+                        currency_key = currency.lower()
+                        if currency_key not in sales_by_currency:
+                            currency_key = 'usd'
+
+                        # Add to appropriate payment method
+                        if payment_method == 'cash':
+                            sales_by_currency[currency_key]['cash'] += float(payment.amount)
+                        elif payment_method == 'card':
+                            sales_by_currency[currency_key]['card'] += float(payment.amount)
+                        elif payment_method == 'ecocash':
+                            sales_by_currency[currency_key]['ecocash'] += float(payment.amount)
+                        elif payment_method == 'transfer':
+                            sales_by_currency[currency_key]['transfer'] += float(payment.amount)
+
+                        sales_by_currency[currency_key]['total'] += float(payment.amount)
+                        sales_by_currency[currency_key]['count'] += 1
+                else:
+                    # Handle regular single payments
+                    currency = sale.payment_currency.upper() if sale.payment_currency else 'USD'
+                    payment_method = sale.payment_method
+
+                    # Convert to lowercase for dictionary key lookup
+                    currency_key = currency.lower()
+                    if currency_key not in sales_by_currency:
+                        currency_key = 'usd'
+
+                    # Add to appropriate payment method
+                    if payment_method == 'cash':
+                        sales_by_currency[currency_key]['cash'] += float(sale.total_amount)
+                    elif payment_method == 'card':
+                        sales_by_currency[currency_key]['card'] += float(sale.total_amount)
+                    elif payment_method == 'ecocash':
+                        sales_by_currency[currency_key]['ecocash'] += float(sale.total_amount)
+                    elif payment_method == 'transfer':
+                        sales_by_currency[currency_key]['transfer'] += float(sale.total_amount)
+
+                    sales_by_currency[currency_key]['total'] += float(sale.total_amount)
+                    sales_by_currency[currency_key]['count'] += 1
             
             # Get drawer for float amounts (but NEVER use drawer session sales fields)
             drawer = CashFloat.get_active_drawer(shop, cashier)
