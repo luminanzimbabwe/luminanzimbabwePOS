@@ -20,18 +20,171 @@ from django.shortcuts import get_object_or_404
 # Import waste views
 from .waste_views import WasteListView, WasteSummaryView, WasteProductSearchView
 
+def validate_drawer_change(cashier, shop, change_needed, currency):
+    """
+    Validate that the cashier's drawer has sufficient cash to provide change
+    Returns error message if insufficient change, None if validation passes
+    """
+    from .models import CashFloat
+    from django.utils import timezone
+
+    try:
+        today = timezone.now().date()
+        drawer = CashFloat.objects.get(shop=shop, cashier=cashier, date=today)
+
+        # Get available cash in the specified currency (includes float amount)
+        if currency == 'USD':
+            available_cash = drawer.current_cash_usd + drawer.float_amount
+        elif currency == 'ZIG':
+            available_cash = drawer.current_cash_zig + drawer.float_amount_zig
+        elif currency == 'RAND':
+            available_cash = drawer.current_cash_rand + drawer.float_amount_rand
+        else:
+            return f"Unsupported currency: {currency}"
+
+        # Check if drawer has enough cash for change
+        if available_cash < change_needed:
+            return f"Insufficient change in drawer. Need {change_needed:.2f} {currency} but only have {available_cash:.2f} {currency} available."
+
+        return None  # Validation passed
+
+    except CashFloat.DoesNotExist:
+        return f"No drawer found for cashier {cashier.name}. Please ensure the cashier is logged in and has an active drawer."
+    except Exception as e:
+        return f"Error validating drawer change: {str(e)}"
+
 @method_decorator(csrf_exempt, name='dispatch')
 class HealthCheckView(APIView):
-    """Simple health check endpoint for sync system"""
+    """Comprehensive health check endpoint for monitoring system status"""
     permission_classes = [AllowAny]
     authentication_classes = []
+
     def get(self, request):
-        return Response({
+        from django.db import connection
+        from django.core.cache import cache
+        import psutil
+        import os
+
+        health_status = {
             "status": "healthy",
             "timestamp": timezone.now().isoformat(),
             "service": "luminan_pos_sync",
-            "version": "1.0.0"
-        })
+            "version": "1.0.0",
+            "checks": {}
+        }
+
+        try:
+            # Database connectivity check
+            cursor = connection.cursor()
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+            health_status["checks"]["database"] = {
+                "status": "healthy",
+                "message": "Database connection successful"
+            }
+        except Exception as e:
+            health_status["checks"]["database"] = {
+                "status": "unhealthy",
+                "message": f"Database connection failed: {str(e)}"
+            }
+            health_status["status"] = "unhealthy"
+
+        try:
+            # Cache connectivity check
+            cache.set('health_check', 'ok', 10)
+            cache_value = cache.get('health_check')
+            if cache_value == 'ok':
+                health_status["checks"]["cache"] = {
+                    "status": "healthy",
+                    "message": "Cache system working"
+                }
+            else:
+                health_status["checks"]["cache"] = {
+                    "status": "warning",
+                    "message": "Cache system responding but not storing correctly"
+                }
+        except Exception as e:
+            health_status["checks"]["cache"] = {
+                "status": "unhealthy",
+                "message": f"Cache system failed: {str(e)}"
+            }
+
+        try:
+            # Memory usage check
+            memory = psutil.virtual_memory()
+            memory_usage = memory.percent
+            health_status["checks"]["memory"] = {
+                "status": "healthy" if memory_usage < 90 else "warning",
+                "message": f"Memory usage: {memory_usage:.1f}%",
+                "details": {
+                    "total": memory.total,
+                    "available": memory.available,
+                    "used": memory.used,
+                    "percentage": memory_usage
+                }
+            }
+            if memory_usage > 95:
+                health_status["status"] = "unhealthy"
+        except Exception as e:
+            health_status["checks"]["memory"] = {
+                "status": "warning",
+                "message": f"Memory check failed: {str(e)}"
+            }
+
+        try:
+            # Disk usage check
+            disk = psutil.disk_usage('/')
+            disk_usage = disk.percent
+            health_status["checks"]["disk"] = {
+                "status": "healthy" if disk_usage < 90 else "warning",
+                "message": f"Disk usage: {disk_usage:.1f}%",
+                "details": {
+                    "total": disk.total,
+                    "free": disk.free,
+                    "used": disk.used,
+                    "percentage": disk_usage
+                }
+            }
+            if disk_usage > 98:
+                health_status["status"] = "unhealthy"
+        except Exception as e:
+            health_status["checks"]["disk"] = {
+                "status": "warning",
+                "message": f"Disk check failed: {str(e)}"
+            }
+
+        # License status check (if shop exists)
+        try:
+            from .models_license import License
+            shop_count = ShopConfiguration.objects.count()
+            license_count = License.objects.count()
+            health_status["checks"]["license"] = {
+                "status": "healthy",
+                "message": f"Shops: {shop_count}, Licenses: {license_count}"
+            }
+        except Exception as e:
+            health_status["checks"]["license"] = {
+                "status": "warning",
+                "message": f"License check failed: {str(e)}"
+            }
+
+        # Response time measurement
+        import time
+        start_time = time.time()
+        # Simulate some processing
+        time.sleep(0.001)  # Minimal delay to measure
+        response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+
+        health_status["response_time_ms"] = round(response_time, 2)
+        health_status["checks"]["response_time"] = {
+            "status": "healthy" if response_time < 100 else "warning",
+            "message": f"Response time: {response_time:.2f}ms"
+        }
+
+        # Set HTTP status code based on overall health
+        http_status = 200 if health_status["status"] == "healthy" else 503
+
+        return Response(health_status, status=http_status)
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ShopStatusView(APIView):
@@ -622,6 +775,46 @@ class SaleListView(APIView):
                     'unit_price': unit_price,
                     'total_price': total_price
                 })
+
+            # ========== CHANGE VALIDATION FOR CASH PAYMENTS ==========
+            # Validate that cashier has sufficient change in drawer before processing sale
+            change_validation_error = None
+
+            if is_split_payment:
+                # For split payments, validate change for each cash payment
+                payments_data = serializer.validated_data['payments']
+                for payment_data in payments_data:
+                    payment_method = payment_data['payment_method']
+                    if payment_method == 'cash':
+                        currency = payment_data['currency']
+                        amount_paid = Decimal(str(payment_data['amount']))
+
+                        # Calculate change needed for this payment
+                        change_needed = amount_paid - total_usd_amount
+                        if change_needed > 0:
+                            # Check if drawer has enough cash in this currency
+                            change_validation_error = validate_drawer_change(cashier, shop, change_needed, currency)
+                            if change_validation_error:
+                                break
+            else:
+                # For single payments, validate change for cash payment
+                payment_method = serializer.validated_data.get('payment_method')
+                if payment_method == 'cash':
+                    payment_currency = serializer.validated_data.get('payment_currency', 'USD')
+                    amount_received = serializer.validated_data.get('total_amount', total_usd_amount)
+
+                    # Calculate change needed
+                    change_needed = Decimal(str(amount_received)) - total_usd_amount
+                    if change_needed > 0:
+                        # Check if drawer has enough cash in this currency
+                        change_validation_error = validate_drawer_change(cashier, shop, change_needed, payment_currency)
+
+            # If change validation failed, return error
+            if change_validation_error:
+                return Response({
+                    "error": change_validation_error,
+                    "type": "insufficient_change"
+                }, status=status.HTTP_400_BAD_REQUEST)
 
             if is_split_payment:
                 # ========== SPLIT PAYMENT LOGIC ==========

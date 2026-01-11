@@ -13,6 +13,7 @@ from django.http import JsonResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404
 from django.conf import settings
 from django.core.cache import cache
+from django.db import connection
 from .models_license import License, LicenseLog
 
 
@@ -20,16 +21,35 @@ class LicenseValidationMiddleware:
     """
     Middleware to validate licenses on every request
     Prevents unauthorized access and detects tampering
+    Includes performance monitoring and database health checks
     """
-    
+
     def __init__(self, get_response):
         self.get_response = get_response
-    
+
     def __call__(self, request):
+        import time
+
+        # Start timing the request
+        start_time = time.time()
+
+        # Database health check - ensure connection is alive
+        if not self._check_database_connection():
+            return JsonResponse({
+                'error': 'Database connection failed. Please try again.',
+                'code': 'DB_CONNECTION_ERROR',
+                'retry_after': 5
+            }, status=503)
+
         # Skip validation for certain paths
         if self._should_skip_validation(request.path):
-            return self.get_response(request)
-        
+            response = self.get_response(request)
+            # Add performance header even for skipped requests
+            if hasattr(response, 'headers'):
+                response_time = (time.time() - start_time) * 1000
+                response.headers['X-Response-Time'] = f"{response_time:.2f}ms"
+            return response
+
         # Get shop from request headers or session
         shop_id = self._get_shop_id(request)
         if not shop_id:
@@ -37,15 +57,15 @@ class LicenseValidationMiddleware:
                 'error': 'Shop identification required',
                 'code': 'NO_SHOP_ID'
             }, status=401)
-        
+
         # Validate license
         license_response = self._validate_license(request, shop_id)
         if license_response:
             return license_response
-        
+
         # Get hardware fingerprint for this request
         fingerprint = self._generate_hardware_fingerprint(request)
-        
+
         # Check if license exists and is valid
         try:
             license_obj = License.objects.get(shop_id=shop_id)
@@ -55,18 +75,26 @@ class LicenseValidationMiddleware:
                 'code': 'NO_LICENSE',
                 'action': 'register'
             }, status=402)
-        
+
         # Update validation tracking
         self._update_validation_tracking(request, license_obj, fingerprint)
-        
+
         # Continue with request
         response = self.get_response(request)
-        
-        # Add license info to response headers for debugging
+
+        # Calculate total response time
+        response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+
+        # Add performance and license info to response headers
         if hasattr(response, 'headers'):
             response.headers['X-License-Status'] = license_obj.status
             response.headers['X-License-Days-Remaining'] = str(license_obj.get_days_remaining())
-        
+            response.headers['X-Response-Time'] = f"{response_time:.2f}ms"
+
+            # Warn about slow requests (>500ms)
+            if response_time > 500:
+                response.headers['X-Performance-Warning'] = f"Slow request: {response_time:.2f}ms"
+
         return response
     
     def _should_skip_validation(self, path):
@@ -247,6 +275,31 @@ class LicenseValidationMiddleware:
             # Log error but don't block the request
             print(f"License tracking error: {e}")
     
+    def _check_database_connection(self):
+        """Check if database connection is healthy"""
+        try:
+            # Use cached result to avoid checking on every request
+            cache_key = 'db_connection_health'
+            cached_result = cache.get(cache_key)
+
+            if cached_result is not None:
+                return cached_result
+
+            # Perform actual database check
+            cursor = connection.cursor()
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+
+            # Cache successful result for 30 seconds
+            cache.set(cache_key, True, 30)
+            return True
+
+        except Exception as e:
+            # Cache failure result for 10 seconds to avoid overwhelming the database
+            cache.set(cache_key, False, 10)
+            print(f"Database connection check failed: {e}")
+            return False
+
     def _get_client_ip(self, request):
         """Get the real client IP address"""
         x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')

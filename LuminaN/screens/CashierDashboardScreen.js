@@ -13,6 +13,8 @@ import {
   Animated,
   Dimensions,
   PanResponder,
+  Modal,
+  Image,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useFocusEffect } from '@react-navigation/native';
@@ -23,6 +25,7 @@ import BarcodeScanner from '../components/BarcodeScanner';
 import presenceService from '../services/presenceService';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import WeightInputModal from '../components/WeightInputModal';
+import LuminaLogo from '../components/LuminaLogo';
 // import ecocashService from '../services/ecocashService'; // REMOVED - USD only
 import exchangeRateService from '../services/exchangeRateService';
 
@@ -175,6 +178,19 @@ const CashierDashboardScreen = () => {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [weightInput, setWeightInput] = useState('');
 
+  // Inactivity Screen State
+  const [showLogoScreen, setShowLogoScreen] = useState(false);
+  const [inactivityTimer, setInactivityTimer] = useState(null);
+  const [logoOpacity] = useState(new Animated.Value(0));
+  const [logoScale] = useState(new Animated.Value(0.8));
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  // Business Hours Countdown State
+  const [countdownTimeString, setCountdownTimeString] = useState('--:--:--');
+  const [isBusinessOpen, setIsBusinessOpen] = useState(true);
+  const [countdownInterval, setCountdownInterval] = useState(null);
+  const [lastNotificationTime, setLastNotificationTime] = useState(null);
+
   // Calculator State - Ultra Advanced Calculator with Graphing
   const [calculatorDisplay, setCalculatorDisplay] = useState('0');
   const [calculatorPreviousValue, setCalculatorPreviousValue] = useState(null);
@@ -272,17 +288,98 @@ const CashierDashboardScreen = () => {
     return () => clearInterval(interval);
   }, [cashierData, drawerWasResetAtEOD]);
 
+  // Inactivity detection and logo screen
+  useEffect(() => {
+    let lastActivityTime = Date.now();
+    let screensaverTimer = null;
+    let isScreensaverActive = false;
+
+    const resetInactivityTimer = () => {
+      // Clear existing timer
+      if (screensaverTimer) {
+        clearTimeout(screensaverTimer);
+        screensaverTimer = null;
+      }
+
+      // Update last activity time
+      lastActivityTime = Date.now();
+
+      // Hide screensaver if it's showing
+      if (isScreensaverActive) {
+        setShowLogoScreen(false);
+        isScreensaverActive = false;
+      }
+
+      // Set new timer for 30 seconds
+      screensaverTimer = setTimeout(() => {
+        // Double-check that there hasn't been recent activity
+        const timeSinceLastActivity = Date.now() - lastActivityTime;
+        if (timeSinceLastActivity >= 30000 && !isScreensaverActive) {
+          setShowLogoScreen(true);
+          isScreensaverActive = true;
+          console.log('🖼️ Screensaver activated after 30 seconds of inactivity');
+        }
+      }, 30000);
+    };
+
+    // Handle user activity with debouncing
+    const handleUserActivity = () => {
+      // Only reset if it's been at least 1 second since last activity
+      // to prevent rapid firing from continuous events like mousemove
+      const now = Date.now();
+      if (now - lastActivityTime > 1000) {
+        resetInactivityTimer();
+      }
+    };
+
+    // Set up event listeners for user activity
+    const events = ['touchstart', 'touchmove', 'scroll', 'keydown', 'click', 'mousemove'];
+
+    events.forEach(event => {
+      if (typeof window !== 'undefined') {
+        window.addEventListener(event, handleUserActivity, { passive: true });
+      }
+    });
+
+    // Start the initial timer
+    resetInactivityTimer();
+
+    // Cleanup
+    return () => {
+      if (screensaverTimer) {
+        clearTimeout(screensaverTimer);
+      }
+      events.forEach(event => {
+        if (typeof window !== 'undefined') {
+          window.removeEventListener(event, handleUserActivity);
+        }
+      });
+    };
+  }, []);
+
   // Fetch business settings when component loads
   useEffect(() => {
     fetchBusinessSettings();
   }, []);
+
+  // Start countdown timer when component loads or shopData changes
+  useEffect(() => {
+    if (shopData?.opening_time && shopData?.closing_time) {
+      startCountdownTimer();
+    }
+    return () => {
+      if (countdownInterval) {
+        clearInterval(countdownInterval);
+      }
+    };
+  }, [shopData?.opening_time, shopData?.closing_time, shopData?.timezone]);
 
   // Refresh business settings when screen comes into focus (e.g., after returning from SettingsScreen)
   useFocusEffect(
     React.useCallback(() => {
       console.log('🔄 Screen focused - refreshing business settings...');
       fetchBusinessSettings();
-      
+
       // Optional: Return cleanup function if needed
       return () => {
         console.log('🔄 Screen unfocused');
@@ -326,7 +423,12 @@ const CashierDashboardScreen = () => {
           ...prev,
           ...newSettings
         }));
-        
+
+        // Restart countdown timer with new settings
+        setTimeout(() => {
+          startCountdownTimer();
+        }, 100);
+
         // Also save to local storage for persistence
         try {
           await shopStorage.saveBusinessSettings(newSettings);
@@ -931,6 +1033,138 @@ const CashierDashboardScreen = () => {
     return `${hour12}:${minutes} ${ampm}`;
   };
 
+  // Calculate countdown to closing time
+  const calculateCountdown = () => {
+    if (!shopData?.closing_time || !shopData?.opening_time) {
+      return { timeString: '--:--:--', isOpen: false };
+    }
+
+    // Get current UTC time
+    const nowUTC = new Date();
+
+    // Get the business timezone offset
+    const businessTimezone = shopData.timezone || 'Africa/Harare';
+
+    // Calculate timezone offset for the business location
+    // For now, we'll use a simple mapping for common African timezones
+    const timezoneOffsets = {
+      'Africa/Harare': 2,      // UTC+2
+      'Africa/Johannesburg': 2, // UTC+2 (same as Harare)
+      'Africa/Lagos': 1,       // UTC+1
+      'Africa/Nairobi': 3,     // UTC+3
+      'Africa/Cairo': 2,       // UTC+2
+      'Europe/London': 0,      // UTC+0 (GMT/BST)
+      'America/New_York': -5,  // UTC-5 (EST/EDT)
+      'Asia/Dubai': 4,         // UTC+4
+    };
+
+    const businessOffset = timezoneOffsets[businessTimezone] || 2; // Default to UTC+2
+
+    // Get device timezone offset in hours
+    const deviceOffset = nowUTC.getTimezoneOffset() / -60;
+
+    // Calculate the difference between business timezone and device timezone
+    const offsetDifference = businessOffset - deviceOffset;
+
+    // Adjust current time to business timezone
+    const nowInBusinessTZ = new Date(nowUTC.getTime() + (offsetDifference * 60 * 60 * 1000));
+
+
+
+    const [closeHours, closeMinutes] = shopData.closing_time.split(':').map(Number);
+    const [openHours, openMinutes] = shopData.opening_time.split(':').map(Number);
+
+    // Create today's opening and closing times in business timezone
+    const todayOpening = new Date(nowInBusinessTZ);
+    todayOpening.setHours(openHours, openMinutes, 0, 0);
+
+    const todayClosing = new Date(nowInBusinessTZ);
+    todayClosing.setHours(closeHours, closeMinutes, 0, 0);
+
+    // If closing time is before opening time, assume it closes next day
+    if (closeHours < openHours || (closeHours === openHours && closeMinutes < openMinutes)) {
+      todayClosing.setDate(todayClosing.getDate() + 1);
+    }
+
+
+
+    // Check if currently open (using business timezone)
+    const isCurrentlyOpen = nowInBusinessTZ >= todayOpening && nowInBusinessTZ < todayClosing;
+
+    let targetTime, isOpen;
+
+    if (isCurrentlyOpen) {
+      // Currently open, countdown to closing
+      targetTime = todayClosing;
+      isOpen = true;
+    } else {
+      // Not open, countdown to next opening
+      let nextOpening = new Date(todayOpening);
+      if (nowInBusinessTZ >= todayClosing) {
+        nextOpening.setDate(nextOpening.getDate() + 1);
+      }
+      targetTime = nextOpening;
+      isOpen = false;
+    }
+
+    const timeDiff = targetTime - nowInBusinessTZ;
+
+
+
+    if (timeDiff <= 0) {
+      return { timeString: '00:00:00', isOpen: false };
+    }
+
+    const hours = Math.floor(timeDiff / (1000 * 60 * 60));
+    const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((timeDiff % (1000 * 60)) / 1000);
+
+    const timeString = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+    return { timeString, isOpen, totalMs: timeDiff };
+  };
+
+  // Show countdown notifications
+  const showCountdownNotification = (remainingMs) => {
+    const now = Date.now();
+
+    // Show notifications at specific thresholds
+    const thresholds = [
+      { ms: 5 * 60 * 1000, message: '⚠️ 5 minutes until closing time!' },
+      { ms: 15 * 60 * 1000, message: '⏰ 15 minutes until closing time!' },
+      { ms: 30 * 60 * 1000, message: '🔔 30 minutes until closing time!' },
+      { ms: 60 * 60 * 1000, message: '🚨 1 hour until closing time!' },
+    ];
+
+    for (const threshold of thresholds) {
+      if (remainingMs <= threshold.ms && (!lastNotificationTime || now - lastNotificationTime > 5 * 60 * 1000)) {
+        Alert.alert('Business Hours Alert', threshold.message, [{ text: 'OK' }]);
+        setLastNotificationTime(now);
+        break;
+      }
+    }
+  };
+
+  // Start countdown timer
+  const startCountdownTimer = () => {
+    if (countdownInterval) {
+      clearInterval(countdownInterval);
+    }
+
+    const interval = setInterval(() => {
+      const countdown = calculateCountdown();
+      setCountdownTimeString(countdown.timeString);
+      setIsBusinessOpen(countdown.isOpen);
+
+      // Show notifications
+      if (countdown.isOpen && countdown.totalMs) {
+        showCountdownNotification(countdown.totalMs);
+      }
+    }, 1000); // Update every second
+
+    setCountdownInterval(interval);
+  };
+
   // USD Only - No currency conversion needed
   const convertToCurrency = (amount, targetCurrency) => {
     if (!exchangeRates) return amount;
@@ -975,15 +1209,7 @@ const CashierDashboardScreen = () => {
       color: '#f97316',
       section: 'cashier-tools'
     },
-    {
-      id: 'my-sales',
-      title: '📊 My Sales',
-      description: 'View my transaction history only',
-      icon: '📊',
-      screen: 'CashierSales',
-      color: '#10b981',
-      section: 'cashier-tools'
-    },
+
     // Stock Transfer feature removed - only owner should access drawer management
     // Keeping Stock Transfer for other operations
     {
@@ -1940,6 +2166,22 @@ const CashierDashboardScreen = () => {
     const interval = setInterval(updateRealTimeStats, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // Update clock when screensaver is active
+  useEffect(() => {
+    let clockInterval;
+    if (showLogoScreen) {
+      setCurrentTime(new Date());
+      clockInterval = setInterval(() => {
+        setCurrentTime(new Date());
+      }, 1000);
+    }
+    return () => {
+      if (clockInterval) {
+        clearInterval(clockInterval);
+      }
+    };
+  }, [showLogoScreen]);
 
   // Get unique categories from products
   const getCategories = () => {
@@ -3440,13 +3682,23 @@ const CashierDashboardScreen = () => {
                 <View style={[styles.neuralPulse, shopStatus?.is_open ? styles.neuralPulseOnline : styles.neuralPulseOffline]}></View>
               </View>
               
-              {/* Business Hours Display */}
+              {/* Business Hours Countdown Display */}
               <View style={styles.neuralBusinessHoursCard}>
-                <Text style={styles.neuralBusinessHoursLabel}>🕐 HOURS</Text>
-                <Text style={styles.neuralBusinessHoursValue}>
-                  {shopData?.opening_time ? formatTimeDisplay(shopData.opening_time) : '-'} - 
-                  {shopData?.closing_time ? formatTimeDisplay(shopData.closing_time) : '-'}
+                <Text style={styles.neuralBusinessHoursLabel}>
+                  {isBusinessOpen ? '⏰ TIME LEFT' : '🚪 CLOSED'}
                 </Text>
+                {shopData?.opening_time && shopData?.closing_time ? (
+                  <View style={styles.countdownContainer}>
+                    <Text style={styles.countdownTime}>
+                      {countdownTimeString}
+                    </Text>
+                    <Text style={styles.countdownLabel}>
+                      {isBusinessOpen ? 'TIME LEFT' : 'UNTIL OPEN'}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={styles.closedText}>Hours Not Set</Text>
+                )}
                 <Text style={styles.neuralBusinessHoursTimezone}>
                   {shopData?.timezone || 'Not set'}
                 </Text>
@@ -5208,6 +5460,74 @@ const CashierDashboardScreen = () => {
           </Animated.View>
         </>
       )}
+
+      {/* Inactivity Screensaver Modal */}
+      <Modal
+        visible={showLogoScreen}
+        transparent={false}
+        animationType="fade"
+        presentationStyle="fullScreen"
+        onRequestClose={() => {
+          console.log('🖼️ Screensaver modal closed - returning to dashboard');
+          setShowLogoScreen(false);
+          // Reset the inactivity timer
+          if (inactivityTimer) {
+            clearTimeout(inactivityTimer);
+          }
+          const timer = setTimeout(() => {
+            console.log('⏰ Setting screensaver to active');
+            setShowLogoScreen(true);
+          }, 30000); // 30 seconds of inactivity
+          setInactivityTimer(timer);
+        }}
+      >
+        <TouchableOpacity
+          style={styles.screensaverModalContainer}
+          activeOpacity={1}
+          onPress={() => {
+            console.log('🖼️ Screensaver touched - returning to dashboard');
+            setShowLogoScreen(false);
+            // Reset the inactivity timer
+            if (inactivityTimer) {
+              clearTimeout(inactivityTimer);
+            }
+            const timer = setTimeout(() => {
+              console.log('⏰ Setting screensaver to active');
+              setShowLogoScreen(true);
+            }, 30000); // 30 seconds of inactivity
+            setInactivityTimer(timer);
+          }}
+        >
+          <View style={styles.screensaverContent}>
+            {/* Inspirational Quote - Centered */}
+            <View style={styles.screensaverQuoteSection}>
+              <Text style={styles.screensaverQuoteText}>
+                "For its like magic but powered by code logic and networks"
+              </Text>
+              <Text style={styles.screensaverQuoteAuthor}>
+                - LuminaN Technology
+              </Text>
+            </View>
+
+            {/* Cashier Info and Time - Centered */}
+            <View style={styles.screensaverInfoSection}>
+              <Text style={styles.screensaverCashierText}>
+                👤 Cashier: {cashierData?.name || cashierData?.cashier_info?.name || 'Unknown'}
+              </Text>
+              <Text style={styles.screensaverTimeText}>
+                🕐 {currentTime.toLocaleTimeString()} | 📅 {currentTime.toLocaleDateString()}
+              </Text>
+            </View>
+
+            {/* Instructions */}
+            <View style={styles.screensaverInstructions}>
+              <Text style={styles.screensaverInstructionsText}>
+                💡 Touch anywhere to return to dashboard
+              </Text>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </ScrollView>
   );
 };
@@ -7869,6 +8189,335 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     zIndex: 1000,
   },
+  // Inactivity Screensaver Modal Styles
+  screensaverModalContainer: {
+    flex: 1,
+    backgroundColor: '#121212', // Dark background for screensaver
+    position: 'relative',
+  },
+  screensaverContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  screensaverLogoSection: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  screensaverLogoImage: {
+    width: '90%',
+    height: '60%',
+    maxWidth: 600,
+    maxHeight: 300,
+  },
+  screensaverQuoteSection: {
+    alignItems: 'center',
+    marginBottom: 40,
+  },
+  screensaverQuoteText: {
+    fontSize: 24,
+    fontWeight: '300',
+    color: '#ffffff',
+    fontFamily: Platform.OS === 'web' ? 'Georgia, serif' : 'serif',
+    textAlign: 'center',
+    marginBottom: 12,
+    fontStyle: 'italic',
+    textShadowColor: '#5AC8FA',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
+    lineHeight: 32,
+  },
+  screensaverQuoteAuthor: {
+    fontSize: 16,
+    color: '#bfdbfe',
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Georgia, serif' : 'serif',
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  screensaverInfoSection: {
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  screensaverCashierText: {
+    fontSize: 18,
+    color: '#ffffff',
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 8,
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+  },
+  screensaverTimeText: {
+    fontSize: 16,
+    color: '#9ca3af',
+    fontWeight: '500',
+    textAlign: 'center',
+    fontFamily: Platform.OS === 'web' ? 'Courier New, monospace' : 'Courier New',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#5AC8FA',
+  },
+  screensaverInstructions: {
+    marginTop: 40,
+    alignItems: 'center',
+  },
+  screensaverInstructionsText: {
+    fontSize: 14,
+    color: '#6b7280',
+    fontWeight: '400',
+    textAlign: 'center',
+    fontFamily: Platform.OS === 'web' ? 'Inter, -apple-system, BlinkMacSystemFont, sans-serif' : 'Arial',
+    fontStyle: 'italic',
+  },
+  retroScanlines: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0, 255, 0, 0.08) 2px, rgba(0, 255, 0, 0.08) 4px)',
+    pointerEvents: 'none',
+  },
+  retroBorder: {
+    position: 'absolute',
+    top: 20,
+    left: 20,
+    right: 20,
+    bottom: 20,
+    borderWidth: 3,
+    borderColor: '#00FF00',
+    borderStyle: 'solid',
+    opacity: 0.9,
+    pointerEvents: 'none',
+  },
+  retroCornerDecorations: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    right: 10,
+    bottom: 10,
+    borderWidth: 1,
+    borderColor: '#00AA00',
+    borderStyle: 'solid',
+    opacity: 0.6,
+    pointerEvents: 'none',
+  },
+  retroSystemHeader: {
+    position: 'absolute',
+    top: 30,
+    left: 30,
+    right: 30,
+    alignItems: 'center',
+    pointerEvents: 'none',
+  },
+  retroSystemText: {
+    color: '#00FF00',
+    fontSize: 12,
+    fontFamily: Platform.OS === 'web' ? 'Courier New, monospace' : 'Courier New',
+    fontWeight: 'normal',
+    textAlign: 'center',
+    textShadowColor: '#00FF00',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 4,
+    opacity: 0.8,
+    letterSpacing: 1,
+  },
+  screensaverContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+    paddingVertical: 40,
+  },
+  screensaverLogoSection: {
+    flex: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 40,
+  },
+  screensaverQuoteContainer: {
+    alignItems: 'center',
+    marginBottom: 60,
+  },
+  screensaverQuoteText: {
+    fontSize: 36,
+    fontWeight: '400',
+    color: '#00FF00', // Retro green
+    fontFamily: Platform.OS === 'web' ? 'Courier New, monospace' : 'Courier New',
+    textAlign: 'center',
+    marginBottom: 20,
+    fontStyle: 'italic',
+    textShadowColor: '#00FF00',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 12,
+    lineHeight: 45,
+    opacity: 1.0,
+  },
+  screensaverQuoteAuthor: {
+    fontSize: 20,
+    color: '#FFFF00', // Retro amber/yellow
+    fontFamily: Platform.OS === 'web' ? 'Courier New, monospace' : 'Courier New',
+    textAlign: 'center',
+    fontStyle: 'italic',
+    fontWeight: '600',
+    textShadowColor: '#FFFF00',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
+    opacity: 1.0,
+  },
+  screensaverClockContainer: {
+    alignItems: 'center',
+    marginBottom: 60,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 20,
+    padding: 30,
+    borderWidth: 2,
+    borderColor: '#5AC8FA',
+    minWidth: 300,
+  },
+  screensaverClockTime: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: '#00FF00', // Retro green
+    fontFamily: Platform.OS === 'web' ? 'Courier New, monospace' : 'Courier New',
+    textAlign: 'center',
+    marginBottom: 12,
+    textShadowColor: '#00FF00',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 15,
+    letterSpacing: 3,
+    opacity: 1.0,
+  },
+  screensaverClockDate: {
+    fontSize: 18,
+    color: '#FFFF00', // Retro amber
+    fontFamily: Platform.OS === 'web' ? 'Courier New, monospace' : 'Courier New',
+    textAlign: 'center',
+    fontWeight: 'normal',
+    textShadowColor: '#FFFF00',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
+    opacity: 1.0,
+  },
+  screensaverTouchText: {
+    fontSize: 16,
+    color: '#00AA00', // Muted retro green
+    fontWeight: 'normal',
+    textAlign: 'center',
+    fontFamily: Platform.OS === 'web' ? 'Courier New, monospace' : 'Courier New',
+    marginTop: 30,
+    textShadowColor: '#00AA00',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 4,
+    letterSpacing: 1,
+    opacity: 0.7,
+  },
+  screensaverFooter: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    paddingBottom: 40,
+  },
+  inspirationalQuoteContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: '#5AC8FA',
+    shadowColor: '#5AC8FA',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  inspirationalQuoteTextStatic: {
+    color: '#ffffff',
+    fontSize: 28,
+    fontWeight: '300',
+    fontFamily: Platform.OS === 'web' ? 'Georgia, serif' : 'serif',
+    textAlign: 'center',
+    marginBottom: 20,
+    fontStyle: 'italic',
+    textShadowColor: '#5AC8FA',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 10,
+    lineHeight: 36,
+  },
+  inspirationalQuoteAuthorStatic: {
+    color: '#bfdbfe',
+    fontSize: 18,
+    fontWeight: '400',
+    fontFamily: Platform.OS === 'web' ? 'Georgia, serif' : 'serif',
+    textAlign: 'center',
+    marginBottom: 30,
+    fontStyle: 'italic',
+  },
+  quoteDecorationStatic: {
+    marginBottom: 40,
+    alignItems: 'center',
+  },
+  quoteDecoTextStatic: {
+    fontSize: 24,
+    textAlign: 'center',
+    color: '#fbbf24',
+    textShadowColor: '#fbbf24',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
+  },
+
+  currentTimeStatic: {
+    color: '#6b7280',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 10,
+    fontFamily: Platform.OS === 'web' ? 'Courier New, monospace' : 'Courier New',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  logoScreenText: {
+    alignItems: 'center',
+    marginTop: 30,
+  },
+  logoScreenTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#5AC8FA',
+    marginBottom: 8,
+    textAlign: 'center',
+    textShadowColor: '#5AC8FA',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 10,
+  },
+  logoScreenSubtitle: {
+    fontSize: 16,
+    color: '#9ca3af',
+    marginBottom: 20,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  logoScreenTime: {
+    fontSize: 20,
+    color: '#ffffff',
+    fontWeight: '600',
+    textAlign: 'center',
+    fontFamily: Platform.OS === 'web' ? 'Courier New, monospace' : 'Courier New',
+    backgroundColor: '#2a2a2a',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#5AC8FA',
+  },
+
   // Enhanced Sidebar Styles - Better Positioning
   sidebar: {
     position: 'absolute',
@@ -8877,6 +9526,40 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 2,
     fontStyle: 'italic',
+  },
+
+  // Countdown Timer Styles
+  countdownContainer: {
+    alignItems: 'center',
+  },
+  countdownTime: {
+    color: '#00ff88',
+    fontSize: 18,
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'web' ? 'Courier New, monospace' : 'Courier New',
+    textAlign: 'center',
+    textShadowColor: '#00ff88',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 4,
+    letterSpacing: 2,
+  },
+  countdownLabel: {
+    color: '#9ca3af',
+    fontSize: 10,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  closedText: {
+    color: '#ff4444',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+    textShadowColor: '#ff4444',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 4,
   },
 
   // Exchange Rates Display Styles

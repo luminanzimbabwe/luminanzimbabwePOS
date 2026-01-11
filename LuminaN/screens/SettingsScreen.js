@@ -46,6 +46,11 @@ const SettingsScreen = () => {
   const [showVatPicker, setShowVatPicker] = useState(false);
   const [customTimezoneInput, setCustomTimezoneInput] = useState('');
 
+  // Health monitoring state
+  const [healthData, setHealthData] = useState(null);
+  const [isLoadingHealth, setIsLoadingHealth] = useState(false);
+  const [lastHealthCheck, setLastHealthCheck] = useState(null);
+
   useEffect(() => {
     loadShopData();
     loadBusinessSettings();
@@ -876,11 +881,17 @@ const SettingsScreen = () => {
         >
           <Text style={[styles.navButtonText, activeSection === 'integrations' && styles.navButtonTextActive]}>🔗 Integration</Text>
         </TouchableOpacity>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.navButton, activeSection === 'exchange' && styles.navButtonActive]}
           onPress={() => setActiveSection('exchange')}
         >
           <Text style={[styles.navButtonText, activeSection === 'exchange' && styles.navButtonTextActive]}>💱 Exchange Rates</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.navButton, activeSection === 'health' && styles.navButtonActive]}
+          onPress={() => setActiveSection('health')}
+        >
+          <Text style={[styles.navButtonText, activeSection === 'health' && styles.navButtonTextActive]}>🩺 System Health</Text>
         </TouchableOpacity>
       </View>
 

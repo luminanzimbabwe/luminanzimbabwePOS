@@ -71,23 +71,27 @@ const EODProductionScreen = () => {
     recentActivity: []
   });
 
+  // Sales data for EOD display
+  const [salesData, setSalesData] = useState(null);
+  const [salesLoading, setSalesLoading] = useState(false);
+
   // Load staff lunch data for deduction tracking
   const loadStaffLunchData = async () => {
     try {
       const response = await shopAPI.getStaffLunchHistory('limit=20');
-      
+
       if (response.data && response.data.success) {
         const lunches = response.data.data || [];
-        
+
         // Calculate today's lunches
         const now = new Date();
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        
+
         const todayLunches = lunches.filter(lunch => {
           const lunchDate = new Date(lunch.created_at);
           return lunchDate >= today;
         });
-        
+
         // Calculate total value of today's lunches
         const totalValue = todayLunches.reduce((sum, lunch) => {
           if (lunch.notes?.includes('CASH LUNCH') && lunch.notes?.includes('Amount:')) {
@@ -96,7 +100,7 @@ const EODProductionScreen = () => {
           }
           return sum + (parseFloat(lunch.total_cost) || 0);
         }, 0);
-        
+
         setStaffLunchMetrics({
           todayLunches: todayLunches.length,
           totalValue: totalValue,
@@ -110,6 +114,38 @@ const EODProductionScreen = () => {
         totalValue: 0,
         recentActivity: []
       });
+    }
+  };
+
+  // Load sales data for EOD display
+  const loadSalesData = async () => {
+    try {
+      setSalesLoading(true);
+      const response = await shopAPI.getAnonymousEndpoint('/analytics/');
+      const apiData = response.data;
+
+      // Get today's sales from daily breakdown
+      const dailyBreakdown = apiData.revenue_analytics?.daily_breakdown || apiData.daily_breakdown || apiData.sales_trend || [];
+      const todayData = dailyBreakdown[dailyBreakdown.length - 1];
+      const todaySales = todayData ? (todayData.net_revenue || todayData.revenue || todayData.sales || 0) : 0;
+      const todayTransactions = todayData ? (todayData.transactions || 0) : 0;
+
+      setSalesData({
+        todaySales,
+        todayTransactions,
+        totalRevenue: apiData.revenue_analytics?.total_revenue || apiData.total_revenue || 0,
+        totalTransactions: apiData.revenue_analytics?.total_transactions || apiData.total_transactions || 0
+      });
+    } catch (error) {
+      console.error('Failed to load sales data:', error);
+      setSalesData({
+        todaySales: 0,
+        todayTransactions: 0,
+        totalRevenue: 0,
+        totalTransactions: 0
+      });
+    } finally {
+      setSalesLoading(false);
     }
   };
 
@@ -145,6 +181,9 @@ const EODProductionScreen = () => {
       ]);
       setReconciliationData(recon.data);
       setDrawerStatus(drawers.data.shop_status || drawers.data);
+
+      // Load sales data for display
+      await loadSalesData();
     } catch (error) {
       Alert.alert('Error', 'Could not load EOD data');
     } finally {
@@ -783,6 +822,36 @@ const EODProductionScreen = () => {
           </View>
         </View>
 
+        {/* Sales Data Display */}
+        {salesData && salesData.todayTransactions > 0 && (
+          <View style={styles.neuralFinancialSection}>
+            <View style={styles.neuralFinancialHeader}>
+              <Icon name="analytics" size={28} color="#00ff88" />
+              <Text style={styles.neuralFinancialTitle}>SALES DATA</Text>
+            </View>
+
+            <View style={styles.neuralMetricsGrid}>
+              <View style={styles.neuralMetricCard}>
+                <View style={styles.neuralMetricHeader}>
+                  <Icon name="point-of-sale" size={24} color="#ff0080" />
+                  <Text style={styles.neuralMetricTitle}>TODAY'S SALES</Text>
+                </View>
+                <Text style={styles.neuralMetricValue}>{salesData.todayTransactions}</Text>
+                <Text style={styles.neuralMetricSubtitle}>Transactions</Text>
+              </View>
+
+              <View style={styles.neuralMetricCard}>
+                <View style={styles.neuralMetricHeader}>
+                  <Icon name="attach-money" size={24} color="#00f5ff" />
+                  <Text style={styles.neuralMetricTitle}>REVENUE</Text>
+                </View>
+                <Text style={styles.neuralMetricValue}>${salesData.todaySales.toLocaleString()}</Text>
+                <Text style={styles.neuralMetricSubtitle}>Total Amount</Text>
+              </View>
+            </View>
+          </View>
+        )}
+
         {/* Financial Neural Grid - Consolidated Expected Amounts */}
         <View style={styles.neuralFinancialSection}>
           <View style={styles.neuralFinancialHeader}>
@@ -791,14 +860,31 @@ const EODProductionScreen = () => {
           </View>
           
           {/* Shop Status Indicator */}
-          <View style={[styles.neuralStatusPanel, { borderColor: '#ffaa00', backgroundColor: 'rgba(255, 170, 0, 0.1)' }]}>
+          <View style={[styles.neuralStatusPanel, {
+            borderColor: drawerStatus?.is_open ? '#00ff88' : '#ff4444',
+            backgroundColor: drawerStatus?.is_open ? 'rgba(0, 255, 136, 0.1)' : 'rgba(255, 68, 68, 0.1)'
+          }]}>
             <View style={styles.neuralStatusIndicator}>
-              <View style={[styles.neuralStatusPulse, { backgroundColor: '#ffaa00' }]} />
-              <Text style={[styles.neuralStatusText, { color: '#ffaa00' }]}>SHOP STATUS: CLOSING</Text>
-              <Icon name="schedule" size={16} color="#ffaa00" />
+              <View style={[styles.neuralStatusPulse, {
+                backgroundColor: drawerStatus?.is_open ? '#00ff88' : '#ff4444'
+              }]} />
+              <Text style={[styles.neuralStatusText, {
+                color: drawerStatus?.is_open ? '#00ff88' : '#ff4444'
+              }]}>
+                SHOP STATUS: {drawerStatus?.is_open ? 'OPEN' : 'CLOSED'}
+              </Text>
+              <Icon name="schedule" size={16} color={drawerStatus?.is_open ? '#00ff88' : '#ff4444'} />
             </View>
-            <Text style={{ color: '#ffaa00', fontSize: 12, textAlign: 'center', marginTop: 8 }}>
-              ⚠️ End of day in progress - All data will be PERMANENTLY DELETED after finalization
+            <Text style={{
+              color: drawerStatus?.is_open ? '#00ff88' : '#ff4444',
+              fontSize: 12,
+              textAlign: 'center',
+              marginTop: 8
+            }}>
+              {drawerStatus?.is_open
+                ? '⚠️ End of day reconciliation in progress'
+                : '🔒 Shop is closed - data has been reset'
+              }
             </Text>
           </View>
           

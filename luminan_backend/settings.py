@@ -91,6 +91,14 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+        'OPTIONS': {
+            # SQLite specific optimizations
+            'timeout': 20,  # Connection timeout in seconds
+            'check_same_thread': False,  # Allow shared connections
+        },
+        # Connection pooling settings
+        'CONN_MAX_AGE': 60,  # Keep connections alive for 60 seconds
+        'CONN_HEALTH_CHECKS': True,  # Enable connection health checks
     }
 }
 
@@ -181,6 +189,7 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
+    'x-request-time',
     'x-shop-id',
     'x-cashier-id',
 ]

@@ -29,17 +29,67 @@ const api = axios.create({
   timeout: 10000, // 10 second timeout
 });
 
-// Add response interceptor for network error handling
+// Add request interceptor for retry logic
+api.interceptors.request.use(
+  (config) => {
+    // Add timestamp to prevent caching issues
+    config.headers['X-Request-Time'] = Date.now();
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+// Add response interceptor for network error handling and retry logic
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (!error.response) {
-      // Network error (timeout, no connection, etc.)
-      const errorMessage = error.code === 'ECONNABORTED' 
-        ? 'Cannot connect to server. Please check if the development server is running and the IP address is correct.'
-        : 'Network connection failed. Please check your internet connection and try again.';
-      throw new Error(errorMessage);
+  async (error) => {
+    const config = error.config;
+
+    // If no config or already retried, reject
+    if (!config || config._retry) {
+      if (!error.response) {
+        // Network error (timeout, no connection, etc.)
+        const errorMessage = error.code === 'ECONNABORTED'
+          ? 'Request timed out. The server may be overloaded. Please try again.'
+          : 'Network connection failed. Please check your internet connection and try again.';
+        throw new Error(errorMessage);
+      }
+      return Promise.reject(error);
     }
+
+    // Mark as retried
+    config._retry = true;
+
+    // Retry logic for network errors and 5xx server errors
+    if (!error.response || (error.response.status >= 500 && error.response.status < 600)) {
+      console.warn(`API request failed, retrying... (${config.url})`);
+
+      // Wait before retrying (exponential backoff)
+      const retryDelay = config._retryCount ? config._retryCount * 1000 : 1000;
+      config._retryCount = (config._retryCount || 0) + 1;
+
+      if (config._retryCount <= 3) { // Max 3 retries
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+        return api(config);
+      }
+    }
+
+    // Handle specific error codes
+    if (error.response) {
+      switch (error.response.status) {
+        case 408: // Request Timeout
+          throw new Error('Request timed out. Please try again.');
+        case 429: // Too Many Requests
+          throw new Error('Too many requests. Please wait a moment and try again.');
+        case 503: // Service Unavailable
+          throw new Error('Service temporarily unavailable. Please try again in a few moments.');
+        case 504: // Gateway Timeout
+          throw new Error('Server is taking too long to respond. Please try again.');
+        default:
+          break;
+      }
+    }
+
     return Promise.reject(error);
   }
 );
@@ -301,6 +351,10 @@ export const shopAPI = {
   // Business Settings methods - for managing business hours, timezone, and VAT
   getBusinessSettings: (config = {}) => api.get('/business-settings/', config),
   updateBusinessSettings: (data, config = {}) => api.patch('/business-settings/', data, config),
+
+  // System Health Monitoring methods
+  getSystemHealth: () => api.get('/health/'),
+  testConnectivity: () => api.get('/status/'),
 };
 
 // Export apiService as alias for shopAPI for backwards compatibility

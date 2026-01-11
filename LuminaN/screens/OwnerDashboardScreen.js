@@ -507,14 +507,19 @@ const OwnerDashboardScreen = () => {
         // Handle different response formats
         const grossRevenue = apiData.revenue_analytics?.total_revenue || apiData.total_revenue || apiData.total_sales || 0;
         const netRevenue = grossRevenue; // No refunds in owner dashboard for now
-        
+
         // Get daily breakdown from various possible response formats
         const dailyBreakdown = apiData.revenue_analytics?.daily_breakdown || apiData.daily_breakdown || apiData.sales_trend || [];
-        
+
+        // Get today's sales from the last day in daily breakdown
+        const todayData = dailyBreakdown[dailyBreakdown.length - 1];
+        const todaySales = todayData ? (todayData.net_revenue || todayData.revenue || todayData.sales || 0) : 0;
+        const todayTransactions = todayData ? (todayData.transactions || 0) : 0;
+
         // Transform analytics data to match our sales metrics format with REAL business data
         const transformedSalesData = {
-          todaySales: netRevenue,
-          todayTransactions: apiData.revenue_analytics?.total_transactions || apiData.total_transactions || 0,
+          todaySales: todaySales,
+          todayTransactions: todayTransactions,
           weekSales: netRevenue, // Use actual period data
           weekTransactions: apiData.revenue_analytics?.total_transactions || apiData.total_transactions || 0,
           monthSales: netRevenue,
@@ -1212,10 +1217,15 @@ const OwnerDashboardScreen = () => {
                   <Icon name="schedule" size={16} color="#00f5ff" />
                   <Text style={styles.dataLabel}>INITIATED:</Text>
                   <Text style={styles.dataValue}>
-                    {new Date(shopStatus.current_shop_day.opened_at).toLocaleString()}
+                    {(() => {
+                      const openedAt = new Date(shopStatus.current_shop_day.opened_at);
+                      // Only show fallback if it's exactly the Unix epoch (1970-01-01)
+                      const isEpoch = openedAt.getFullYear() === 1970 && openedAt.getMonth() === 0 && openedAt.getDate() === 1;
+                      return isEpoch ? 'SYSTEM INITIALIZED' : openedAt.toLocaleString();
+                    })()}
                   </Text>
                 </View>
-                
+
                 {shopStatus.active_cashiers && shopStatus.active_cashiers.length > 0 && (
                   <View style={styles.dataStreamItem}>
                     <Icon name="people" size={16} color="#ffaa00" />
@@ -1223,12 +1233,19 @@ const OwnerDashboardScreen = () => {
                     <Text style={styles.dataValue}>{shopStatus.active_cashiers.length} CASHIERS</Text>
                   </View>
                 )}
-                
+
                 <View style={styles.dataStreamItem}>
                   <Icon name="speed" size={16} color="#ff0080" />
                   <Text style={styles.dataLabel}>UPTIME:</Text>
                   <Text style={styles.dataValue}>
-                    {Math.floor((new Date() - new Date(shopStatus.current_shop_day.opened_at)) / (1000 * 60 * 60))}H ACTIVE
+                    {(() => {
+                      const openedAt = new Date(shopStatus.current_shop_day.opened_at);
+                      // Only show fallback if it's exactly the Unix epoch (1970-01-01)
+                      const isEpoch = openedAt.getFullYear() === 1970 && openedAt.getMonth() === 0 && openedAt.getDate() === 1;
+                      if (isEpoch) return 'CALCULATING...';
+                      const uptimeHours = Math.floor((new Date() - openedAt) / (1000 * 60 * 60));
+                      return `${uptimeHours}H ACTIVE`;
+                    })()}
                   </Text>
                 </View>
               </View>
