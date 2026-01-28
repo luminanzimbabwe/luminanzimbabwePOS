@@ -12,7 +12,7 @@ from django.db.models import Sum, F, Q
 from django.db.models.functions import Cast
 from datetime import timedelta
 from decimal import Decimal
-from .models import ShopConfiguration, Cashier, Product, Sale, SaleItem, Customer, Discount, Shift, Expense, StaffLunch, StockTake, StockTakeItem, InventoryLog, StockTransfer, Waste, ShopDay, CurrencyWallet, CurrencyTransaction, SalePayment
+from .models import ShopConfiguration, Cashier, Product, Sale, SaleItem, Customer, Discount, Shift, Expense, StaffLunch, StockTake, StockTakeItem, InventoryLog, StockTransfer, Waste, ShopDay, CurrencyWallet, CurrencyTransaction, SalePayment, CashFloat
 from .serializers import ShopConfigurationSerializer, ShopLoginSerializer, ResetPasswordSerializer, CashierSerializer, CashierLoginSerializer, ProductSerializer, SaleSerializer, CreateSaleSerializer, ExpenseSerializer, StockValuationSerializer, StaffLunchSerializer, BulkProductSerializer, CustomerSerializer, DiscountSerializer, StockTakeSerializer, StockTakeItemSerializer, CreateStockTakeSerializer, AddStockTakeItemSerializer, BulkAddStockTakeItemsSerializer, CashierResetPasswordSerializer, InventoryLogSerializer, StockTransferSerializer
 from django.db import transaction
 from django.shortcuts import get_object_or_404
@@ -25,11 +25,10 @@ def validate_drawer_change(cashier, shop, change_needed, currency):
     Validate that the cashier's drawer has sufficient cash to provide change
     Returns error message if insufficient change, None if validation passes
     """
-    from .models import CashFloat
     from django.utils import timezone
 
     try:
-        today = timezone.now().date()
+        today = timezone.localdate()
         drawer = CashFloat.objects.get(shop=shop, cashier=cashier, date=today)
 
         # Get available cash in the specified currency (includes float amount)
@@ -216,6 +215,218 @@ class ShopStatusView(APIView):
             })
 
 @method_decorator(csrf_exempt, name='dispatch')
+class CashierDrawersView(APIView):
+    """Get drawer status for all cashiers - shows FINANCIAL NEURAL GRID summary"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        try:
+            shop = ShopConfiguration.objects.get()
+            cashiers = Cashier.objects.filter(shop=shop)
+
+            # Initialize summary data structure
+            financial_neural_grid = {
+                "usd": {
+                    "cash": 0.0,
+                    "transfer": 0.0,
+                    "card": 0.0,
+                    "ecocash": 0.0,
+                    "total": 0.0
+                },
+                "zig": {
+                    "cash": 0.0,
+                    "transfer": 0.0,
+                    "card": 0.0,
+                    "total": 0.0
+                },
+                "rand": {
+                    "cash": 0.0,
+                    "transfer": 0.0,
+                    "card": 0.0,
+                    "ecocash": 0.0,
+                    "total": 0.0
+                }
+            }
+
+            drawers_data = []
+            for cashier in cashiers:
+                # CRITICAL FIX: Get ALL non-settled drawers for this cashier
+                # This ensures we see money from previous days if EOD wasn't run (e.g. past midnight)
+                drawers = CashFloat.objects.filter(shop=shop, cashier=cashier).exclude(status='SETTLED')
+                
+                # If no drawers exist at all, ensure we have at least today's active drawer
+                if not drawers.exists():
+                    drawer = CashFloat.get_active_drawer(shop, cashier)
+                    drawers = [drawer]
+                
+                # Initialize aggregation variables
+                agg = {
+                    'status': 'INACTIVE',
+                    'float_usd': 0.0, 'float_zig': 0.0, 'float_rand': 0.0,
+                    'cash_usd': 0.0, 'cash_zig': 0.0, 'cash_rand': 0.0,
+                    'card_usd': 0.0, 'card_zig': 0.0, 'card_rand': 0.0,
+                    'ecocash_usd': 0.0, 'ecocash_zig': 0.0, 'ecocash_rand': 0.0,
+                    'transfer_usd': 0.0, 'transfer_zig': 0.0, 'transfer_rand': 0.0,
+                    'total_usd': 0.0, 'total_zig': 0.0, 'total_rand': 0.0,
+                    'sales_cash_usd': 0.0, 'sales_cash_zig': 0.0, 'sales_cash_rand': 0.0
+                }
+                
+                # Aggregate values from all active/inactive (non-settled) drawers
+                for d in drawers:
+                    if d.status == 'ACTIVE':
+                        agg['status'] = 'ACTIVE'
+                    
+                    agg['float_usd'] += float(d.float_amount)
+                    agg['float_zig'] += float(d.float_amount_zig)
+                    agg['float_rand'] += float(d.float_amount_rand)
+                    
+                    agg['cash_usd'] += float(d.current_cash_usd)
+                    agg['cash_zig'] += float(d.current_cash_zig)
+                    agg['cash_rand'] += float(d.current_cash_rand)
+                    
+                    agg['card_usd'] += float(d.current_card_usd)
+                    agg['card_zig'] += float(d.current_card_zig)
+                    agg['card_rand'] += float(d.current_card_rand)
+                    
+                    agg['ecocash_usd'] += float(d.current_ecocash_usd)
+                    agg['ecocash_zig'] += float(d.current_ecocash_zig)
+                    agg['ecocash_rand'] += float(d.current_ecocash_rand)
+                    
+                    agg['transfer_usd'] += float(d.current_transfer_usd)
+                    agg['transfer_zig'] += float(d.current_transfer_zig)
+                    agg['transfer_rand'] += float(d.current_transfer_rand)
+                    
+                    agg['total_usd'] += float(d.current_total_usd)
+                    agg['total_zig'] += float(d.current_total_zig)
+                    agg['total_rand'] += float(d.current_total_rand)
+                    
+                    agg['sales_cash_usd'] += float(d.session_cash_sales_usd)
+                    agg['sales_cash_zig'] += float(d.session_cash_sales_zig)
+                    agg['sales_cash_rand'] += float(d.session_cash_sales_rand)
+
+                # Aggregate amounts for FINANCIAL NEURAL GRID
+                financial_neural_grid["usd"]["cash"] += agg['cash_usd']
+                financial_neural_grid["usd"]["transfer"] += agg['transfer_usd']
+                financial_neural_grid["usd"]["card"] += agg['card_usd']
+                financial_neural_grid["usd"]["ecocash"] += agg['ecocash_usd']
+
+                financial_neural_grid["zig"]["cash"] += agg['cash_zig']
+                financial_neural_grid["zig"]["transfer"] += agg['transfer_zig']
+                financial_neural_grid["zig"]["card"] += agg['card_zig']
+
+                financial_neural_grid["rand"]["cash"] += agg['cash_rand']
+                financial_neural_grid["rand"]["transfer"] += agg['transfer_rand']
+                financial_neural_grid["rand"]["card"] += agg['card_rand']
+                financial_neural_grid["rand"]["ecocash"] += agg['ecocash_rand']
+
+                drawers_data.append({
+                    "cashier_id": cashier.id,
+                    "cashier_name": cashier.name,
+                    "drawer_status": agg['status'],
+                    "float_amounts": {
+                        "usd": agg['float_usd'],
+                        "zig": agg['float_zig'],
+                        "rand": agg['float_rand']
+                    },
+                    "current_cash": {
+                        "usd": agg['cash_usd'],
+                        "zig": agg['cash_zig'],
+                        "rand": agg['cash_rand']
+                    },
+                    "current_card": {
+                        "usd": agg['card_usd'],
+                        "zig": agg['card_zig'],
+                        "rand": agg['card_rand']
+                    },
+                    "current_ecocash": {
+                        "usd": agg['ecocash_usd'],
+                        "zig": agg['ecocash_zig'],
+                        "rand": agg['ecocash_rand']
+                    },
+                    "current_transfer": {
+                        "usd": agg['transfer_usd'],
+                        "zig": agg['transfer_zig'],
+                        "rand": agg['transfer_rand']
+                    },
+                    "total_by_currency": {
+                        "usd": agg['total_usd'],
+                        "zig": agg['total_zig'],
+                        "rand": agg['total_rand']
+                    },
+                    "session_sales": {
+                        "usd_cash": agg['sales_cash_usd'],
+                        "zig_cash": agg['sales_cash_zig'],
+                        "rand_cash": agg['sales_cash_rand']
+                    },
+                    "expected_vs_actual": {
+                        "usd": {
+                            "expected": agg['float_usd'] + agg['sales_cash_usd'],
+                            "actual": agg['cash_usd'],
+                            "variance": agg['cash_usd'] - (agg['float_usd'] + agg['sales_cash_usd'])
+                        },
+                        "zig": {
+                            "expected": agg['float_zig'] + agg['sales_cash_zig'],
+                            "actual": agg['cash_zig'],
+                            "variance": agg['cash_zig'] - (agg['float_zig'] + agg['sales_cash_zig'])
+                        },
+                        "rand": {
+                            "expected": agg['float_rand'] + agg['sales_cash_rand'],
+                            "actual": agg['cash_rand'],
+                            "variance": agg['cash_rand'] - (agg['float_rand'] + agg['sales_cash_rand'])
+                        }
+                    }
+                })
+
+            # Calculate totals for each currency
+            financial_neural_grid["usd"]["total"] = (
+                financial_neural_grid["usd"]["cash"] +
+                financial_neural_grid["usd"]["transfer"] +
+                financial_neural_grid["usd"]["card"] +
+                financial_neural_grid["usd"]["ecocash"]
+            )
+
+            financial_neural_grid["zig"]["total"] = (
+                financial_neural_grid["zig"]["cash"] +
+                financial_neural_grid["zig"]["transfer"] +
+                financial_neural_grid["zig"]["card"]
+            )
+
+            financial_neural_grid["rand"]["total"] = (
+                financial_neural_grid["rand"]["cash"] +
+                financial_neural_grid["rand"]["transfer"] +
+                financial_neural_grid["rand"]["card"] +
+                financial_neural_grid["rand"]["ecocash"]
+            )
+
+            return Response({
+                "success": True,
+                "shop_name": shop.name,
+                "total_cashiers": len(drawers_data),
+                "financial_neural_grid": financial_neural_grid,
+                "drawers": drawers_data
+            })
+
+        except ShopConfiguration.DoesNotExist:
+            # Return default empty data for demo/development
+            return Response({
+                "success": True,
+                "shop_name": "Demo Shop",
+                "total_cashiers": 0,
+                "financial_neural_grid": {
+                    "usd": {"cash": 0.0, "transfer": 0.0, "card": 0.0, "ecocash": 0.0, "total": 0.0},
+                    "zig": {"cash": 0.0, "transfer": 0.0, "card": 0.0, "total": 0.0},
+                    "rand": {"cash": 0.0, "transfer": 0.0, "card": 0.0, "ecocash": 0.0, "total": 0.0}
+                },
+                "drawers": []
+            })
+        except Exception as e:
+            return Response({
+                "success": False,
+                "error": f"Server error: {str(e)}"
+            }, status=500)
+
+@method_decorator(csrf_exempt, name='dispatch')
 class ShopRegisterView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
@@ -347,7 +558,7 @@ class CashierLoginView(APIView):
                         from .models import CashFloat, Shift
                         from django.utils import timezone
                         from decimal import Decimal
-                        today = timezone.now().date()
+                        today = timezone.localdate()
 
                         # Ensure a CashFloat exists for today and activate it
                         cf, _ = CashFloat.objects.get_or_create(
@@ -711,6 +922,7 @@ class SaleListView(APIView):
 
     def post(self, request):
         print(f"DEBUG: Sale request data: {request.data}")
+        print(f"DEBUG: Payment Currency: {request.data.get('payment_currency')}")
         
         serializer = CreateSaleSerializer(data=request.data)
         if serializer.is_valid():
@@ -776,45 +988,42 @@ class SaleListView(APIView):
                     'total_price': total_price
                 })
 
-            # ========== CHANGE VALIDATION FOR CASH PAYMENTS ==========
-            # Validate that cashier has sufficient change in drawer before processing sale
-            change_validation_error = None
-
-            if is_split_payment:
-                # For split payments, validate change for each cash payment
-                payments_data = serializer.validated_data['payments']
-                for payment_data in payments_data:
-                    payment_method = payment_data['payment_method']
-                    if payment_method == 'cash':
-                        currency = payment_data['currency']
-                        amount_paid = Decimal(str(payment_data['amount']))
-
-                        # Calculate change needed for this payment
-                        change_needed = amount_paid - total_usd_amount
-                        if change_needed > 0:
-                            # Check if drawer has enough cash in this currency
-                            change_validation_error = validate_drawer_change(cashier, shop, change_needed, currency)
-                            if change_validation_error:
-                                break
-            else:
-                # For single payments, validate change for cash payment
-                payment_method = serializer.validated_data.get('payment_method')
-                if payment_method == 'cash':
+            # Validation: Reject USD Cash for amounts less than $1.00 (no coins available)
+            if 0 < total_usd_amount < 1:
+                is_usd_cash_payment = False
+                
+                if is_split_payment:
+                    for payment in serializer.validated_data['payments']:
+                        if payment.get('currency') == 'USD' and payment.get('payment_method') == 'cash':
+                            is_usd_cash_payment = True
+                            break
+                else:
+                    payment_method = serializer.validated_data.get('payment_method')
                     payment_currency = serializer.validated_data.get('payment_currency', 'USD')
-                    amount_received = serializer.validated_data.get('total_amount', total_usd_amount)
+                    if payment_method == 'cash' and payment_currency == 'USD':
+                        is_usd_cash_payment = True
+                
+                if is_usd_cash_payment:
+                    return Response({"error": "USD Cash payments cannot be less than $1.00 (no coins available). Please use ZIG or RAND."}, status=status.HTTP_400_BAD_REQUEST)
 
-                    # Calculate change needed
-                    change_needed = Decimal(str(amount_received)) - total_usd_amount
-                    if change_needed > 0:
-                        # Check if drawer has enough cash in this currency
-                        change_validation_error = validate_drawer_change(cashier, shop, change_needed, payment_currency)
+            # NOTE: USD Cash payments with cents are now automatically handled
+            # The signal (update_cash_float_on_sale) will split the change:
+            # - Whole USD dollars are returned from USD drawer
+            # - Cents portion is converted to ZIG and returned from ZIG drawer
+            # No need to reject these sales anymore - they process normally
 
-            # If change validation failed, return error
-            if change_validation_error:
-                return Response({
-                    "error": change_validation_error,
-                    "type": "insufficient_change"
-                }, status=status.HTTP_400_BAD_REQUEST)
+            # ========== CHANGE VALIDATION REMOVED ==========
+            # The validation block has been removed to allow sales even with insufficient change
+            # and to support negative drawer balances as requested.
+            #
+            # Original logic:
+            # change_validation_error = None
+            # if is_split_payment:
+            #     ...
+            # else:
+            #     ...
+            # if change_validation_error:
+            #     return Response({...}, status=status.HTTP_400_BAD_REQUEST)
 
             if is_split_payment:
                 # ========== SPLIT PAYMENT LOGIC ==========
@@ -866,6 +1075,7 @@ class SaleListView(APIView):
                     payment_method = payment_data['payment_method']
                     currency = payment_data['currency']
                     amount = Decimal(str(payment_data['amount']))
+                    amount_received = payment_data.get('amount_received')
 
                     # Convert to USD equivalent
                     amount_usd = amount
@@ -886,7 +1096,8 @@ class SaleListView(APIView):
                         currency=currency,
                         amount=amount,
                         exchange_rate_to_usd=exchange_rate_to_usd,
-                        amount_usd_equivalent=amount_usd
+                        amount_usd_equivalent=amount_usd,
+                        amount_received=amount_received
                     )
                     sale_payments.append(sale_payment)
 
@@ -935,12 +1146,17 @@ class SaleListView(APIView):
                 product_price_currency = serializer.validated_data.get('product_price_currency', 'USD')
                 payment_currency = serializer.validated_data.get('payment_currency', product_price_currency)
                 frontend_total = serializer.validated_data.get('total_amount')
+                amount_received = serializer.validated_data.get('amount_received')
                 
                 exchange_rate_used = None
                 wallet_currency = payment_currency if payment_currency else product_price_currency
                 final_amount = total_usd_amount
                 
-                if product_price_currency != wallet_currency and exchange_rates:
+                # CRITICAL FIX: If payment currency is NOT USD, do NOT convert amount_received
+                # If the user typed 32.80 ZIG, we want to store 32.80 ZIG, not $1.00 USD
+                if payment_currency and payment_currency != 'USD' and product_price_currency == payment_currency:
+                     final_amount = total_usd_amount # It's already in the correct currency
+                elif product_price_currency != wallet_currency and exchange_rates:
                     final_amount = exchange_rates.convert_amount(total_usd_amount, product_price_currency, wallet_currency)
                     exchange_rate_used = exchange_rates.convert_amount(1, product_price_currency, wallet_currency)
                     print(f"DEBUG: Currency conversion - {total_usd_amount} {product_price_currency} -> {final_amount} {wallet_currency} (rate: {exchange_rate_used})")
@@ -961,6 +1177,7 @@ class SaleListView(APIView):
                     customer_phone=customer_phone,
                     wallet_account=wallet_currency,
                     exchange_rate_used=exchange_rate_used,
+                    amount_received=amount_received,
                     status='completed'
                 )
                 
@@ -4472,7 +4689,7 @@ class DrawerAccessStatusView(APIView):
                 }, status=status.HTTP_404_NOT_FOUND)
             
             # Check drawer access from CashFloat
-            today = timezone.now().date()
+            today = timezone.localdate()
             try:
                 cash_float = CashFloat.objects.get(shop=shop, cashier=cashier, date=today)
                 has_access = cash_float.drawer_access_granted
@@ -4767,4 +4984,3 @@ class BusinessSettingsView(APIView):
             },
             "updated_fields": updated_fields
         })
-

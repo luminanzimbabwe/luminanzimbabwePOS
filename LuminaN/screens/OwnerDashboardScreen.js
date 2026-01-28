@@ -377,16 +377,30 @@ const OwnerDashboardScreen = () => {
         attempts++;
       }
       
-      // Use session-aware endpoint - returns only current session sales (resets when shop is closed)
-      const response = await shopAPI.getAllDrawersSession();
-      console.log('[/cash-float/all-drawers-session/] response:', response?.data);
+      // Use the same API as DrawerManagementScreen for consistent data
+      let response;
+      try {
+        response = await shopAPI.getCashierDrawers();
+        console.log('[getCashierDrawers] response:', response?.data);
+      } catch (apiError) {
+        console.error('❌ getCashierDrawers failed, falling back to getAllDrawersSession:', apiError);
+        // Fall back to the original API
+        response = await shopAPI.getAllDrawersSession();
+        console.log('[getAllDrawersSession] fallback response:', response?.data);
+      }
+
       if (response.data && response.data.success) {
-        let shop_status = response.data.shop_status;
+        // Check if this is from getCashierDrawers (has financial_neural_grid) or getAllDrawersSession (has shop_status)
+        const isCashierDrawersAPI = !!response.data.financial_neural_grid;
+
+        if (isCashierDrawersAPI) {
+        // Transform the DrawerManagement data format to OwnerDashboard format
+        const financialGrid = response.data.financial_neural_grid || {};
 
         // If the dashboard believes the shop is closed, show zeroed drawer status
         if (shopStatus && shopStatus.is_open === false) {
           const zeroed = {
-            shop: shopStatus.current_shop_day?.shop || shopData?.name || '',
+            shop: shopData?.name || '',
             date: new Date().toISOString().slice(0,10),
             total_drawers: 0,
             active_drawers: 0,
@@ -396,7 +410,7 @@ const OwnerDashboardScreen = () => {
               total_expected_cash: 0,
               total_current_cash: 0,
               variance: 0,
-              // Multi-currency fields
+              // Multi-currency fields - properly calculated from financial_neural_grid
               expected_zig: 0,
               expected_usd: 0,
               expected_rand: 0,
@@ -409,6 +423,13 @@ const OwnerDashboardScreen = () => {
               total_expected_cash_multi: 0,
               total_current_cash_multi: 0,
               variance_multi: 0,
+              // Payment breakdown from financial_neural_grid
+              transfer_usd: 0,
+              transfer_zig: 0,
+              transfer_rand: 0,
+              card_usd: 0,
+              card_zig: 0,
+              card_rand: 0,
             },
             drawers: []
           };
@@ -417,44 +438,78 @@ const OwnerDashboardScreen = () => {
           return;
         }
 
-        // Use the backend-calculated values directly - no frontend recalculation needed
-        // The backend now calculates everything correctly from the Sale table
-        if (shop_status) {
-          // Backend already provides all the currency breakdowns we need
-          // Just ensure the values are properly formatted as numbers
-          const cashFlow = shop_status.cash_flow || {};
+        // Calculate totals from individual drawers for expected amounts
+        const drawers = response.data.drawers || [];
+        let expectedUsd = 0, expectedZig = 0, expectedRand = 0;
 
-          // Ensure all currency values are numbers
-          shop_status.cash_flow = {
-            ...cashFlow,
-            current_usd: Number(cashFlow.current_usd || 0),
-            current_zig: Number(cashFlow.current_zig || 0),
-            current_rand: Number(cashFlow.current_rand || 0),
-            expected_usd: Number(cashFlow.expected_usd || 0),
-            expected_zig: Number(cashFlow.expected_zig || 0),
-            expected_rand: Number(cashFlow.expected_rand || 0),
-            transfer_usd: Number(cashFlow.transfer_usd || 0),
-            transfer_zig: Number(cashFlow.transfer_zig || 0),
-            transfer_rand: Number(cashFlow.transfer_rand || 0),
-            card_usd: Number(cashFlow.card_usd || 0),
-            card_zig: Number(cashFlow.card_zig || 0),
-            card_rand: Number(cashFlow.card_rand || 0),
-            usd_variance: Number(cashFlow.usd_variance || 0),
-            zig_variance: Number(cashFlow.zig_variance || 0),
-            rand_variance: Number(cashFlow.rand_variance || 0),
-          };
+        drawers.forEach(d => {
+          expectedUsd += d.expected_vs_actual?.usd?.expected || 0;
+          expectedZig += d.expected_vs_actual?.zig?.expected || 0;
+          expectedRand += d.expected_vs_actual?.rand?.expected || 0;
+        });
 
-          console.log('💰 Using backend-calculated currency breakdown:', shop_status.cash_flow);
-        }
+        // Use the financial_neural_grid for actual amounts (already calculated correctly)
+        const shop_status = {
+          shop: response.data.shop_name || shopData?.name || '',
+          total_drawers: response.data.total_cashiers || drawers.length,
+          active_drawers: drawers.filter(d => d.drawer_status === 'ACTIVE').length,
+          cash_flow: {
+            // Expected amounts from sum of drawer expectations
+            expected_usd: expectedUsd,
+            expected_zig: expectedZig,
+            expected_rand: expectedRand,
+            total_expected_cash: expectedUsd + expectedZig + expectedRand,
 
+            // Current amounts from financial_neural_grid (already calculated)
+            current_usd: financialGrid.usd?.total || 0,
+            current_zig: financialGrid.zig?.total || 0,
+            current_rand: financialGrid.rand?.total || 0,
+            total_current_cash: (financialGrid.usd?.total || 0) + (financialGrid.zig?.total || 0) + (financialGrid.rand?.total || 0),
+
+            // Cash breakdown from financial_neural_grid (already calculated correctly)
+            cash_usd: financialGrid.usd?.cash || 0,
+            cash_zig: financialGrid.zig?.cash || 0,
+            cash_rand: financialGrid.rand?.cash || 0,
+
+            // Transfer breakdown
+            transfer_usd: financialGrid.usd?.transfer || 0,
+            transfer_zig: financialGrid.zig?.transfer || 0,
+            transfer_rand: financialGrid.rand?.transfer || 0,
+
+            // Card breakdown
+            card_usd: financialGrid.usd?.card || 0,
+            card_zig: financialGrid.zig?.card || 0,
+            card_rand: financialGrid.rand?.card || 0,
+
+            // Variance calculations
+            usd_variance: (financialGrid.usd?.total || 0) - expectedUsd,
+            zig_variance: (financialGrid.zig?.total || 0) - expectedZig,
+            rand_variance: (financialGrid.rand?.total || 0) - expectedRand,
+          },
+          drawers: drawers,
+          financial_neural_grid: financialGrid
+        };
+
+        console.log('💰 Using financial_neural_grid data:', financialGrid);
         setDrawerStatus(shop_status);
+      } else {
+        // Not from getCashierDrawers API, handle differently
+        const shop_status = response.data.shop_status;
+        if (shop_status) {
+          setDrawerStatus(shop_status);
+        } else {
+          console.warn('⚠️ No shop_status in response:', response.data);
+          setDrawerStatus(null);
+        }
       }
-    } catch (error) {
-      console.error('Failed to load drawer status:', error);
-    } finally {
-      setDrawerLoading(false);
     }
-  };
+  } catch (error) {
+    console.error('Failed to load drawer status:', error);
+    setDrawerStatus(null);
+  } finally {
+    setDrawerLoading(false);
+  }
+};
 
   const loadSalesData = async () => {
     try {
@@ -1621,14 +1676,14 @@ const OwnerDashboardScreen = () => {
               </Text>
             </View>
             
-            {/* CASH Section - Shows actual cash in drawer (total minus transfers and cards) */}
+            {/* CASH Section - Shows actual cash in drawer from financial_neural_grid */}
             <View style={styles.cashSection}>
               <View style={styles.cashHeaderRow}>
                 <Icon name="payments" size={20} color="#00ff88" />
                 <Text style={styles.cashTitle}>CASH</Text>
               </View>
-              
-              {/* USD Cash Row - Actual cash = current holding - transfers - cards */}
+
+              {/* USD Cash Row - Direct from API */}
               <View style={styles.cashRow}>
                 <View style={styles.cashCurrencyBadge}>
                   <Text style={styles.cashCurrencyText}>USD</Text>
@@ -1638,10 +1693,10 @@ const OwnerDashboardScreen = () => {
                   styles.cashValue,
                   { color: '#00f5ff' }
                 ]}>
-                  ${((drawerStatus.cash_flow?.current_usd || 0) - (drawerStatus.cash_flow?.transfer_usd || 0) - (drawerStatus.cash_flow?.card_usd || 0)).toLocaleString()}
+                  ${(drawerStatus.cash_flow?.cash_usd || drawerStatus.financial_neural_grid?.usd?.cash || 0).toLocaleString()}
                 </Text>
               </View>
-              
+
               {/* ZIG Cash Row */}
               <View style={styles.cashRow}>
                 <View style={[styles.cashCurrencyBadge, { borderColor: '#ffffff' }]}>
@@ -1652,10 +1707,10 @@ const OwnerDashboardScreen = () => {
                   styles.cashValue,
                   { color: '#ffffff' }
                 ]}>
-                  ZW${((drawerStatus.cash_flow?.current_zig || 0) - (drawerStatus.cash_flow?.transfer_zig || 0) - (drawerStatus.cash_flow?.card_zig || 0)).toLocaleString()}
+                  ZW${(drawerStatus.cash_flow?.cash_zig || drawerStatus.financial_neural_grid?.zig?.cash || 0).toLocaleString()}
                 </Text>
               </View>
-              
+
               {/* Rand Cash Row */}
               <View style={styles.cashRow}>
                 <View style={[styles.cashCurrencyBadge, { borderColor: '#ffaa00' }]}>
@@ -1666,18 +1721,18 @@ const OwnerDashboardScreen = () => {
                   styles.cashValue,
                   { color: '#ffaa00' }
                 ]}>
-                  R{((drawerStatus.cash_flow?.current_rand || 0) - (drawerStatus.cash_flow?.transfer_rand || 0) - (drawerStatus.cash_flow?.card_rand || 0)).toLocaleString()}
+                  R{(drawerStatus.cash_flow?.cash_rand || drawerStatus.financial_neural_grid?.rand?.cash || 0).toLocaleString()}
                 </Text>
               </View>
-              
+
               {/* Total Cash Value */}
               <View style={styles.totalCashRow}>
                 <Text style={styles.totalCashLabel}>TOTAL CASH</Text>
                 <Text style={styles.totalCashValue}>
                   ${(
-                    ((drawerStatus.cash_flow?.current_usd || 0) - (drawerStatus.cash_flow?.transfer_usd || 0) - (drawerStatus.cash_flow?.card_usd || 0)) +
-                    ((drawerStatus.cash_flow?.current_zig || 0) - (drawerStatus.cash_flow?.transfer_zig || 0) - (drawerStatus.cash_flow?.card_zig || 0)) +
-                    ((drawerStatus.cash_flow?.current_rand || 0) - (drawerStatus.cash_flow?.transfer_rand || 0) - (drawerStatus.cash_flow?.card_rand || 0))
+                    (drawerStatus.cash_flow?.cash_usd || drawerStatus.financial_neural_grid?.usd?.cash || 0) +
+                    (drawerStatus.cash_flow?.cash_zig || drawerStatus.financial_neural_grid?.zig?.cash || 0) +
+                    (drawerStatus.cash_flow?.cash_rand || drawerStatus.financial_neural_grid?.rand?.cash || 0)
                   ).toLocaleString()}
                 </Text>
               </View>
@@ -1799,43 +1854,44 @@ const OwnerDashboardScreen = () => {
               </View>
             </View>
             
-            {/* Variance Matrix - Calculate based on actual cash in drawer (current - transfers - cards) vs expected */}
+            {/* Variance Matrix - Only show CASH (float) variance */}
             {(() => {
-              const expectedAfterLunch = (drawerStatus.cash_flow?.total_expected_cash || 0) - staffLunchMetrics.totalValue;
-              
-              // Get individual currency values
-              const currentUsd = drawerStatus.cash_flow?.current_usd || 0;
-              const currentZig = drawerStatus.cash_flow?.current_zig || 0;
-              const currentRand = drawerStatus.cash_flow?.current_rand || 0;
-              
-              const transferUsd = drawerStatus.cash_flow?.transfer_usd || 0;
-              const transferZig = drawerStatus.cash_flow?.transfer_zig || 0;
-              const transferRand = drawerStatus.cash_flow?.transfer_rand || 0;
-              
-              const cardUsd = drawerStatus.cash_flow?.card_usd || 0;
-              const cardZig = drawerStatus.cash_flow?.card_zig || 0;
-              const cardRand = drawerStatus.cash_flow?.card_rand || 0;
-              
+              // Use the financial_neural_grid directly for accurate calculations
+              const fng = drawerStatus.financial_neural_grid || {};
+
+              // Get expected amounts (sum of drawer expectations)
               const expectedUsd = drawerStatus.cash_flow?.expected_usd || 0;
               const expectedZig = drawerStatus.cash_flow?.expected_zig || 0;
               const expectedRand = drawerStatus.cash_flow?.expected_rand || 0;
-              
-              // Calculate actual cash in drawer per currency
-              const actualCashUsd = currentUsd - transferUsd - cardUsd;
-              const actualCashZig = currentZig - transferZig - cardZig;
-              const actualCashRand = currentRand - transferRand - cardRand;
-              
-              // Calculate variance per currency (actual cash - expected)
-              const varianceUsd = actualCashUsd - expectedUsd;
-              const varianceZig = actualCashZig - expectedZig;
-              const varianceRand = actualCashRand - expectedRand;
-              
-              // Total variance
+
+              // Get CASH amounts only (this is the actual float in drawer)
+              const cashUsd = fng.usd?.cash || 0;
+              const cashZig = fng.zig?.cash || 0;
+              const cashRand = fng.rand?.cash || 0;
+
+              // Get transfer amounts (for display only)
+              const transferUsd = fng.usd?.transfer || 0;
+              const transferZig = fng.zig?.transfer || 0;
+              const transferRand = fng.rand?.transfer || 0;
+
+              // Get card amounts (for display only)
+              const cardUsd = fng.usd?.card || 0;
+              const cardZig = fng.zig?.card || 0;
+              const cardRand = fng.rand?.card || 0;
+
+              // Calculate variance per currency (CASH ONLY - actual cash vs expected)
+              // This shows the true float surplus/shortage
+              const varianceUsd = cashUsd - expectedUsd;
+              const varianceZig = cashZig - expectedZig;
+              const varianceRand = cashRand - expectedRand;
+
+              // Total variance (CASH ONLY - the float variance)
               const totalVariance = varianceUsd + varianceZig + varianceRand;
-              
+
               const totalTransfers = transferUsd + transferZig + transferRand;
               const totalCardPayments = cardUsd + cardZig + cardRand;
-              
+              const totalCash = cashUsd + cashZig + cashRand;
+
               const isSurplus = totalVariance >= 0;
               return (
                 <View style={styles.totalVarianceCard}>
@@ -1847,24 +1903,27 @@ const OwnerDashboardScreen = () => {
                     styles.totalVarianceAmount,
                     { color: isSurplus ? '#00ff88' : '#ff4444' }
                   ]}>
-                    {isSurplus ? 'SURPLUS DETECTED' : 'SHORTAGE DETECTED'}
+                    {isSurplus ? 'FLOAT SURPLUS' : 'FLOAT SHORTAGE'}
                   </Text>
                   <Text style={styles.totalVarianceValue}>
                     ${Math.abs(totalVariance).toLocaleString()}
                   </Text>
+                  <Text style={{ fontSize: 10, color: '#00ff88', marginTop: 4, textAlign: 'center' }}>
+                    (Cash only: ${totalCash.toFixed(2)})
+                  </Text>
                   {staffLunchMetrics.totalValue > 0 && (
-                    <Text style={{ fontSize: 10, color: '#ffaa00', marginTop: 8, textAlign: 'center' }}>
+                    <Text style={{ fontSize: 10, color: '#ffaa00', marginTop: 4, textAlign: 'center' }}>
                       (After ${staffLunchMetrics.totalValue.toFixed(2)} lunch deductions)
                     </Text>
                   )}
                   {totalTransfers > 0 && (
                     <Text style={{ fontSize: 10, color: '#00f5ff', marginTop: 4, textAlign: 'center' }}>
-                      (Excludes ${totalTransfers.toFixed(2)} in transfers)
+                      (Transfers: ${totalTransfers.toFixed(2)} not included)
                     </Text>
                   )}
                   {totalCardPayments > 0 && (
                     <Text style={{ fontSize: 10, color: '#ff0080', marginTop: 4, textAlign: 'center' }}>
-                      (Excludes ${totalCardPayments.toFixed(2)} in card payments)
+                      (Card payments: ${totalCardPayments.toFixed(2)} not included)
                     </Text>
                   )}
                 </View>

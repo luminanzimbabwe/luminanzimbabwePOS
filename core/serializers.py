@@ -155,7 +155,7 @@ class SaleSerializer(serializers.ModelSerializer):
 class SalePaymentSerializer(serializers.ModelSerializer):
     class Meta:
         model = SalePayment
-        fields = ['payment_method', 'currency', 'amount']
+        fields = ['payment_method', 'currency', 'amount', 'amount_received']
         read_only_fields = ['id', 'sale', 'exchange_rate_to_usd', 'amount_usd_equivalent', 'is_change_given', 'change_amount', 'created_at']
 
 class CreateSaleSerializer(serializers.Serializer):
@@ -179,6 +179,8 @@ class CreateSaleSerializer(serializers.Serializer):
     )
     # Legacy total amount (for backward compatibility)
     total_amount = serializers.DecimalField(max_digits=15, decimal_places=2, required=False)
+    # Amount received from customer (for change calculation)
+    amount_received = serializers.DecimalField(max_digits=15, decimal_places=2, required=False, allow_null=True)
 
     # SPLIT PAYMENT SUPPORT: List of payments for multi-currency payments
     # Example: [{'payment_method': 'cash', 'currency': 'USD', 'amount': 5.00}, {'payment_method': 'cash', 'currency': 'ZIG', 'amount': 1000.00}]

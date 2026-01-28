@@ -229,7 +229,7 @@ export const shopAPI = {
   updateWasteBatch: (batchId, data, config = {}) => api.patch(`/waste-batches/${batchId}/`, data, config),
 
   // Shop Day Management methods
-  getShopStatus: () => api.get('/shop-status/'),
+  getShopStatus: () => api.get('/status/'),
   startDay: (data) => api.post('/start-day/', data),
   endDay: (data) => api.post('/end-day/', data),
 
@@ -351,6 +351,9 @@ export const shopAPI = {
   // Business Settings methods - for managing business hours, timezone, and VAT
   getBusinessSettings: (config = {}) => api.get('/business-settings/', config),
   updateBusinessSettings: (data, config = {}) => api.patch('/business-settings/', data, config),
+
+  // Drawer Management methods
+  getCashierDrawers: () => api.get('/cashier-drawers/'),
 
   // System Health Monitoring methods
   getSystemHealth: () => api.get('/health/'),

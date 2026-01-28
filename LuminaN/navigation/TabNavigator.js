@@ -2,7 +2,7 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaView, Platform, View, TouchableOpacity, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { Home, Users, Package, BarChart3, Settings, Truck, ClipboardCheck, Trash2, Calculator, List } from 'lucide-react-native';
+import { Home, Users, Package, BarChart3, Settings, Truck, ClipboardCheck, Trash2, Calculator, List, Wallet } from 'lucide-react-native';
 
 // Import main screens for tabs
 import OwnerDashboardScreen from '../screens/OwnerDashboardScreen';
@@ -12,6 +12,7 @@ import WasteScreen from '../screens/WasteScreen';
 import InventoryReceivingScreen from '../screens/InventoryReceivingScreen';
 import OrderConfirmationScreen from '../screens/OrderConfirmationScreen';
 import InventoryAuditTrailScreen from '../screens/InventoryAuditTrailScreen';
+import DrawerManagementScreen from '../screens/DrawerManagementScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import EODReconciliationScreen from '../screens/EODReconciliationScreen';
 import SalesLedgerScreen from '../screens/SalesLedgerScreen';
@@ -71,6 +72,8 @@ const CustomTabBar = ({ state, descriptors, navigation }) => {
             IconComponent = Truck;
           } else if (route.name === 'Confirmations') {
             IconComponent = ClipboardCheck;
+          } else if (route.name === 'Drawers') {
+            IconComponent = Wallet;
           } else if (route.name === 'Reports') {
             IconComponent = BarChart3;
           } else if (route.name === 'Settings') {
@@ -202,8 +205,18 @@ const TabNavigator = () => {
         }}
       />
 
-      <Tab.Screen 
-        name="Reports" 
+      <Tab.Screen
+        name="Drawers"
+        component={DrawerManagementScreen}
+        options={{
+          title: 'Drawers',
+          headerTitle: 'Drawer Management',
+          tabBarLabel: 'Drawers',
+        }}
+      />
+
+      <Tab.Screen
+        name="Reports"
         component={InventoryAuditTrailScreen}
         options={{
           title: 'Reports',

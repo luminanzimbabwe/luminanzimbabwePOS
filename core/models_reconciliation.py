@@ -183,8 +183,12 @@ class CashierCount(models.Model):
     def update_from_cash_float(self, cash_float):
         """Update expected amounts from CashFloat record"""
         self.expected_cash = cash_float.expected_cash_at_eod
-        # For card and ecocash, we could get from cash_float.session_card_sales, etc.
-        # For now, leaving as 0 since the original system doesn't track these in CashFloat
+        # Update expected card from session card sales
+        self.expected_card = cash_float.session_card_sales
+        # Update expected ecocash from session ecocash sales
+        self.expected_ecocash = cash_float.session_ecocash_sales
+        # Also update multi-currency cash expectations
+        self.expected_cash_usd = cash_float.expected_cash_usd
         self.save()
         return self
 
@@ -285,13 +289,25 @@ class ReconciliationSession(models.Model):
         """Calculate overall session summary from cashier counts (multi-currency)"""
         counts = CashierCount.objects.filter(shop=self.shop, date=self.date)
         
+        # Cash totals
         self.total_expected_cash = sum(count.expected_cash for count in counts)
         self.total_expected_cash_usd = sum(count.expected_cash_usd for count in counts)
         self.total_expected_cash_rand = sum(count.expected_cash_rand for count in counts)
         self.total_counted_cash = sum(count.total_cash for count in counts)
         self.total_counted_cash_usd = sum(count.total_cash for count in counts)  # Note: total_cash is ZIG only currently
         self.total_counted_cash_rand = sum(count.total_cash for count in counts)
-        self.total_variance = self.total_counted_cash - self.total_expected_cash
+        
+        # Card and Ecocash totals
+        total_expected_card = sum(count.expected_card for count in counts)
+        total_expected_ecocash = sum(count.expected_ecocash for count in counts)
+        total_counted_card = sum(count.total_card for count in counts)
+        total_counted_ecocash = sum(count.total_ecocash for count in counts)
+        
+        # Total variance includes cash, card, and ecocash
+        total_variance_cash = self.total_counted_cash - self.total_expected_cash
+        total_variance_card = Decimal(str(total_counted_card)) - Decimal(str(total_expected_card))
+        total_variance_ecocash = Decimal(str(total_counted_ecocash)) - Decimal(str(total_expected_ecocash))
+        self.total_variance = total_variance_cash + total_variance_card + total_variance_ecocash
         
         self.save()
         return self
@@ -299,6 +315,16 @@ class ReconciliationSession(models.Model):
     def get_session_summary(self):
         """Get comprehensive session summary (multi-currency)"""
         counts = CashierCount.objects.filter(shop=self.shop, date=self.date)
+        
+        # Calculate card and ecocash totals
+        total_expected_card = sum(count.expected_card for count in counts)
+        total_expected_ecocash = sum(count.expected_ecocash for count in counts)
+        total_counted_card = sum(count.total_card for count in counts)
+        total_counted_ecocash = sum(count.total_ecocash for count in counts)
+        
+        # Calculate variances
+        variance_card = float(total_counted_card) - float(total_expected_card)
+        variance_ecocash = float(total_counted_ecocash) - float(total_expected_ecocash)
         
         return {
             'session_info': {
@@ -316,6 +342,14 @@ class ReconciliationSession(models.Model):
                 'total_counted_cash_rand': float(self.total_counted_cash_rand),
                 'total_variance': float(self.total_variance),
                 'variance_percentage': (float(self.total_variance) / float(self.total_expected_cash) * 100) if self.total_expected_cash > 0 else 0,
+                # Card payment tracking
+                'total_expected_card': total_expected_card,
+                'total_counted_card': total_counted_card,
+                'variance_card': variance_card,
+                # Ecocash payment tracking
+                'total_expected_ecocash': total_expected_ecocash,
+                'total_counted_ecocash': total_counted_ecocash,
+                'variance_ecocash': variance_ecocash,
             },
             'cashier_counts': [count.get_count_summary() for count in counts],
             'cashier_progress': {

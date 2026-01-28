@@ -40,6 +40,7 @@ urlpatterns = [
     path('waste-batches/<int:batch_id>/', WasteBatchDetailView.as_view(), name='waste-batch-detail'),
     
     path('status/', views.ShopStatusView.as_view(), name='shop-status'),
+    path('cashier-drawers/', views.CashierDrawersView.as_view(), name='cashier-drawers'),
     path('register/', views.ShopRegisterView.as_view(), name='shop-register'),
     path('update/', views.ShopUpdateView.as_view(), name='shop-update'),
     path('dashboard/', views.OwnerDashboardView.as_view(), name='owner-dashboard'),

@@ -82,7 +82,7 @@ class ExchangeRate(models.Model):
         except cls.DoesNotExist:
             # Return default rates if none exist
             return cls.objects.create(
-                date=timezone.now.date(),
+                date=timezone.now().date(),
                 usd_to_zig=1.000000,
                 usd_to_rand=18.500000,
                 updated_by='system'

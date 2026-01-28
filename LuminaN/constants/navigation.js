@@ -48,6 +48,7 @@ export const ROUTES = {
   DEMAND_FORECASTING: 'DemandForecasting',
   STAFF_LUNCH: 'StaffLunch',
   EXCHANGE_RATE_MANAGEMENT: 'ExchangeRateManagement',
+  DRAWER_MANAGEMENT: 'DrawerManagement',
 };
 
 // Screen titles
@@ -99,4 +100,5 @@ export const SCREEN_TITLES = {
   [ROUTES.DEMAND_FORECASTING]: 'Demand Forecasting',
   [ROUTES.STAFF_LUNCH]: 'Staff Lunch',
   [ROUTES.EXCHANGE_RATE_MANAGEMENT]: 'Exchange Rate Management',
+  [ROUTES.DRAWER_MANAGEMENT]: 'Drawer Management',
 };

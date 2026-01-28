@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
-import { shopAPI, getApiBaseUrl } from '../services/api';
+import { shopAPI, apiService, getApiBaseUrl } from '../services/api';
 import { shopStorage } from '../services/storage';
 import presenceService from '../services/presenceService';
 
@@ -50,6 +50,7 @@ const EODProductionScreen = () => {
     cash_zig: '',
     cash_usd: '',
     cash_rand: '',
+    card: '',
     notes: ''
   });
 
@@ -174,13 +175,22 @@ const EODProductionScreen = () => {
     try {
       // Add timestamp to prevent caching
       const timestamp = forceRefresh ? `?t=${Date.now()}` : '';
-      const [recon, drawers] = await Promise.all([
-        shopAPI.getEnhancedReconciliation(timestamp),
-        // Use session-aware endpoint - returns only current session sales (resets when shop is closed)
-        shopAPI.getAllDrawersSession(timestamp)
-      ]);
-      setReconciliationData(recon.data);
-      setDrawerStatus(drawers.data.shop_status || drawers.data);
+      
+      // Fetch reconciliation data
+      const reconResponse = await shopAPI.getEnhancedReconciliation(timestamp);
+      setReconciliationData(reconResponse.data);
+      
+      // Fetch drawer data - Use the exact same API call as DrawerManagementScreen
+      // This ensures we get the "Financial Neural Grid" data correctly
+      const drawersResponse = await shopAPI.getCashierDrawers();
+      
+      if (drawersResponse.data && drawersResponse.data.success) {
+        console.log('✅ EOD: Loaded drawer data successfully');
+        setDrawerStatus(drawersResponse.data);
+      } else {
+        console.warn('⚠️ EOD: Failed to load drawer data, using fallback');
+        // Fallback to empty structure if needed
+      }
 
       // Load sales data for display
       await loadSalesData();
@@ -230,9 +240,10 @@ const EODProductionScreen = () => {
       console.log('📅 Today:', today);
       
       // First, save all cashier counts to the database
-      const savePromises = Object.entries(cashierCounts).map(([cashierId, count]) => {
+      // Use cashier names (which is what we use as keys in cashierCounts)
+      const savePromises = Object.entries(cashierCounts).map(([cashierName, count]) => {
         return shopAPI.saveCashierCount({
-          cashier_id: cashierId,
+          cashier_id: cashierName,  // API accepts both name and ID
           date: today,
           expected_cash: count.cash_zig || 0,
           expected_cash_usd: count.cash_usd || 0,
@@ -357,36 +368,63 @@ const EODProductionScreen = () => {
   };
 
   // Calculate per-cashier variance - shows if cashier has short or over
-  // Now accounts for staff lunch deductions and transfer money
+  // Using the same logic as DrawerManagementScreen - uses expected_vs_actual from API
   const getCashierVariance = (drawer, verifiedCount) => {
-    if (!drawer?.eod_expectations) return { variance: 0, status: 'pending', expected: 0, actual: 0 };
+    // Use expected_vs_actual from API (same as DrawerManagementScreen)
+    const eva = drawer?.expected_vs_actual;
+    if (!eva) return {
+      variance: 0,
+      status: 'pending',
+      expected: 0,
+      actual: 0,
+      varianceType: 'pending',
+      breakdown: {
+        zig: { expected: 0, actual: 0 },
+        usd: { expected: 0, actual: 0 },
+        rand: { expected: 0, actual: 0 },
+        card: { expected: 0, actual: 0 },
+        transfers: {
+          expected: 0,
+          actual: 0,
+          usd: { expected: 0, actual: 0 },
+          zig: { expected: 0, actual: 0 },
+          rand: { expected: 0, actual: 0 }
+        }
+      },
+      staffLunchDeduction: 0,
+      totalTransfer: 0
+    };
     
-    // Get expected amounts from drawer expectations
-    const expectedZig = drawer.eod_expectations.expected_zig || 0;
-    const expectedUsd = drawer.eod_expectations.expected_cash || 0;
-    const expectedRand = drawer.eod_expectations.expected_rand || 0;
+    // Get expected amounts from expected_vs_actual (same structure as DrawerManagementScreen)
+    const expectedUsd = eva.usd?.expected || 0;
+    const expectedZig = eva.zig?.expected || 0;
+    const expectedRand = eva.rand?.expected || 0;
     
-    // Get expected card from breakdown (per currency)
-    const expectedCardUsd = drawer.current_breakdown_by_currency?.usd?.card || 0;
-    const expectedCardZig = drawer.current_breakdown_by_currency?.zig?.card || 0;
-    const expectedCardRand = drawer.current_breakdown_by_currency?.rand?.card || 0;
+    // Get actual amounts from expected_vs_actual
+    const actualUsdFromDrawer = eva.usd?.actual || 0;
+    const actualZigFromDrawer = eva.zig?.actual || 0;
+    const actualRandFromDrawer = eva.rand?.actual || 0;
+    
+    // Get card amounts from current_card
+    const expectedCardUsd = drawer.current_card?.usd || 0;
+    const expectedCardZig = drawer.current_card?.zig || 0;
+    const expectedCardRand = drawer.current_card?.rand || 0;
     const expectedCard = expectedCardUsd + expectedCardZig + expectedCardRand;
     
-    // Get transfer amounts from current_breakdown_by_currency
-    const transferUsd = drawer.current_breakdown_by_currency?.usd?.transfer || 0;
-    const transferZig = drawer.current_breakdown_by_currency?.zig?.transfer || 0;
-    const transferRand = drawer.current_breakdown_by_currency?.rand?.transfer || 0;
+    // Get transfer amounts from current_transfer
+    const transferUsd = drawer.current_transfer?.usd || 0;
+    const transferZig = drawer.current_transfer?.zig || 0;
+    const transferRand = drawer.current_transfer?.rand || 0;
     const totalTransfer = transferUsd + transferZig + transferRand;
     
-    // Total expected for this cashier (cash only, NOT card or transfers - those are tracked separately)
-    const totalExpectedBeforeLunch = expectedZig + expectedUsd + expectedRand;
+    // Total expected for this cashier (cash only, NOT card or transfers)
+    const totalExpectedBeforeLunch = expectedUsd + expectedZig + expectedRand;
     
     // Subtract staff lunch deductions from expected amount
-    // Staff lunches reduce the cash that should be in the drawer
     const staffLunchDeduction = staffLunchMetrics.totalValue || 0;
     const totalExpected = totalExpectedBeforeLunch - staffLunchDeduction;
     
-    // Get verified/counted amounts
+    // Get verified/counted amounts (user input)
     const verified = verifiedCount || {};
     const actualZig = verified.cash_zig || 0;
     const actualUsd = verified.cash_usd || 0;
@@ -397,17 +435,19 @@ const EODProductionScreen = () => {
     const actualTransferRand = verified.transfer_rand || 0;
     const actualTransferTotal = actualTransferUsd + actualTransferZig + actualTransferRand;
     
-    // Total actual for this cashier (excluding transfers for variance calculation)
-    const totalActual = actualZig + actualUsd + actualRand + actualCard;
+    // Total actual for this cashier (use verified amounts if available, otherwise from drawer)
+    const hasVerifiedAmounts = actualZig > 0 || actualUsd > 0 || actualRand > 0;
+    const totalActual = hasVerifiedAmounts
+      ? (actualZig + actualUsd + actualRand + actualCard)
+      : (actualZigFromDrawer + actualUsdFromDrawer + actualRandFromDrawer);
     
-    // Calculate variance for this cashier (cash only - transfers excluded as they're tracked separately)
-    // Variance = Actual Cash - Expected Cash (after lunch deductions)
+    // Calculate variance for this cashier
     const variance = totalActual - totalExpected;
     
     // Determine status
     let status = 'pending';
     let varianceType = 'pending';
-    if (verifiedCount && Object.keys(verifiedCount).length > 0) {
+    if (verifiedCount && Object.keys(verifiedCount).length > 0 && hasVerifiedAmounts) {
       if (variance === 0) {
         status = 'perfect';
         varianceType = 'perfect';
@@ -420,16 +460,16 @@ const EODProductionScreen = () => {
       }
     }
     
-    return { 
-      expected: totalExpected, 
-      actual: totalActual, 
-      variance, 
+    return {
+      expected: totalExpected,
+      actual: totalActual,
+      variance,
       status,
       varianceType,
       breakdown: {
-        zig: { expected: expectedZig, actual: actualZig },
-        usd: { expected: expectedUsd, actual: actualUsd },
-        rand: { expected: expectedRand, actual: actualRand },
+        zig: { expected: expectedZig, actual: hasVerifiedAmounts ? actualZig : actualZigFromDrawer },
+        usd: { expected: expectedUsd, actual: hasVerifiedAmounts ? actualUsd : actualUsdFromDrawer },
+        rand: { expected: expectedRand, actual: hasVerifiedAmounts ? actualRand : actualRandFromDrawer },
         card: { expected: expectedCard, actual: actualCard },
         transfers: {
           expected: totalTransfer,
@@ -439,12 +479,13 @@ const EODProductionScreen = () => {
           rand: { expected: transferRand, actual: actualTransferRand }
         }
       },
-      staffLunchDeduction, // Include for display purposes
-      totalTransfer // Include expected transfers for display
+      staffLunchDeduction,
+      totalTransfer
     };
   };
 
   // Calculate expected amounts from current drawer data
+  // Using same logic as DrawerManagementScreen - uses expected_vs_actual
   const stats = useMemo(() => {
     let cash_zig = 0;
     let cash_usd = 0;
@@ -466,68 +507,59 @@ const EODProductionScreen = () => {
       card_rand: 0,
       total: 0
     };
-    
+
     let transferTotal = 0;
     let transfer_usd = 0;
     let transfer_zig = 0;
     let transfer_rand = 0;
 
+    // Use drawerStatus if available (same API as DrawerManagementScreen)
     if (drawerStatus?.drawers && drawerStatus.drawers.length > 0) {
-      // Sum up all drawer expected amounts using expected_cash which includes float + sales
+      // Sum up all drawer expected amounts using expected_vs_actual
       drawerStatus.drawers.forEach(drawer => {
-        if (drawer.eod_expectations) {
-          expected.cash_usd += drawer.eod_expectations.expected_cash || 0;
-          expected.cash_zig += drawer.eod_expectations.expected_zig || 0;
-          expected.cash_rand += drawer.eod_expectations.expected_rand || 0;
+        if (drawer.expected_vs_actual) {
+          expected.cash_usd += drawer.expected_vs_actual.usd?.expected || 0;
+          expected.cash_zig += drawer.expected_vs_actual.zig?.expected || 0;
+          expected.cash_rand += drawer.expected_vs_actual.rand?.expected || 0;
         }
-        // Get card from current_breakdown_by_currency
-        const breakdownByCurrency = drawer?.current_breakdown_by_currency || {};
-        expected.card_usd += breakdownByCurrency?.usd?.card || 0;
-        expected.card_zig += breakdownByCurrency?.zig?.card || 0;
-        expected.card_rand += breakdownByCurrency?.rand?.card || 0;
-        
-        // Get transfers from current_breakdown_by_currency
-        transfer_usd += breakdownByCurrency?.usd?.transfer || 0;
-        transfer_zig += breakdownByCurrency?.zig?.transfer || 0;
-        transfer_rand += breakdownByCurrency?.rand?.transfer || 0;
+        // Get card from current_card
+        expected.card_usd += drawer.current_card?.usd || 0;
+        expected.card_zig += drawer.current_card?.zig || 0;
+        expected.card_rand += drawer.current_card?.rand || 0;
+
+        // Get transfers from current_transfer
+        transfer_usd += drawer.current_transfer?.usd || 0;
+        transfer_zig += drawer.current_transfer?.zig || 0;
+        transfer_rand += drawer.current_transfer?.rand || 0;
       });
       transferTotal = transfer_usd + transfer_zig + transfer_rand;
-      // Expected total should only include cash, not card (card is separate from cash in drawer)
+      // Expected total should only include cash
       expected.total = expected.cash_zig + expected.cash_usd + expected.cash_rand;
-    } else {
-      // Check for enhanced multi-currency expected amounts first
-      const enhancedExpected = reconciliationData?.expected_amounts?.by_currency;
-      if (enhancedExpected) {
-        // Use the multi-currency breakdown from enhanced reconciliation
-        expected.cash_zig = enhancedExpected?.zig?.expected_cash || 0;
-        expected.cash_usd = enhancedExpected?.usd?.expected_cash || 0;
-        expected.cash_rand = enhancedExpected?.rand?.expected_cash || 0;
-        // Get card payments by currency
-        expected.card_usd = enhancedExpected?.usd?.expected_card || 0;
-        expected.card_zig = enhancedExpected?.zig?.expected_card || 0;
-        expected.card_rand = enhancedExpected?.rand?.expected_card || 0;
-        // Expected total should only include cash, not card (card is separate from cash in drawer)
-        expected.total = expected.cash_zig + expected.cash_usd + expected.cash_rand;
-      } else {
-        // Fallback to legacy format
-        const legacyExpected = reconciliationData?.expected_amounts || {};
-        expected.cash_zig = legacyExpected.cash_zig || 0;
-        expected.cash_usd = legacyExpected.cash_usd || 0;
-        expected.cash_rand = legacyExpected.cash_rand || 0;
-        expected.card_usd = legacyExpected.card || 0;
-        expected.card_zig = 0;
-        expected.card_rand = 0;
-        expected.total = legacyExpected.total || 0;
-      }
+
+    } else if (reconciliationData?.expected_amounts?.by_currency) {
+      // Fallback to enhanced reconciliation data
+      const enhancedExpected = reconciliationData.expected_amounts.by_currency;
+      expected.cash_zig = enhancedExpected?.zig?.expected_cash || 0;
+      expected.cash_usd = enhancedExpected?.usd?.expected_cash || 0;
+      expected.cash_rand = enhancedExpected?.rand?.expected_cash || 0;
+      expected.card_usd = enhancedExpected?.usd?.expected_card || 0;
+      expected.card_zig = enhancedExpected?.zig?.expected_card || 0;
+      expected.card_rand = enhancedExpected?.rand?.expected_card || 0;
+      
+      transfer_usd = enhancedExpected?.usd?.expected_transfer || 0;
+      transfer_zig = enhancedExpected?.zig?.expected_transfer || 0;
+      transfer_rand = enhancedExpected?.rand?.expected_transfer || 0;
+      transferTotal = transfer_usd + transfer_zig + transfer_rand;
+      
+      expected.total = expected.cash_zig + expected.cash_usd + expected.cash_rand;
     }
 
     const actual = cash_zig + cash_usd + cash_rand;
     const totalExpectedCard = (expected.card_usd || 0) + (expected.card_zig || 0) + (expected.card_rand || 0);
     // Variance = Actual Cash Count - Expected Cash (after lunch deductions)
-    // Transfers are excluded from variance since they're intentional money movements
     const variance = actual - (expected.total - staffLunchMetrics.totalValue);
 
-    return { 
+    return {
       cash_zig, cash_usd, cash_rand, expected, actual, variance,
       verifiedCash: cash_zig + cash_usd + cash_rand,
       expectedAfterLunch: expected.total - staffLunchMetrics.totalValue,
@@ -537,7 +569,7 @@ const EODProductionScreen = () => {
       transfer_rand,
       totalCard: totalExpectedCard
     };
-  }, [cashierCounts, reconciliationData, drawerStatus]);
+  }, [cashierCounts, reconciliationData, drawerStatus, staffLunchMetrics.totalValue]);
 
   const openCashier = cashier => {
     setCurrentCashier(cashier);
@@ -548,31 +580,43 @@ const EODProductionScreen = () => {
             cash_zig: String(existing.cash_zig || ''),
             cash_usd: String(existing.cash_usd || ''),
             cash_rand: String(existing.cash_rand || ''),
+            card: String(existing.card || ''),
             notes: existing.notes || ''
           }
-        : { cash_zig: '', cash_usd: '', cash_rand: '', notes: '' }
+        : { cash_zig: '', cash_usd: '', cash_rand: '', card: '', notes: '' }
     );
     setShowModal(true);
+  };
+
+  // Helper function to get display name for a cashier
+  const getCashierDisplayName = (cashier) => {
+    if (!cashier) return 'Unknown';
+    if (typeof cashier === 'string') return cashier;
+    return cashier.cashier_name || cashier.cashier || 'Unknown';
   };
 
   const saveCashier = async () => {
     const cash_zig = parseFloat(inputs.cash_zig) || 0;
     const cash_usd = parseFloat(inputs.cash_usd) || 0;
     const cash_rand = parseFloat(inputs.cash_rand) || 0;
-    
-    if (cash_zig === 0 && cash_usd === 0 && cash_rand === 0) {
-      Alert.alert('Invalid Cash', 'Enter a valid cash amount in at least one currency');
+    const card = parseFloat(inputs.card) || 0;
+
+    if (cash_zig === 0 && cash_usd === 0 && cash_rand === 0 && card === 0) {
+      Alert.alert('Invalid Entry', 'Enter a valid amount in at least one currency or card');
       return;
     }
 
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
 
+    // Use the cashier name as the key (currentCashier is already the name string)
+    const cashierName = getCashierDisplayName(currentCashier);
     const updatedCounts = {
       ...cashierCounts,
-      [currentCashier]: {
+      [cashierName]: {
         cash_zig,
         cash_usd,
         cash_rand,
+        card,
         notes: inputs.notes,
         timestamp: new Date().toISOString()
       }
@@ -584,46 +628,55 @@ const EODProductionScreen = () => {
     try {
       const today = new Date().toISOString().split('T')[0];
       await shopAPI.saveCashierCount({
-        cashier_id: currentCashier,
+        cashier_id: cashierName,  // API accepts both name and ID
         date: today,
         expected_cash: cash_zig,
         expected_cash_usd: cash_usd,
         expected_cash_rand: cash_rand,
+        expected_card: card,
         notes: inputs.notes,
         status: 'IN_PROGRESS'
       });
     } catch (error) {
       // Don't show error to user for individual saves, just log it
+      console.log('Save cashier count error:', error);
     }
 
     setShowModal(false);
   };
 
   // Filter drawers to only show cashiers who logged in TODAY (have activity/sales)
+  // Using the same logic as DrawerManagementScreen - show all active cashiers with drawers
   const todayDrawers = useMemo(() => {
     if (!drawerStatus?.drawers) return [];
-    const today = new Date().toISOString().split('T')[0];
     
     return drawerStatus.drawers.filter(drawer => {
-      // Check if drawer has expected amounts (means it has activity today)
-      const hasExpectedAmounts = drawer.eod_expectations && (
-        (drawer.eod_expectations.expected_cash || 0) > 0 ||
-        (drawer.eod_expectations.expected_zig || 0) > 0 ||
-        (drawer.eod_expectations.expected_rand || 0) > 0
+      // Check if drawer has expected amounts from expected_vs_actual (means it has activity today)
+      const hasExpectedAmounts = drawer.expected_vs_actual && (
+        (drawer.expected_vs_actual.usd?.expected || 0) > 0 ||
+        (drawer.expected_vs_actual.zig?.expected || 0) > 0 ||
+        (drawer.expected_vs_actual.rand?.expected || 0) > 0
       );
       
       // Check if drawer has current holdings (has cash in drawer)
-      const hasCurrentHoldings = drawer.current_total_cash > 0 || 
-        drawer.current_breakdown_by_currency?.zig?.total > 0 ||
-        drawer.current_breakdown_by_currency?.usd?.total > 0 ||
-        drawer.current_breakdown_by_currency?.rand?.total > 0;
+      const hasCurrentHoldings = drawer.total_by_currency && (
+        (drawer.total_by_currency.usd || 0) > 0 ||
+        (drawer.total_by_currency.zig || 0) > 0 ||
+        (drawer.total_by_currency.rand || 0) > 0
+      );
       
-      return hasExpectedAmounts || hasCurrentHoldings;
+      // Also include drawers that are ACTIVE status
+      const isActive = drawer.drawer_status === 'ACTIVE';
+      
+      return hasExpectedAmounts || hasCurrentHoldings || isActive;
     });
   }, [drawerStatus]);
 
   const totalCashiers = todayDrawers.length || 0;
-  const verifiedCount = Object.keys(cashierCounts).length;
+  // Count verified cashiers that are actually in today's drawers
+  const verifiedCount = Object.keys(cashierCounts).filter(name =>
+    todayDrawers.some(d => (d.cashier_name || d.cashier) === name)
+  ).length;
   const progress = totalCashiers ? verifiedCount / totalCashiers : 0;
 
   const varianceColor =
@@ -861,27 +914,27 @@ const EODProductionScreen = () => {
           
           {/* Shop Status Indicator */}
           <View style={[styles.neuralStatusPanel, {
-            borderColor: drawerStatus?.is_open ? '#00ff88' : '#ff4444',
-            backgroundColor: drawerStatus?.is_open ? 'rgba(0, 255, 136, 0.1)' : 'rgba(255, 68, 68, 0.1)'
+            borderColor: (drawerStatus?.is_open || (drawerStatus?.drawers && drawerStatus.drawers.length > 0)) ? '#00ff88' : '#ff4444',
+            backgroundColor: (drawerStatus?.is_open || (drawerStatus?.drawers && drawerStatus.drawers.length > 0)) ? 'rgba(0, 255, 136, 0.1)' : 'rgba(255, 68, 68, 0.1)'
           }]}>
             <View style={styles.neuralStatusIndicator}>
               <View style={[styles.neuralStatusPulse, {
-                backgroundColor: drawerStatus?.is_open ? '#00ff88' : '#ff4444'
+                backgroundColor: (drawerStatus?.is_open || (drawerStatus?.drawers && drawerStatus.drawers.length > 0)) ? '#00ff88' : '#ff4444'
               }]} />
               <Text style={[styles.neuralStatusText, {
-                color: drawerStatus?.is_open ? '#00ff88' : '#ff4444'
+                color: (drawerStatus?.is_open || (drawerStatus?.drawers && drawerStatus.drawers.length > 0)) ? '#00ff88' : '#ff4444'
               }]}>
-                SHOP STATUS: {drawerStatus?.is_open ? 'OPEN' : 'CLOSED'}
+                SHOP STATUS: {(drawerStatus?.is_open || (drawerStatus?.drawers && drawerStatus.drawers.length > 0)) ? 'OPEN' : 'CLOSED'}
               </Text>
-              <Icon name="schedule" size={16} color={drawerStatus?.is_open ? '#00ff88' : '#ff4444'} />
+              <Icon name="schedule" size={16} color={(drawerStatus?.is_open || (drawerStatus?.drawers && drawerStatus.drawers.length > 0)) ? '#00ff88' : '#ff4444'} />
             </View>
             <Text style={{
-              color: drawerStatus?.is_open ? '#00ff88' : '#ff4444',
+              color: (drawerStatus?.is_open || (drawerStatus?.drawers && drawerStatus.drawers.length > 0)) ? '#00ff88' : '#ff4444',
               fontSize: 12,
               textAlign: 'center',
               marginTop: 8
             }}>
-              {drawerStatus?.is_open
+              {(drawerStatus?.is_open || (drawerStatus?.drawers && drawerStatus.drawers.length > 0))
                 ? '⚠️ End of day reconciliation in progress'
                 : '🔒 Shop is closed - data has been reset'
               }
@@ -1162,13 +1215,14 @@ const EODProductionScreen = () => {
           <View style={styles.neuralCashierList}>
             {todayDrawers.length === 0 ? (
               <View style={styles.neuralEmptyState}>
-                <Icon name="info-outline" size={48} color="#6b7280" />
-                <Text style={styles.neuralEmptyStateText}>No active cashiers for today</Text>
-                <Text style={styles.neuralEmptyStateSubtext}>Cashiers who log in today will appear here</Text>
+                <Text style={styles.neuralEmptyStateText}>No active cashier drawers were returned from the server. Please pull down to refresh.</Text>
               </View>
             ) : (
               todayDrawers.map((d) => {
-                const verified = cashierCounts[d.cashier];
+                // Use cashier_name from API (same as DrawerManagementScreen)
+                const cashierName = d.cashier_name || d.cashier || 'Unknown';
+                const cashierId = d.cashier_id || d.cashier || 'unknown';
+                const verified = cashierCounts[cashierName];
                 const varianceData = getCashierVariance(d, verified);
                 
                 // Status colors based on variance type
@@ -1191,17 +1245,17 @@ const EODProductionScreen = () => {
                 
                 return (
                   <TouchableOpacity
-                    key={d.cashier}
+                    key={cashierId}
                     style={[
                       styles.neuralCashierCard,
                       { borderLeftColor: statusColor }
                     ]}
-                    onPress={() => openCashier(d.cashier)}
+                    onPress={() => openCashier(cashierName)}
                     activeOpacity={0.7}
                   >
                     {/* Cashier Name - BIG AND CLEAR */}
                     <View style={styles.cashierNameRow}>
-                      <Text style={styles.cashierBigName}>{d.cashier}</Text>
+                      <Text style={styles.cashierBigName}>{cashierName}</Text>
                       <View style={[styles.cashierStatusBadge, { backgroundColor: statusColor }]}>
                         <Text style={styles.cashierStatusText}>
                           {varianceData.varianceType === 'pending' ? 'TAP TO COUNT' : 
@@ -1264,7 +1318,25 @@ const EODProductionScreen = () => {
                         </View>
                       </View>
                     )}
-                    
+
+                    {/* Card Payment Display */}
+                    {varianceData.breakdown.card.expected > 0 && (
+                      <View style={[styles.transferDisplayRow, { backgroundColor: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.3)' }]}>
+                        <View style={styles.transferDisplayLabel}>
+                          <Icon name="credit-card" size={16} color="#10b981" />
+                          <Text style={[styles.transferDisplayText, { color: '#10b981' }]}>CARD PAYMENTS</Text>
+                        </View>
+                        <View style={styles.transferDisplayValues}>
+                          <Text style={[styles.transferExpected, { color: '#10b981' }]}>Expected: ${varianceData.breakdown.card.expected.toFixed(2)}</Text>
+                          {verified && verified.card > 0 && (
+                            <Text style={[styles.transferActual, { color: '#00ff88' }]}>
+                              Actual: ${(varianceData.breakdown.card.actual || 0).toFixed(2)}
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                    )}
+
                     {/* Currency breakdown - CASH ONLY */}
                     <View style={styles.currencyRow}>
                       <View style={styles.currencyItem}>
@@ -1286,6 +1358,30 @@ const EODProductionScreen = () => {
                         </Text>
                       </View>
                     </View>
+
+                    {/* Card Currency Breakdown */}
+                    {varianceData.breakdown.card.expected > 0 && (
+                      <View style={[styles.currencyRow, { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(16, 185, 129, 0.2)' }]}>
+                        <View style={styles.currencyItem}>
+                          <Text style={[styles.currencyLabel, { color: '#10b981' }]}>ZW$ CARD</Text>
+                          <Text style={[styles.currencyValue, { color: '#10b981' }]}>
+                            {d.current_card?.zig > 0 ? `ZW$${d.current_card.zig.toLocaleString()}` : '—'}
+                          </Text>
+                        </View>
+                        <View style={styles.currencyItem}>
+                          <Text style={[styles.currencyLabel, { color: '#10b981' }]}>USD CARD</Text>
+                          <Text style={[styles.currencyValue, { color: '#10b981' }]}>
+                            {d.current_card?.usd > 0 ? `$${d.current_card.usd.toFixed(2)}` : '—'}
+                          </Text>
+                        </View>
+                        <View style={styles.currencyItem}>
+                          <Text style={[styles.currencyLabel, { color: '#10b981' }]}>RAND CARD</Text>
+                          <Text style={[styles.currencyValue, { color: '#10b981' }]}>
+                            {d.current_card?.rand > 0 ? `R${d.current_card.rand.toFixed(2)}` : '—'}
+                          </Text>
+                        </View>
+                      </View>
+                    )}
                     
                     {/* Tap Instruction - PROMINENT */}
                     {varianceData.varianceType === 'pending' && (
@@ -1322,6 +1418,11 @@ const EODProductionScreen = () => {
               <View style={styles.neuralSummaryItem}>
                 <Text style={styles.neuralSummaryLabel}>TRANSFERS</Text>
                 <Text style={[styles.neuralSummaryValue, { color: '#00f5ff' }]}>${(stats.transferTotal || 0).toFixed(2)}</Text>
+              </View>
+              <View style={styles.neuralSummaryDivider} />
+              <View style={styles.neuralSummaryItem}>
+                <Text style={styles.neuralSummaryLabel}>CARD</Text>
+                <Text style={[styles.neuralSummaryValue, { color: '#10b981' }]}>${(stats.totalCard || 0).toFixed(2)}</Text>
               </View>
               <View style={styles.neuralSummaryDivider} />
               <View style={styles.neuralSummaryItem}>
@@ -1411,7 +1512,7 @@ const EODProductionScreen = () => {
           </TouchableOpacity>
           <View style={styles.modalTitleContainer}>
             <Icon name="person" size={20} color="#00f5ff" />
-            <Text style={styles.modalTitle}>{currentCashier}</Text>
+            <Text style={styles.modalTitle}>{getCashierDisplayName(currentCashier)}</Text>
           </View>
           <TouchableOpacity onPress={saveCashier} style={styles.modalSaveButton}>
             <Icon name="check" size={24} color="#00ff88" />
@@ -1439,7 +1540,7 @@ const EODProductionScreen = () => {
                   placeholderTextColor="#6b7280"
                 />
               </View>
-              
+
               <View style={styles.modalCurrencyCard}>
                 <Icon name="attach-money" size={28} color="#00f5ff" />
                 <Text style={styles.modalCurrencyLabel}>$ Cash Counted (USD)</Text>
@@ -1452,7 +1553,7 @@ const EODProductionScreen = () => {
                   placeholderTextColor="#6b7280"
                 />
               </View>
-              
+
               <View style={styles.modalCurrencyCard}>
                 <Icon name="attach-money" size={28} color="#ffaa00" />
                 <Text style={styles.modalCurrencyLabel}>R Cash Counted (Rand)</Text>
@@ -1461,6 +1562,19 @@ const EODProductionScreen = () => {
                   keyboardType="decimal-pad"
                   value={inputs.cash_rand}
                   onChangeText={v => setInputs({ ...inputs, cash_rand: v })}
+                  placeholder="0.00"
+                  placeholderTextColor="#6b7280"
+                />
+              </View>
+
+              <View style={[styles.modalCurrencyCard, { borderColor: 'rgba(16, 185, 129, 0.5)' }]}>
+                <Icon name="credit-card" size={28} color="#10b981" />
+                <Text style={[styles.modalCurrencyLabel, { color: '#10b981' }]}>Card Payments</Text>
+                <TextInput
+                  style={[styles.modalAmountInput, { borderColor: 'rgba(16, 185, 129, 0.3)' }]}
+                  keyboardType="decimal-pad"
+                  value={inputs.card}
+                  onChangeText={v => setInputs({ ...inputs, card: v })}
                   placeholder="0.00"
                   placeholderTextColor="#6b7280"
                 />
@@ -2975,4 +3089,3 @@ const styles = StyleSheet.create({
 });
 
 export default EODProductionScreen;
-

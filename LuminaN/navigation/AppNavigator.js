@@ -70,7 +70,7 @@ const AppNavigator = () => {
       try {
         console.log('🔍 Checking shop registration status...');
         const response = await apiService.getShopStatus();
-        
+
         if (response.is_registered) {
           console.log('✅ Shop is registered, showing login screen');
           setInitialRoute(ROUTES.LOGIN);

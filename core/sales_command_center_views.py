@@ -12,7 +12,8 @@ import json
 
 from .models import (
     ShopConfiguration, Cashier, Product, Sale, SaleItem, Customer, 
-    StockTransfer, Waste, WasteBatch, InventoryLog, StockMovement, Shift, ShopDay
+    StockTransfer, Waste, WasteBatch, InventoryLog, StockMovement, Shift, ShopDay,
+    CashFloat
 )
 from .serializers import SaleSerializer, ProductSerializer
 
@@ -734,6 +735,20 @@ class ShopDayManagementView(APIView):
         ).select_related('cashier')
         
         return Response({
+            'is_registered': True,
+            'register_id': shop.register_id,
+            'shop': {
+                'id': shop.id,
+                'name': shop.name,
+                'email': shop.email,
+                'address': shop.address,
+                'phone': shop.phone,
+                'register_id': shop.register_id,
+                'shop_id': shop.shop_id,
+                'business_type': shop.business_type,
+                'industry': shop.industry,
+                'base_currency': shop.base_currency
+            },
             'shop_day': {
                 'date': shop_day.date.isoformat(),
                 'status': shop_day.status,
@@ -860,7 +875,19 @@ class EODReconciliationView(APIView):
         
         # Get only completed sales for revenue calculations
         completed_sales = today_sales.filter(status='completed')
-        
+
+        # CRITICAL FIX: Fetch expected amounts directly from CashFloat (Financial Neural Grid)
+        # This ensures EOD matches Drawer Management exactly and prevents "bullshit" numbers
+        from .models import CashFloat
+        drawers = CashFloat.objects.filter(shop=shop, date=today)
+
+        # Aggregate expected amounts from all drawers
+        cf_expected_usd = sum(d.expected_cash_usd for d in drawers)
+        cf_expected_zig = sum(d.expected_cash_zig for d in drawers)
+        cf_expected_rand = sum(d.expected_cash_rand for d in drawers)
+
+        # Also get session sales from CashFloat to override potentially incorrect sale-based calcs
+
         # Calculate reconciliation data
         reconciliation_data = {
             'date': today.isoformat(),
@@ -1154,12 +1181,86 @@ class EODReconciliationView(APIView):
         # Add multi-currency breakdown to response
         reconciliation_data['sales_by_currency'] = sales_by_currency
         
+        # CRITICAL FIX: Fetch expected amounts directly from CashFloat (Financial Neural Grid)
+        # This ensures EOD matches Drawer Management exactly and prevents "bullshit" numbers
+        # UPDATED: Use exclude(status='SETTLED') to match Drawer Management logic
+        # This handles cases where the session spans across midnight (date change)
+        drawers = CashFloat.objects.filter(shop=shop).exclude(status='SETTLED')
+        
+        if not drawers.exists():
+            drawers = CashFloat.objects.filter(shop=shop, date=today)
+        
+        # Aggregate expected amounts from all drawers
+        cf_expected_usd = sum(d.expected_cash_usd for d in drawers)
+        cf_expected_zig = sum(d.expected_cash_zig for d in drawers)
+        cf_expected_rand = sum(d.expected_cash_rand for d in drawers)
+        
+        # Aggregate sales from drawers (Net sales after refunds/lunch)
+        cf_sales_usd = sum(d.session_cash_sales_usd for d in drawers)
+        cf_sales_zig = sum(d.session_cash_sales_zig for d in drawers)
+        cf_sales_rand = sum(d.session_cash_sales_rand for d in drawers)
+        
+        # Aggregate transfers and cards from CashFloat (Financial Neural Grid)
+        cf_transfer_usd = sum(d.current_transfer_usd for d in drawers)
+        cf_transfer_zig = sum(d.current_transfer_zig for d in drawers)
+        cf_transfer_rand = sum(d.current_transfer_rand for d in drawers)
+        
+        cf_card_usd = sum(d.current_card_usd for d in drawers)
+        cf_card_zig = sum(d.current_card_zig for d in drawers)
+        cf_card_rand = sum(d.current_card_rand for d in drawers)
+        
+        # Aggregate floats
+        cf_float_usd = sum(d.float_amount for d in drawers)
+        
         reconciliation_data['expected_cash'] = {
             'opening_float': sum(float(shift.opening_balance) for shift in today_shifts),
             'cash_sales': float(gross_cash_sales),
             'cash_refunds': float(cash_refunds),
             'expected_total': float(total_cash_expected)
         }
+        
+        # Override with CashFloat data if available to match Drawer Management
+        if drawers.exists():
+            # Update sales_by_currency with CashFloat session data
+            reconciliation_data['sales_by_currency']['usd']['cash_sales'] = float(cf_sales_usd)
+            reconciliation_data['sales_by_currency']['usd']['transfer_sales'] = float(cf_transfer_usd)
+            reconciliation_data['sales_by_currency']['usd']['card_sales'] = float(cf_card_usd)
+            
+            reconciliation_data['sales_by_currency']['zig']['cash_sales'] = float(cf_sales_zig)
+            reconciliation_data['sales_by_currency']['zig']['transfer_sales'] = float(cf_transfer_zig)
+            reconciliation_data['sales_by_currency']['zig']['card_sales'] = float(cf_card_zig)
+            
+            reconciliation_data['sales_by_currency']['rand']['cash_sales'] = float(cf_sales_rand)
+            reconciliation_data['sales_by_currency']['rand']['transfer_sales'] = float(cf_transfer_rand)
+            reconciliation_data['sales_by_currency']['rand']['card_sales'] = float(cf_card_rand)
+            
+            # Update expected cash totals
+            reconciliation_data['expected_cash']['expected_total'] = float(cf_expected_usd)
+            reconciliation_data['expected_cash']['opening_float'] = float(cf_float_usd)
+            reconciliation_data['expected_cash']['cash_sales'] = float(cf_sales_usd)
+            
+            # Add explicit breakdown for frontend
+            reconciliation_data['expected_cash_breakdown'] = {
+                'usd': float(cf_expected_usd),
+                'zig': float(cf_expected_zig),
+                'rand': float(cf_expected_rand)
+            }
+            
+            # CRITICAL: Also update sales_summary and overall_summary to ensure consistency
+            # This fixes the "SALES DATA" section and "EXPECTED CASH" summary
+            reconciliation_data['sales_summary']['cash_sales'] = float(cf_sales_usd)
+            reconciliation_data['sales_summary']['net_cash_sales'] = float(cf_sales_usd)
+            
+            if 'expected_totals' in reconciliation_data['overall_summary']:
+                reconciliation_data['overall_summary']['expected_totals']['cash'] = float(cf_expected_usd)
+            
+            # Update shifts data
+            for shift_data in reconciliation_data['shifts']:
+                cashier_id = shift_data['cashier_id']
+                drawer = next((d for d in drawers if d.cashier_id == cashier_id), None)
+                if drawer:
+                    shift_data['expected_cash'] = float(drawer.expected_cash_usd)
+                    shift_data['cash_difference'] = shift_data['actual_cash'] - float(drawer.expected_cash_usd)
         
         reconciliation_data['discrepancies'] = {
             'overage': 0,  # Will be calculated by frontend based on actual vs expected

@@ -638,7 +638,7 @@ class ShopDay(models.Model):
         This ensures the shop NEVER auto-closes - only the owner can close it.
         """
         from datetime import timedelta
-        today = timezone.now().date()
+        today = timezone.localdate()
         
         # Try to get existing shop day for today
         try:
@@ -673,7 +673,7 @@ class ShopDay(models.Model):
         
         This ensures the shop stays open until explicitly closed by the owner.
         """
-        today = timezone.now().date()
+        today = timezone.localdate()
         
         # First try to get today's shop day
         try:
@@ -691,7 +691,7 @@ class ShopDay(models.Model):
     @classmethod
     def get_open_shop_day(cls, shop):
         """Get the current open shop day for a shop, or None if shop is not open"""
-        today = timezone.now().date()
+        today = timezone.localdate()
         try:
             return cls.objects.get(shop=shop, date=today, status='OPEN')
         except cls.DoesNotExist:
@@ -762,6 +762,7 @@ class Sale(models.Model):
     
     customer_name = models.CharField(max_length=255, blank=True)
     customer_phone = models.CharField(max_length=20, blank=True)
+    amount_received = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Amount actually received from customer (for change calculation)")
     status = models.CharField(max_length=20, default='completed', choices=[
         ('pending', 'Pending Confirmation'),
         ('pending_payment', 'Pending Payment'),  # For split payments - not fully paid yet
@@ -874,13 +875,14 @@ class SalePayment(models.Model):
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES)
     currency = models.CharField(max_length=4, choices=Product.CURRENCY_CHOICES, default='USD')
     amount = models.DecimalField(max_digits=15, decimal_places=2, help_text="Amount in the payment currency")
-    
+    amount_received = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True, help_text="Amount actually received from customer for this payment method (for change calculation)")
+
     # Exchange rate used to convert this payment to the sale's base currency (USD)
     # This helps track the original currency amounts
     exchange_rate_to_usd = models.DecimalField(
-        max_digits=10, 
-        decimal_places=6, 
-        null=True, 
+        max_digits=10,
+        decimal_places=6,
+        null=True,
         blank=True,
         help_text="Exchange rate to convert this payment to USD (for multi-currency tracking)"
     )
@@ -2694,7 +2696,7 @@ class CashFloat(models.Model):
     def get_active_drawer(cls, shop, cashier):
         """Get or create active drawer for cashier"""
         from decimal import Decimal
-        today = timezone.now().date()
+        today = timezone.localdate()
         
         # First try to get existing drawer for today
         try:
@@ -2767,7 +2769,7 @@ class CashFloat(models.Model):
     def get_shop_drawer_status(cls, shop):
         """Get status of all drawers in shop with multi-currency support"""
         from django.db.models import Sum
-        today = timezone.now().date()
+        today = timezone.localdate()
         drawers = cls.objects.filter(shop=shop, date=today)
         
         active_drawers = drawers.filter(status='ACTIVE')
@@ -3537,7 +3539,9 @@ def get_all_drawers_session(request):
             rates = ExchangeRate.objects.filter(shop=shop, is_active=True).order_by('-created_at')[:5]
             usd_to_zig = 1.0
             usd_to_rand = 1.0
+            exchange_rates = None
             if rates:
+                exchange_rates = rates[0]
                 for rate in rates:
                     if rate.from_currency == 'USD' and rate.to_currency == 'ZIG':
                         usd_to_zig = float(rate.rate)
@@ -3546,6 +3550,7 @@ def get_all_drawers_session(request):
         except Exception:
             usd_to_zig = 1.0
             usd_to_rand = 1.0
+            exchange_rates = None
 
         for cashier in cashiers:
             # Calculate sales from Sale table for TODAY ONLY - THIS IS THE SOURCE OF TRUTH
@@ -3590,8 +3595,38 @@ def get_all_drawers_session(request):
 
                         sales_by_currency[currency_key]['total'] += float(payment.amount)
                         sales_by_currency[currency_key]['count'] += 1
+
+                    # Calculate change for split payments
+                    total_paid_usd = 0
+                    for payment in sale_payments:
+                        if payment.currency == 'USD':
+                            total_paid_usd += float(payment.amount)
+                        elif exchange_rates:
+                            try:
+                                amount_usd = exchange_rates.convert_amount(payment.amount, payment.currency, 'USD')
+                                total_paid_usd += float(amount_usd)
+                            except:
+                                pass
+
+                    if total_paid_usd > float(sale.total_amount):
+                        change_usd = total_paid_usd - float(sale.total_amount)
+                        change_int_usd = int(change_usd)
+                        change_frac_usd = change_usd - change_int_usd
+
+                        if change_int_usd > 0:
+                            sales_by_currency['usd']['cash'] -= change_int_usd
+                            sales_by_currency['usd']['total'] -= change_int_usd
+
+                        if change_frac_usd > 0 and exchange_rates:
+                            change_zig = exchange_rates.convert_amount(Decimal(str(change_frac_usd)), 'USD', 'ZIG')
+                            sales_by_currency['zig']['cash'] -= float(change_zig)
+                            sales_by_currency['zig']['total'] -= float(change_zig)
+
                 else:
                     # Handle regular single payments
+                    # Calculate actual sale amount from items
+                    sale_amount = sum(float(item.total_price) for item in sale.items.all())
+                    amount_paid = float(sale.total_amount)
                     currency = sale.payment_currency.upper() if sale.payment_currency else 'USD'
                     payment_method = sale.payment_method
 
@@ -3600,18 +3635,47 @@ def get_all_drawers_session(request):
                     if currency_key not in sales_by_currency:
                         currency_key = 'usd'
 
-                    # Add to appropriate payment method
+                    # Add sale amount to currency totals
                     if payment_method == 'cash':
-                        sales_by_currency[currency_key]['cash'] += float(sale.total_amount)
+                        sales_by_currency[currency_key]['cash'] += sale_amount
                     elif payment_method == 'card':
-                        sales_by_currency[currency_key]['card'] += float(sale.total_amount)
+                        sales_by_currency[currency_key]['card'] += sale_amount
                     elif payment_method == 'ecocash':
-                        sales_by_currency[currency_key]['ecocash'] += float(sale.total_amount)
+                        sales_by_currency[currency_key]['ecocash'] += sale_amount
                     elif payment_method == 'transfer':
-                        sales_by_currency[currency_key]['transfer'] += float(sale.total_amount)
+                        sales_by_currency[currency_key]['transfer'] += sale_amount
 
-                    sales_by_currency[currency_key]['total'] += float(sale.total_amount)
+                    sales_by_currency[currency_key]['total'] += sale_amount
                     sales_by_currency[currency_key]['count'] += 1
+
+                    # Handle change for cash payments
+                    if payment_method == 'cash' and amount_paid > sale_amount:
+                        change_usd = amount_paid - sale_amount
+
+                        if currency_key == 'usd':
+                            change_in_usd = change_usd
+                        elif exchange_rates:
+                            try:
+                                change_in_usd = float(exchange_rates.convert_amount(Decimal(str(change_usd)), currency_key.upper(), 'USD'))
+                            except:
+                                change_in_usd = change_usd
+                        else:
+                            change_in_usd = change_usd
+
+                        change_int_usd = int(change_in_usd)
+                        change_frac_usd = change_in_usd - change_int_usd
+
+                        if change_int_usd > 0:
+                            sales_by_currency['usd']['cash'] -= change_int_usd
+                            sales_by_currency['usd']['total'] -= change_int_usd
+
+                        if change_frac_usd > 0 and exchange_rates:
+                            try:
+                                change_zig = exchange_rates.convert_amount(Decimal(str(change_frac_usd)), 'USD', 'ZIG')
+                                sales_by_currency['zig']['cash'] -= float(change_zig)
+                                sales_by_currency['zig']['total'] -= float(change_zig)
+                            except:
+                                pass
             
             # Get drawer for float amounts (but NEVER use drawer session sales fields)
             drawer = CashFloat.get_active_drawer(shop, cashier)
@@ -4086,6 +4150,16 @@ def get_cashier_drawer_session(request):
                     'error': 'Authentication required or cashier_id parameter missing'
                 }, status=status.HTTP_401_UNAUTHORIZED)
         
+        # Get exchange rates
+        try:
+            from .models_exchange_rates import ExchangeRate
+            rates = ExchangeRate.objects.filter(shop=shop, is_active=True).order_by('-created_at')[:5]
+            exchange_rates = None
+            if rates:
+                exchange_rates = rates[0]
+        except Exception:
+            exchange_rates = None
+
         # Calculate sales from Sale table for TODAY ONLY
         # CRITICAL FIX: Use proper timezone-aware datetime range instead of __date lookup
         today_sales = Sale.objects.filter(
@@ -4094,35 +4168,121 @@ def get_cashier_drawer_session(request):
             created_at__range=[day_start, day_end],
             status='completed'
         )
-        
+
         # Calculate totals by currency and payment method
         sales_by_currency = {
             'usd': {'cash': 0, 'card': 0, 'ecocash': 0, 'transfer': 0, 'total': 0, 'count': 0},
             'zig': {'cash': 0, 'card': 0, 'ecocash': 0, 'transfer': 0, 'total': 0, 'count': 0},
             'rand': {'cash': 0, 'card': 0, 'ecocash': 0, 'transfer': 0, 'total': 0, 'count': 0}
         }
-        
+
         for sale in today_sales:
-            currency = sale.payment_currency.upper() if sale.payment_currency else 'USD'
-            payment_method = sale.payment_method
-            
-            # Convert to lowercase for dictionary key lookup
-            currency_key = currency.lower()
-            if currency_key not in sales_by_currency:
-                currency_key = 'usd'
-            
-            # Add to appropriate payment method
-            if payment_method == 'cash':
-                sales_by_currency[currency_key]['cash'] += float(sale.total_amount)
-            elif payment_method == 'card':
-                sales_by_currency[currency_key]['card'] += float(sale.total_amount)
-            elif payment_method == 'ecocash':
-                sales_by_currency[currency_key]['ecocash'] += float(sale.total_amount)
-            elif payment_method == 'transfer':
-                sales_by_currency[currency_key]['transfer'] += float(sale.total_amount)
-            
-            sales_by_currency[currency_key]['total'] += float(sale.total_amount)
-            sales_by_currency[currency_key]['count'] += 1
+            # Handle split payments differently - use SalePayment records
+            if sale.payment_method == 'split':
+                # For split payments, get individual payment components
+                sale_payments = SalePayment.objects.filter(sale=sale)
+                for payment in sale_payments:
+                    currency = payment.currency.upper()
+                    payment_method = payment.payment_method
+
+                    # Convert to lowercase for dictionary key lookup
+                    currency_key = currency.lower()
+                    if currency_key not in sales_by_currency:
+                        currency_key = 'usd'
+
+                    # Add to appropriate payment method
+                    if payment_method == 'cash':
+                        sales_by_currency[currency_key]['cash'] += float(payment.amount)
+                    elif payment_method == 'card':
+                        sales_by_currency[currency_key]['card'] += float(payment.amount)
+                    elif payment_method == 'ecocash':
+                        sales_by_currency[currency_key]['ecocash'] += float(payment.amount)
+                    elif payment_method == 'transfer':
+                        sales_by_currency[currency_key]['transfer'] += float(payment.amount)
+
+                    sales_by_currency[currency_key]['total'] += float(payment.amount)
+                    sales_by_currency[currency_key]['count'] += 1
+
+                # Calculate change for split payments
+                total_paid_usd = 0
+                for payment in sale_payments:
+                    if payment.currency == 'USD':
+                        total_paid_usd += float(payment.amount)
+                    elif exchange_rates:
+                        try:
+                            amount_usd = exchange_rates.convert_amount(payment.amount, payment.currency, 'USD')
+                            total_paid_usd += float(amount_usd)
+                        except:
+                            pass
+
+                if total_paid_usd > float(sale.total_amount):
+                    change_usd = total_paid_usd - float(sale.total_amount)
+                    change_int_usd = int(change_usd)
+                    change_frac_usd = change_usd - change_int_usd
+
+                    if change_int_usd > 0:
+                        sales_by_currency['usd']['cash'] -= change_int_usd
+                        sales_by_currency['usd']['total'] -= change_int_usd
+
+                    if change_frac_usd > 0 and exchange_rates:
+                        change_zig = exchange_rates.convert_amount(Decimal(str(change_frac_usd)), 'USD', 'ZIG')
+                        sales_by_currency['zig']['cash'] -= float(change_zig)
+                        sales_by_currency['zig']['total'] -= float(change_zig)
+
+            else:
+                # Handle regular single payments
+                # Calculate actual sale amount from items
+                sale_amount = sum(float(item.total_price) for item in sale.items.all())
+                amount_paid = float(sale.total_amount)
+                currency = sale.payment_currency.upper() if sale.payment_currency else 'USD'
+                payment_method = sale.payment_method
+
+                # Convert to lowercase for dictionary key lookup
+                currency_key = currency.lower()
+                if currency_key not in sales_by_currency:
+                    currency_key = 'usd'
+
+                # Add sale amount to currency totals
+                if payment_method == 'cash':
+                    sales_by_currency[currency_key]['cash'] += sale_amount
+                elif payment_method == 'card':
+                    sales_by_currency[currency_key]['card'] += sale_amount
+                elif payment_method == 'ecocash':
+                    sales_by_currency[currency_key]['ecocash'] += sale_amount
+                elif payment_method == 'transfer':
+                    sales_by_currency[currency_key]['transfer'] += sale_amount
+
+                sales_by_currency[currency_key]['total'] += sale_amount
+                sales_by_currency[currency_key]['count'] += 1
+
+                # Handle change for cash payments
+                if payment_method == 'cash' and amount_paid > sale_amount:
+                    change_usd = amount_paid - sale_amount
+
+                    if currency_key == 'usd':
+                        change_in_usd = change_usd
+                    elif exchange_rates:
+                        try:
+                            change_in_usd = float(exchange_rates.convert_amount(Decimal(str(change_usd)), currency_key.upper(), 'USD'))
+                        except:
+                            change_in_usd = change_usd
+                    else:
+                        change_in_usd = change_usd
+
+                    change_int_usd = int(change_in_usd)
+                    change_frac_usd = change_in_usd - change_int_usd
+
+                    if change_int_usd > 0:
+                        sales_by_currency['usd']['cash'] -= change_int_usd
+                        sales_by_currency['usd']['total'] -= change_int_usd
+
+                    if change_frac_usd > 0 and exchange_rates:
+                        try:
+                            change_zig = exchange_rates.convert_amount(Decimal(str(change_frac_usd)), 'USD', 'ZIG')
+                            sales_by_currency['zig']['cash'] -= float(change_zig)
+                            sales_by_currency['zig']['total'] -= float(change_zig)
+                        except:
+                            pass
         
         # Get or create drawer for float amounts
         drawer = CashFloat.get_active_drawer(shop, cashier)

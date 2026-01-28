@@ -1,4 +1,7 @@
 from django.apps import AppConfig
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class CoreConfig(AppConfig):
@@ -8,3 +11,6 @@ class CoreConfig(AppConfig):
     def ready(self):
         # Import signals to ensure they are registered
         import core.signals
+        
+        # Log successful initialization
+        logger.info("Core app initialized - EOD reconciliation system ready")

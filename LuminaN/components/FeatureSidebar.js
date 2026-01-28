@@ -148,6 +148,15 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
       color: '#f97316',
       section: 'sales'
     },
+    {
+      id: 'drawer-management',
+      title: '💰 Drawer Management',
+      description: 'FINANCIAL NEURAL GRID - Monitor all cashier drawers',
+      icon: '💰',
+      screen: 'DrawerManagement',
+      color: '#10b981',
+      section: 'sales'
+    },
     // Analytics & Reports Section
 
     // Inventory Management Section
@@ -336,6 +345,9 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
         break;
       case 'WasteScreen':
         navigation.navigate('Waste');
+        break;
+      case 'DrawerManagement':
+        navigation.navigate('Drawers');
         break;
       
 

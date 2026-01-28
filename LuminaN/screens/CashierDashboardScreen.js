@@ -3390,6 +3390,7 @@ const CashierDashboardScreen = () => {
         customer_name: '',
         customer_phone: '',
         total_amount: roundedTotal.toString(),
+        amount_received: paymentMethod === 'cash' ? (parseFloat(amountReceived) || 0).toString() : null,
         ...(paymentMethod === 'transfer' && {
           wallet_account: walletAccount,
           transfer_reference: transferReference
