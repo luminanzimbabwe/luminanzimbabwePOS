@@ -24,6 +24,7 @@ export const ROUTES = {
   POS_PRICE: 'POSPrice',
   SALES_AND_REFUNDS: 'SalesAndRefunds',
   CASHIER_SALES: 'CashierSales',
+  CASHIER_COUNT: 'CashierCount',
   CASHIER_PRODUCT_RECEIVING: 'CashierProductReceiving',
   QUICK_PRODUCTS: 'QuickProducts',
   // License Management routes
@@ -49,6 +50,7 @@ export const ROUTES = {
   STAFF_LUNCH: 'StaffLunch',
   EXCHANGE_RATE_MANAGEMENT: 'ExchangeRateManagement',
   DRAWER_MANAGEMENT: 'DrawerManagement',
+  CASHIER_HISTORY: 'CashierHistory',
 };
 
 // Screen titles
@@ -76,6 +78,7 @@ export const SCREEN_TITLES = {
   [ROUTES.STOCK_VALUATION]: 'Stock Valuation',
   [ROUTES.POS_PRICE]: 'POS Price Labels',
   [ROUTES.SALES_AND_REFUNDS]: 'Sales & Refunds',
+  [ROUTES.CASHIER_COUNT]: 'Cashier Cash Count',
   [ROUTES.CASHIER_PRODUCT_RECEIVING]: 'Cashier Product Receiving',
   [ROUTES.QUICK_PRODUCTS]: 'Quick Products',
   // License Management titles
@@ -101,4 +104,5 @@ export const SCREEN_TITLES = {
   [ROUTES.STAFF_LUNCH]: 'Staff Lunch',
   [ROUTES.EXCHANGE_RATE_MANAGEMENT]: 'Exchange Rate Management',
   [ROUTES.DRAWER_MANAGEMENT]: 'Drawer Management',
+  [ROUTES.CASHIER_HISTORY]: 'Cashier History & Performance',
 };

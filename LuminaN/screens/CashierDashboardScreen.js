@@ -1183,6 +1183,15 @@ const CashierDashboardScreen = () => {
   // Sidebar features for cashiers - Drawer Status removed for security
   const sidebarFeatures = [
     {
+      id: 'cashier-count',
+      title: '🧮 Cash Count',
+      description: 'Count your cash and save it',
+      icon: '🧮',
+      screen: ROUTES.CASHIER_COUNT,
+      color: '#00f5ff',
+      section: 'cashier-tools'
+    },
+    {
       id: 'product-receiving',
       title: '📦 Product Receiving',
       description: 'Receive products from suppliers',
@@ -1253,6 +1262,9 @@ const CashierDashboardScreen = () => {
     
     // Navigate to the feature screen
     switch (feature.screen) {
+      case ROUTES.CASHIER_COUNT:
+        navigation.navigate(ROUTES.CASHIER_COUNT);
+        break;
       case 'CashierProductReceiving':
         navigation.navigate('CashierProductReceiving');
         break;

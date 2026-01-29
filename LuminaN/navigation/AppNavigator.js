@@ -38,6 +38,7 @@ import WasteScreen from '../screens/WasteScreen';
 import EODReconciliationScreen from '../screens/EODReconciliationScreen';
 import StartOfDayScreen from '../screens/StartOfDayScreen';
 import CashierSalesScreen from '../screens/CashierSalesScreen';
+import CashierCountScreen from '../screens/CashierCountScreen';
 import CashierDrawerScreen from '../screens/CashierDrawerScreen';
 import CashierProductsScreen from '../screens/CashierProductsScreen';
 import CashierProductReceivingScreen from '../screens/CashierProductReceivingScreen';
@@ -52,6 +53,7 @@ import PriceComparisonScreen from '../screens/PriceComparisonScreen';
 import DemandForecastingScreen from '../screens/DemandForecastingScreen';
 import StaffLunchScreen from '../screens/StaffLunchScreen';
 import ExchangeRateManagementScreen from '../screens/ExchangeRateManagementScreen';
+import CashierHistoryScreen from '../screens/CashierHistoryScreen';
 
 // Import Tab Navigator
 import TabNavigator from './TabNavigator';
@@ -158,6 +160,7 @@ const AppNavigator = () => {
       <Stack.Screen name={ROUTES.EOD_RECONCILIATION} component={EODReconciliationScreen} />
       <Stack.Screen name={ROUTES.START_OF_DAY} component={StartOfDayScreen} />
       <Stack.Screen name={ROUTES.CASHIER_SALES} component={CashierSalesScreen} />
+      <Stack.Screen name={ROUTES.CASHIER_COUNT} component={CashierCountScreen} />
       <Stack.Screen name={ROUTES.CASHIER_PRODUCT_RECEIVING} component={CashierProductReceivingScreen} />
       <Stack.Screen name="CashierDrawer" component={CashierDrawerScreen} />
       <Stack.Screen name="CashierProducts" component={CashierProductsScreen} />
@@ -173,6 +176,7 @@ const AppNavigator = () => {
       <Stack.Screen name={ROUTES.DEMAND_FORECASTING} component={DemandForecastingScreen} />
       <Stack.Screen name={ROUTES.STAFF_LUNCH} component={StaffLunchScreen} />
       <Stack.Screen name={ROUTES.EXCHANGE_RATE_MANAGEMENT} component={ExchangeRateManagementScreen} />
+      <Stack.Screen name={ROUTES.CASHIER_HISTORY} component={CashierHistoryScreen} />
 
     </Stack.Navigator>
   );

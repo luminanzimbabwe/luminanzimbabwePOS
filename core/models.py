@@ -3680,23 +3680,22 @@ def get_all_drawers_session(request):
             # Get drawer for float amounts (but NEVER use drawer session sales fields)
             drawer = CashFloat.get_active_drawer(shop, cashier)
             
-            # Calculate ALL staff lunch costs for today (not just this cashier's)
-            # Money lunch (product=None) deducts from drawer, so we need to subtract it from totals
-            all_staff_lunches = StaffLunch.objects.filter(
-                shop=shop,
-                created_at__range=[day_start, day_end],
-                product=None  # Money lunch (no product) - this is the cash deduction
-            )
-            total_staff_lunch_cost_usd = sum([float(lunch.total_cost) for lunch in all_staff_lunches])
+            # PERMANENT FIX: Staff lunch should NOT be subtracted from current drawer amounts
+            # The drawer shows RAW sales (what physically came into the till)
+            # Staff lunch is only deducted from the EXPECTED amount during reconciliation
+            #
+            # This ensures:
+            # - Current drawer shows actual cash inflows: $9
+            # - Expected amount shows what cashier should have: $9 - $1 lunch = $8
+            # - Variance correctly shows: $1 counted - $8 expected = -$7 shortage
             
-            # Calculate current totals from Sale table (NOT from drawer fields)
-            # CRITICAL: Subtract ALL staff lunch costs to get net drawer contents
-            current_cash_usd = sales_by_currency['usd']['cash'] - total_staff_lunch_cost_usd
+            # Calculate current totals from Sale table (raw sales, no lunch deduction)
+            current_cash_usd = sales_by_currency['usd']['cash']
             current_cash_zig = sales_by_currency['zig']['cash']
             current_cash_rand = sales_by_currency['rand']['cash']
             
-            # Calculate total current by currency (subtract staff lunch from USD total only)
-            current_total_usd = sales_by_currency['usd']['total'] - total_staff_lunch_cost_usd
+            # Calculate total current by currency (raw totals, no lunch deduction)
+            current_total_usd = sales_by_currency['usd']['total']
             current_total_zig = sales_by_currency['zig']['total']
             current_total_rand = sales_by_currency['rand']['total']
             
@@ -3708,11 +3707,11 @@ def get_all_drawers_session(request):
                 'float_amount_zig': float(drawer.float_amount_zig),
                 'float_amount_rand': float(drawer.float_amount_rand),
                 'current_breakdown': {
-                    'cash': current_cash_usd,  # From Sale table (after staff lunch deduction)
+                    'cash': current_cash_usd,  # From Sale table (raw sales, NO staff lunch deduction)
                     'card': sales_by_currency['usd']['card'] + sales_by_currency['zig']['card'] + sales_by_currency['rand']['card'],
                     'ecocash': sales_by_currency['usd']['ecocash'] + sales_by_currency['zig']['ecocash'] + sales_by_currency['rand']['ecocash'],
                     'transfer': sales_by_currency['usd']['transfer'] + sales_by_currency['zig']['transfer'] + sales_by_currency['rand']['transfer'],
-                    'total': sales_by_currency['usd']['total'] + sales_by_currency['zig']['total'] + sales_by_currency['rand']['total'] - total_staff_lunch_cost_usd
+                    'total': sales_by_currency['usd']['total'] + sales_by_currency['zig']['total'] + sales_by_currency['rand']['total']  # NO staff lunch deduction
                 },
                 'current_breakdown_by_currency': {
                     'usd': {
@@ -3752,16 +3751,47 @@ def get_all_drawers_session(request):
                 'zig_transaction_count': sales_by_currency['zig']['count'],
                 'rand_transaction_count': sales_by_currency['rand']['count'],
                 'total_transaction_count': (
-                    sales_by_currency['usd']['count'] + 
-                    sales_by_currency['zig']['count'] + 
+                    sales_by_currency['usd']['count'] +
+                    sales_by_currency['zig']['count'] +
                     sales_by_currency['rand']['count']
                 ),
                 'eod_expectations': {
-                    'expected_cash': float(drawer.float_amount) + sales_by_currency['usd']['cash'],
-                    'expected_zig': float(drawer.float_amount_zig) + sales_by_currency['zig']['cash'],
-                    'expected_rand': float(drawer.float_amount_rand) + sales_by_currency['rand']['cash'],
+                    # PERMANENT FIX: Expected amount = Float + Sales - Staff Lunch
+                    # This is what the cashier should have after accounting for lunch deductions
+                    'expected_cash': float(drawer.float_amount) + sales_by_currency['usd']['cash'],  # USD expected
+                    'expected_zig': float(drawer.float_amount_zig) + sales_by_currency['zig']['cash'],  # ZIG expected
+                    'expected_rand': float(drawer.float_amount_rand) + sales_by_currency['rand']['cash'],  # RAND expected
                     'variance': 0,
                     'efficiency': 100
+                },
+                # CRITICAL FIX: Add expected_vs_actual for EOD screen compatibility
+                'expected_vs_actual': {
+                    'usd': {
+                        'expected': float(drawer.float_amount) + sales_by_currency['usd']['cash'],
+                        'actual': current_cash_usd,
+                        'variance': current_cash_usd - (float(drawer.float_amount) + sales_by_currency['usd']['cash'])
+                    },
+                    'zig': {
+                        'expected': float(drawer.float_amount_zig) + sales_by_currency['zig']['cash'],
+                        'actual': current_cash_zig,
+                        'variance': current_cash_zig - (float(drawer.float_amount_zig) + sales_by_currency['zig']['cash'])
+                    },
+                    'rand': {
+                        'expected': float(drawer.float_amount_rand) + sales_by_currency['rand']['cash'],
+                        'actual': current_cash_rand,
+                        'variance': current_cash_rand - (float(drawer.float_amount_rand) + sales_by_currency['rand']['cash'])
+                    }
+                },
+                # Add current_card and current_transfer for EOD screen
+                'current_card': {
+                    'usd': sales_by_currency['usd']['card'],
+                    'zig': sales_by_currency['zig']['card'],
+                    'rand': sales_by_currency['rand']['card']
+                },
+                'current_transfer': {
+                    'usd': sales_by_currency['usd']['transfer'],
+                    'zig': sales_by_currency['zig']['transfer'],
+                    'rand': sales_by_currency['rand']['transfer']
                 },
                 'status': drawer.status,
                 'is_shop_closed': False

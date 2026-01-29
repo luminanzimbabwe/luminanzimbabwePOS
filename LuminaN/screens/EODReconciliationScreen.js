@@ -76,6 +76,9 @@ const EODProductionScreen = () => {
   const [salesData, setSalesData] = useState(null);
   const [salesLoading, setSalesLoading] = useState(false);
 
+  // Cashier count data from the database - only showing completed counts
+  const [completedCashierCounts, setCompletedCashierCounts] = useState([]);
+
   // Load staff lunch data for deduction tracking
   const loadStaffLunchData = async () => {
     try {
@@ -180,6 +183,54 @@ const EODProductionScreen = () => {
       const reconResponse = await shopAPI.getEnhancedReconciliation(timestamp);
       setReconciliationData(reconResponse.data);
       
+      // Extract completed cashier counts from the reconciliation data
+      // CRITICAL FIX: Only show counts where is_counted is true (status === 'COMPLETED')
+      // AND the cashier has drawer activity (sales) today
+      if (reconResponse.data && reconResponse.data.cashier_details) {
+        // Get drawer data to check which cashiers have actual sales today
+        const drawersWithSales = drawerStatus?.drawers?.filter(d => {
+          const hasSales = d.expected_vs_actual && (
+            (d.expected_vs_actual.usd?.expected || 0) > 0 ||
+            (d.expected_vs_actual.zig?.expected || 0) > 0 ||
+            (d.expected_vs_actual.rand?.expected || 0) > 0
+          );
+          const hasCardSales = d.current_card && (
+            (d.current_card.usd || 0) > 0 ||
+            (d.current_card.zig || 0) > 0 ||
+            (d.current_card.rand || 0) > 0
+          );
+          return hasSales || hasCardSales;
+        }) || [];
+        
+        const activeCashierNames = drawersWithSales.map(d => d.cashier_name || d.cashier);
+        
+        console.log('Active cashiers with sales:', activeCashierNames);
+        console.log('All cashier details:', reconResponse.data.cashier_details.map(c => ({
+          name: c.cashier_name,
+          is_counted: c.is_counted
+        })));
+        
+        // Only show counts for cashiers who have sales activity today
+        const completedCounts = reconResponse.data.cashier_details.filter(
+          count => {
+            // Must be completed
+            if (!count.is_counted) return false;
+            
+            // Must have sales activity today (be in active drawer list)
+            const hasSalesActivity = activeCashierNames.includes(count.cashier_name);
+            
+            if (!hasSalesActivity) {
+              console.log(`Filtering out count for ${count.cashier_name} - no sales today`);
+            }
+            
+            return hasSalesActivity;
+          }
+        );
+        
+        console.log('Filtered completed counts:', completedCounts.map(c => c.cashier_name));
+        setCompletedCashierCounts(completedCounts);
+      }
+      
       // Fetch drawer data - Use the exact same API call as DrawerManagementScreen
       // This ensures we get the "Financial Neural Grid" data correctly
       const drawersResponse = await shopAPI.getCashierDrawers();
@@ -283,6 +334,34 @@ const EODProductionScreen = () => {
         console.error('   Stack:', deleteErr.stack);
         // Continue with EOD process even if delete fails
         console.log('⚠️ Continuing with EOD despite delete error...');
+      }
+      
+      // CRITICAL: CLEAR ALL CASHIER COUNTS FOR TODAY - ensures fresh start tomorrow
+      console.log('🧹 Clearing all cashier counts for today...');
+      try {
+        const clearCountsResponse = await shopAPI.clearCashierCounts(today);
+        console.log('✅ Clear counts response:', JSON.stringify(clearCountsResponse.data, null, 2));
+        if (clearCountsResponse.data && clearCountsResponse.data.success) {
+          console.log(`✅ ${clearCountsResponse.data.message}`);
+        }
+      } catch (clearErr) {
+        console.error('❌ Clear counts ERROR:', clearErr.message);
+        // Continue with EOD process even if clear fails
+        console.log('⚠️ Continuing with EOD despite clear counts error...');
+      }
+      
+      // CRITICAL: RESET RECONCILIATION SESSION - ensures fresh start tomorrow
+      console.log('🔄 Resetting reconciliation session...');
+      try {
+        const resetSessionResponse = await shopAPI.resetReconciliationSession(today);
+        console.log('✅ Reset session response:', JSON.stringify(resetSessionResponse.data, null, 2));
+        if (resetSessionResponse.data && resetSessionResponse.data.success) {
+          console.log(`✅ ${resetSessionResponse.data.message}`);
+        }
+      } catch (resetErr) {
+        console.error('❌ Reset session ERROR:', resetErr.message);
+        // Continue with EOD process even if reset fails
+        console.log('⚠️ Continuing with EOD despite reset session error...');
       }
       
       // Now finalize the session
@@ -645,30 +724,28 @@ const EODProductionScreen = () => {
     setShowModal(false);
   };
 
-  // Filter drawers to only show cashiers who logged in TODAY (have activity/sales)
-  // Using the same logic as DrawerManagementScreen - show all active cashiers with drawers
+  // Filter drawers to only show cashiers who have SALES/ACTIVITY today
+  // Only cashiers with expected amounts (sales) need to count
   const todayDrawers = useMemo(() => {
     if (!drawerStatus?.drawers) return [];
     
     return drawerStatus.drawers.filter(drawer => {
-      // Check if drawer has expected amounts from expected_vs_actual (means it has activity today)
-      const hasExpectedAmounts = drawer.expected_vs_actual && (
+      // ONLY check if drawer has expected amounts from expected_vs_actual (means it has SALES today)
+      const hasSalesActivity = drawer.expected_vs_actual && (
         (drawer.expected_vs_actual.usd?.expected || 0) > 0 ||
         (drawer.expected_vs_actual.zig?.expected || 0) > 0 ||
         (drawer.expected_vs_actual.rand?.expected || 0) > 0
       );
       
-      // Check if drawer has current holdings (has cash in drawer)
-      const hasCurrentHoldings = drawer.total_by_currency && (
-        (drawer.total_by_currency.usd || 0) > 0 ||
-        (drawer.total_by_currency.zig || 0) > 0 ||
-        (drawer.total_by_currency.rand || 0) > 0
+      // Also check card sales
+      const hasCardSales = drawer.current_card && (
+        (drawer.current_card.usd || 0) > 0 ||
+        (drawer.current_card.zig || 0) > 0 ||
+        (drawer.current_card.rand || 0) > 0
       );
       
-      // Also include drawers that are ACTIVE status
-      const isActive = drawer.drawer_status === 'ACTIVE';
-      
-      return hasExpectedAmounts || hasCurrentHoldings || isActive;
+      // Only include if they have sales activity - no sales = no count needed
+      return hasSalesActivity || hasCardSales;
     });
   }, [drawerStatus]);
 
@@ -1205,62 +1282,91 @@ const EODProductionScreen = () => {
           </View>
         </View>
 
-        {/* Neural Cashier Verification Section */}
+        {/* Neural Cashier Verification Section - Shows ONLY Completed Counts with Shortages */}
         <View style={styles.neuralCashierSection}>
           <View style={styles.neuralCashierHeader}>
             <Icon name="people" size={28} color="#ffaa00" />
             <Text style={styles.neuralCashierTitle}>CASHIER NEURAL VERIFICATION</Text>
           </View>
           
+          {/* Summary of Completed Counts */}
+          <View style={[styles.neuralStatusPanel, {
+            borderColor: completedCashierCounts.length > 0 ? '#00ff88' : (drawerStatus?.is_open ? '#ffaa00' : '#00f5ff'),
+            backgroundColor: completedCashierCounts.length > 0 ? 'rgba(0, 255, 136, 0.1)' : (drawerStatus?.is_open ? 'rgba(255, 170, 0, 0.1)' : 'rgba(0, 245, 255, 0.1)'),
+            marginBottom: 16
+          }]}>
+            <View style={styles.neuralStatusIndicator}>
+              <View style={[styles.neuralStatusPulse, {
+                backgroundColor: completedCashierCounts.length > 0 ? '#00ff88' : (drawerStatus?.is_open ? '#ffaa00' : '#00f5ff')
+              }]} />
+              <Text style={[styles.neuralStatusText, {
+                color: completedCashierCounts.length > 0 ? '#00ff88' : (drawerStatus?.is_open ? '#ffaa00' : '#00f5ff')
+              }]}>
+                {completedCashierCounts.length > 0
+                  ? `${completedCashierCounts.length} CASHIER${completedCashierCounts.length > 1 ? 'S' : ''} COUNTED`
+                  : drawerStatus?.is_open
+                    ? 'WAITING FOR CASHIER COUNTS...'
+                    : '🌅 FRESH START - NEW SESSION READY'}
+              </Text>
+            </View>
+            {!drawerStatus?.is_open && completedCashierCounts.length === 0 && (
+              <Text style={{
+                color: '#00f5ff',
+                fontSize: 12,
+                textAlign: 'center',
+                marginTop: 8,
+                fontStyle: 'italic'
+              }}>
+                All previous counts cleared. Ready for new day!
+              </Text>
+            )}
+          </View>
+          
           <View style={styles.neuralCashierList}>
-            {todayDrawers.length === 0 ? (
+            {completedCashierCounts.length === 0 ? (
               <View style={styles.neuralEmptyState}>
-                <Text style={styles.neuralEmptyStateText}>No active cashier drawers were returned from the server. Please pull down to refresh.</Text>
+                <Icon name={drawerStatus?.is_open ? "hourglass-empty" : "check-circle"} size={48} color={drawerStatus?.is_open ? "#6b7280" : "#00ff88"} />
+                <Text style={[styles.neuralEmptyStateText, { color: drawerStatus?.is_open ? '#9ca3af' : '#00ff88' }]}>
+                  {drawerStatus?.is_open
+                    ? "No cashiers have completed their counts yet."
+                    : "✓ All counts cleared - Ready for new session!"}
+                </Text>
+                <Text style={styles.neuralEmptyStateSubtext}>
+                  {drawerStatus?.is_open
+                    ? "Cashiers must submit their counts from the Cashier Count screen before they appear here."
+                    : "Previous day's data has been cleared. Start fresh when shop opens."}
+                </Text>
               </View>
             ) : (
-              todayDrawers.map((d) => {
-                // Use cashier_name from API (same as DrawerManagementScreen)
-                const cashierName = d.cashier_name || d.cashier || 'Unknown';
-                const cashierId = d.cashier_id || d.cashier || 'unknown';
-                const verified = cashierCounts[cashierName];
-                const varianceData = getCashierVariance(d, verified);
+              completedCashierCounts.map((count, index) => {
+                const cashierName = count.cashier_name || 'Unknown';
+                const totals = count.totals || {};
+                const expected = count.expected || {};
+                const variances = count.variances || {};
                 
-                // Status colors based on variance type
-                const statusColor = varianceData.varianceType === 'pending' ? '#ff4444' : 
-                                   varianceData.varianceType === 'perfect' ? '#00ff88' : 
-                                   varianceData.varianceType === 'short' ? '#ff4444' : 
-                                   '#ffaa00'; // over
+                // Calculate shortages (negative variances)
+                const cashShortage = (variances.cash || 0) < 0 ? Math.abs(variances.cash) : 0;
+                const cardShortage = (variances.card || 0) < 0 ? Math.abs(variances.card) : 0;
+                const totalShortage = (variances.total || 0) < 0 ? Math.abs(variances.total) : 0;
+                const hasShortage = totalShortage > 0;
                 
-                // Status icon
-                const StatusIcon = varianceData.varianceType === 'pending' ? "pending" : 
-                                   varianceData.varianceType === 'perfect' ? "check-circle" : 
-                                   varianceData.varianceType === 'short' ? "arrow-downward" : 
-                                   "arrow-upward";
-                
-                // Status text
-                const statusText = varianceData.varianceType === 'pending' ? '○ PENDING VERIFICATION' : 
-                                   varianceData.varianceType === 'perfect' ? '✓ BALANCED - PERFECT' : 
-                                   varianceData.varianceType === 'short' ? `⚠️ SHORTAGE: ${Math.abs(varianceData.variance).toFixed(2)}` : 
-                                   `✓ OVERAGE: ${varianceData.variance.toFixed(2)}`;
+                // Status colors - red for shortage, green for balanced/over
+                const statusColor = hasShortage ? '#ff4444' : '#00ff88';
                 
                 return (
-                  <TouchableOpacity
-                    key={cashierId}
+                  <View
+                    key={index}
                     style={[
                       styles.neuralCashierCard,
                       { borderLeftColor: statusColor }
                     ]}
-                    onPress={() => openCashier(cashierName)}
-                    activeOpacity={0.7}
                   >
                     {/* Cashier Name - BIG AND CLEAR */}
                     <View style={styles.cashierNameRow}>
                       <Text style={styles.cashierBigName}>{cashierName}</Text>
                       <View style={[styles.cashierStatusBadge, { backgroundColor: statusColor }]}>
                         <Text style={styles.cashierStatusText}>
-                          {varianceData.varianceType === 'pending' ? 'TAP TO COUNT' : 
-                           varianceData.varianceType === 'perfect' ? 'BALANCED' : 
-                           varianceData.varianceType === 'short' ? 'SHORT' : 'OVER'}
+                          {hasShortage ? 'SHORTAGE' : 'BALANCED'}
                         </Text>
                       </View>
                     </View>
@@ -1269,136 +1375,266 @@ const EODProductionScreen = () => {
                     <View style={styles.bigAmountsRow}>
                       <View style={styles.bigAmountBox}>
                         <Text style={styles.bigAmountLabel}>EXPECTED</Text>
-                        <Text style={[styles.bigAmountValue, { color: '#ffaa00' }]}>${varianceData.expected.toFixed(2)}</Text>
-                        {varianceData.staffLunchDeduction > 0 && (
-                          <Text style={{ fontSize: 10, color: '#ff4444', marginTop: 2 }}>
-                            -${varianceData.staffLunchDeduction.toFixed(2)} lunch
-                          </Text>
-                        )}
+                        <Text style={[styles.bigAmountValue, { color: '#ffaa00' }]}>
+                          ${(expected.cash || 0).toFixed(2)}
+                        </Text>
                       </View>
                       <View style={styles.bigAmountDivider} />
                       <View style={styles.bigAmountBox}>
-                        <Text style={styles.bigAmountLabel}>ACTUAL</Text>
+                        <Text style={styles.bigAmountLabel}>ACTUAL COUNT</Text>
                         <Text style={[styles.bigAmountValue, { color: '#00ff88' }]}>
-                          {verified ? `${varianceData.actual.toFixed(2)}` : '—'}
+                          ${(totals.cash || 0).toFixed(2)}
                         </Text>
                       </View>
                     </View>
                     
-                    {/* Variance - THE KEY METRIC */}
-                    {varianceData.varianceType !== 'pending' && (
-                      <View style={styles.varianceBanner}>
-                        <Icon 
-                          name={varianceData.varianceType === 'short' ? "warning" : varianceData.varianceType === 'over' ? "check-circle" : "check"} 
-                          size={20} 
-                          color={statusColor} 
-                        />
-                        <Text style={[styles.varianceBannerText, { color: statusColor }]}>
-                          {varianceData.varianceType === 'short' ? `SHORTAGE: -${Math.abs(varianceData.variance).toFixed(2)}` : 
-                           varianceData.varianceType === 'over' ? `OVERAGE: +${varianceData.variance.toFixed(2)}` : 
-                           "PERFECT BALANCE"}
+                    {/* SHORTAGE DISPLAY - THE KEY METRIC */}
+                    {hasShortage ? (
+                      <View style={[styles.varianceBanner, { backgroundColor: 'rgba(255, 68, 68, 0.2)', borderColor: '#ff4444' }]}>
+                        <Icon name="warning" size={24} color="#ff4444" />
+                        <Text style={[styles.varianceBannerText, { color: '#ff4444', fontSize: 20 }]}>
+                          SHORTAGE: ${totalShortage.toFixed(2)}
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={[styles.varianceBanner, { backgroundColor: 'rgba(0, 255, 136, 0.1)', borderColor: '#00ff88' }]}>
+                        <Icon name="check-circle" size={24} color="#00ff88" />
+                        <Text style={[styles.varianceBannerText, { color: '#00ff88' }]}>
+                          PERFECT BALANCE / OVER
                         </Text>
                       </View>
                     )}
                     
-                    {/* Transfer Display */}
-                    {varianceData.totalTransfer > 0 && (
-                      <View style={styles.transferDisplayRow}>
-                        <View style={styles.transferDisplayLabel}>
-                          <Icon name="swap-horiz" size={16} color="#00f5ff" />
-                          <Text style={styles.transferDisplayText}>TRANSFERS</Text>
-                        </View>
-                        <View style={styles.transferDisplayValues}>
-                          <Text style={styles.transferExpected}>Expected: ${varianceData.totalTransfer.toFixed(2)}</Text>
-                          {verified && (verified.transfer_usd || verified.transfer_zig || verified.transfer_rand) && (
-                            <Text style={styles.transferActual}>
-                              Actual: ${(varianceData.breakdown.transfers.actual || 0).toFixed(2)}
-                            </Text>
-                          )}
-                        </View>
-                      </View>
-                    )}
-
-                    {/* Card Payment Display */}
-                    {varianceData.breakdown.card.expected > 0 && (
-                      <View style={[styles.transferDisplayRow, { backgroundColor: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.3)' }]}>
-                        <View style={styles.transferDisplayLabel}>
-                          <Icon name="credit-card" size={16} color="#10b981" />
-                          <Text style={[styles.transferDisplayText, { color: '#10b981' }]}>CARD PAYMENTS</Text>
-                        </View>
-                        <View style={styles.transferDisplayValues}>
-                          <Text style={[styles.transferExpected, { color: '#10b981' }]}>Expected: ${varianceData.breakdown.card.expected.toFixed(2)}</Text>
-                          {verified && verified.card > 0 && (
-                            <Text style={[styles.transferActual, { color: '#00ff88' }]}>
-                              Actual: ${(varianceData.breakdown.card.actual || 0).toFixed(2)}
-                            </Text>
-                          )}
+                    {/* Detailed Shortage Breakdown */}
+                    {hasShortage && (
+                      <View style={styles.shortageBreakdownCard}>
+                        <Text style={styles.shortageBreakdownTitle}>📊 SHORTAGE BREAKDOWN</Text>
+                        
+                        {cashShortage > 0 && (
+                          <View style={styles.shortageBreakdownRow}>
+                            <Text style={styles.shortageBreakdownLabel}>Cash Shortage:</Text>
+                            <Text style={styles.shortageBreakdownValue}>${cashShortage.toFixed(2)}</Text>
+                          </View>
+                        )}
+                        
+                        {cardShortage > 0 && (
+                          <View style={styles.shortageBreakdownRow}>
+                            <Text style={styles.shortageBreakdownLabel}>Card Shortage:</Text>
+                            <Text style={styles.shortageBreakdownValue}>${cardShortage.toFixed(2)}</Text>
+                          </View>
+                        )}
+                        
+                        <View style={[styles.shortageBreakdownRow, styles.shortageTotalRow]}>
+                          <Text style={styles.shortageTotalLabel}>TOTAL SHORTAGE:</Text>
+                          <Text style={styles.shortageTotalValue}>${totalShortage.toFixed(2)}</Text>
                         </View>
                       </View>
                     )}
 
-                    {/* Currency breakdown - CASH ONLY */}
-                    <View style={styles.currencyRow}>
-                      <View style={styles.currencyItem}>
-                        <Text style={styles.currencyLabel}>ZW$</Text>
-                        <Text style={styles.currencyValue}>
-                          {varianceData.breakdown.zig.actual > 0 ? varianceData.breakdown.zig.actual.toFixed(2) : '—'}
-                        </Text>
+                    {/* Detailed Count Breakdown - All Currencies */}
+                    <View style={styles.detailedCountCard}>
+                      <Text style={styles.detailedCountTitle}>💰 CASH COUNTED</Text>
+                      
+                      <View style={styles.detailedCountGrid}>
+                        <View style={styles.detailedCountItem}>
+                          <Text style={styles.detailedCountLabel}>ZW$ Cash</Text>
+                          <Text style={[styles.detailedCountValue, { color: '#f59e0b' }]}>
+                            ZW${(totals.cash_zig || 0).toLocaleString()}
+                          </Text>
+                        </View>
+                        <View style={styles.detailedCountItem}>
+                          <Text style={styles.detailedCountLabel}>USD Cash</Text>
+                          <Text style={[styles.detailedCountValue, { color: '#00f5ff' }]}>
+                            ${(totals.cash_usd || 0).toFixed(2)}
+                          </Text>
+                        </View>
+                        <View style={styles.detailedCountItem}>
+                          <Text style={styles.detailedCountLabel}>RAND Cash</Text>
+                          <Text style={[styles.detailedCountValue, { color: '#ffaa00' }]}>
+                            R{(totals.cash_rand || 0).toFixed(2)}
+                          </Text>
+                        </View>
                       </View>
-                      <View style={styles.currencyItem}>
-                        <Text style={[styles.currencyLabel, { color: '#00f5ff' }]}>USD</Text>
-                        <Text style={[styles.currencyValue, { color: '#00f5ff' }]}>
-                          {varianceData.breakdown.usd.actual > 0 ? varianceData.breakdown.usd.actual.toFixed(2) : '—'}
-                        </Text>
-                      </View>
-                      <View style={styles.currencyItem}>
-                        <Text style={[styles.currencyLabel, { color: '#ffaa00' }]}>RAND</Text>
-                        <Text style={[styles.currencyValue, { color: '#ffaa00' }]}>
-                          {varianceData.breakdown.rand.actual > 0 ? varianceData.breakdown.rand.actual.toFixed(2) : '—'}
+                      
+                      <View style={styles.detailedCountTotal}>
+                        <Text style={styles.detailedCountTotalLabel}>TOTAL CASH:</Text>
+                        <Text style={styles.detailedCountTotalValue}>
+                          ZW${(totals.cash_zig || 0).toLocaleString()} + ${(totals.cash_usd || 0).toFixed(2)} + R{(totals.cash_rand || 0).toFixed(2)}
                         </Text>
                       </View>
                     </View>
-
-                    {/* Card Currency Breakdown */}
-                    {varianceData.breakdown.card.expected > 0 && (
-                      <View style={[styles.currencyRow, { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(16, 185, 129, 0.2)' }]}>
-                        <View style={styles.currencyItem}>
-                          <Text style={[styles.currencyLabel, { color: '#10b981' }]}>ZW$ CARD</Text>
-                          <Text style={[styles.currencyValue, { color: '#10b981' }]}>
-                            {d.current_card?.zig > 0 ? `ZW$${d.current_card.zig.toLocaleString()}` : '—'}
+                    
+                    {/* Electronic Payments Breakdown */}
+                    <View style={styles.detailedCountCard}>
+                      <Text style={styles.detailedCountTitle}>💳 ELECTRONIC PAYMENTS</Text>
+                      
+                      <View style={styles.detailedCountGrid}>
+                        <View style={styles.detailedCountItem}>
+                          <Text style={styles.detailedCountLabel}>Card</Text>
+                          <Text style={[styles.detailedCountValue, { color: '#10b981' }]}>
+                            ${(totals.card || 0).toFixed(2)}
                           </Text>
                         </View>
-                        <View style={styles.currencyItem}>
-                          <Text style={[styles.currencyLabel, { color: '#10b981' }]}>USD CARD</Text>
-                          <Text style={[styles.currencyValue, { color: '#10b981' }]}>
-                            {d.current_card?.usd > 0 ? `$${d.current_card.usd.toFixed(2)}` : '—'}
+                        <View style={styles.detailedCountItem}>
+                          <Text style={styles.detailedCountLabel}>Transfer</Text>
+                          <Text style={[styles.detailedCountValue, { color: '#00f5ff' }]}>
+                            ${(count.electronic_payments?.total_transfer || 0).toFixed(2)}
                           </Text>
                         </View>
-                        <View style={styles.currencyItem}>
-                          <Text style={[styles.currencyLabel, { color: '#10b981' }]}>RAND CARD</Text>
-                          <Text style={[styles.currencyValue, { color: '#10b981' }]}>
-                            {d.current_card?.rand > 0 ? `R${d.current_card.rand.toFixed(2)}` : '—'}
+                        <View style={styles.detailedCountItem}>
+                          <Text style={styles.detailedCountLabel}>EcoCash</Text>
+                          <Text style={[styles.detailedCountValue, { color: '#ffaa00' }]}>
+                            ${(totals.ecocash || 0).toFixed(2)}
                           </Text>
                         </View>
                       </View>
-                    )}
+                    </View>
                     
-                    {/* Tap Instruction - PROMINENT */}
-                    {varianceData.varianceType === 'pending' && (
-                      <View style={styles.tapToCountRow}>
-                        <Icon name="touch-app" size={24} color="#00f5ff" />
-                        <Text style={styles.tapToCountText}>TAP HERE TO COUNT CASH</Text>
+                    {/* Denominations Breakdown */}
+                    {count.denominations && (
+                      <View style={styles.denominationsBreakdownCard}>
+                        <Text style={styles.denominationsBreakdownTitle}>🧮 DENOMINATIONS</Text>
+                        
+                        {/* USD Denominations */}
+                        {count.denominations.usd && (
+                          <View style={styles.denominationSection}>
+                            <Text style={styles.denominationSectionTitle}>USD Bills</Text>
+                            <View style={styles.denominationGrid}>
+                              {[
+                                { label: '$100', value: count.denominations.usd['100'] },
+                                { label: '$50', value: count.denominations.usd['50'] },
+                                { label: '$20', value: count.denominations.usd['20'] },
+                                { label: '$10', value: count.denominations.usd['10'] },
+                                { label: '$5', value: count.denominations.usd['5'] },
+                                { label: '$2', value: count.denominations.usd['2'] },
+                                { label: '$1', value: count.denominations.usd['1'] },
+                              ].filter(d => d.value > 0).map((denom, idx) => (
+                                <View key={idx} style={styles.denominationItem}>
+                                  <Text style={styles.denominationItemLabel}>{denom.label}</Text>
+                                  <Text style={styles.denominationItemValue}>×{denom.value}</Text>
+                                </View>
+                              ))}
+                            </View>
+                            {/* USD Coins */}
+                            <Text style={styles.denominationSectionTitle}>USD Coins</Text>
+                            <View style={styles.denominationGrid}>
+                              {[
+                                { label: '$1 Coin', value: count.denominations.usd['1_coin'] },
+                                { label: '50¢', value: count.denominations.usd['0.50'] },
+                                { label: '25¢', value: count.denominations.usd['0.25'] },
+                                { label: '10¢', value: count.denominations.usd['0.10'] },
+                                { label: '5¢', value: count.denominations.usd['0.05'] },
+                                { label: '1¢', value: count.denominations.usd['0.01'] },
+                              ].filter(d => d.value > 0).map((denom, idx) => (
+                                <View key={idx} style={styles.denominationItem}>
+                                  <Text style={styles.denominationItemLabel}>{denom.label}</Text>
+                                  <Text style={styles.denominationItemValue}>×{denom.value}</Text>
+                                </View>
+                              ))}
+                            </View>
+                          </View>
+                        )}
+                        
+                        {/* ZIG Denominations */}
+                        {count.denominations.zig && (
+                          <View style={styles.denominationSection}>
+                            <Text style={styles.denominationSectionTitle}>ZW$ Notes</Text>
+                            <View style={styles.denominationGrid}>
+                              {[
+                                { label: 'Z$100', value: count.denominations.zig['100'] },
+                                { label: 'Z$50', value: count.denominations.zig['50'] },
+                                { label: 'Z$20', value: count.denominations.zig['20'] },
+                                { label: 'Z$10', value: count.denominations.zig['10'] },
+                                { label: 'Z$5', value: count.denominations.zig['5'] },
+                                { label: 'Z$2', value: count.denominations.zig['2'] },
+                                { label: 'Z$1', value: count.denominations.zig['1'] },
+                              ].filter(d => d.value > 0).map((denom, idx) => (
+                                <View key={idx} style={styles.denominationItem}>
+                                  <Text style={styles.denominationItemLabel}>{denom.label}</Text>
+                                  <Text style={styles.denominationItemValue}>×{denom.value}</Text>
+                                </View>
+                              ))}
+                            </View>
+                            {/* ZIG Coins */}
+                            <Text style={styles.denominationSectionTitle}>ZW$ Coins</Text>
+                            <View style={styles.denominationGrid}>
+                              {[
+                                { label: '50¢', value: count.denominations.zig['0.50'] },
+                              ].filter(d => d.value > 0).map((denom, idx) => (
+                                <View key={idx} style={styles.denominationItem}>
+                                  <Text style={styles.denominationItemLabel}>{denom.label}</Text>
+                                  <Text style={styles.denominationItemValue}>×{denom.value}</Text>
+                                </View>
+                              ))}
+                            </View>
+                          </View>
+                        )}
+
+                        {/* RAND Denominations */}
+                        {count.denominations.rand && (
+                          <View style={styles.denominationSection}>
+                            <Text style={styles.denominationSectionTitle}>RAND Notes</Text>
+                            <View style={styles.denominationGrid}>
+                              {[
+                                { label: 'R200', value: count.denominations.rand['200'] },
+                                { label: 'R100', value: count.denominations.rand['100'] },
+                                { label: 'R50', value: count.denominations.rand['50'] },
+                                { label: 'R20', value: count.denominations.rand['20'] },
+                                { label: 'R10', value: count.denominations.rand['10'] },
+                                { label: 'R5', value: count.denominations.rand['5'] },
+                                { label: 'R2', value: count.denominations.rand['2'] },
+                                { label: 'R1', value: count.denominations.rand['1'] },
+                              ].filter(d => d.value > 0).map((denom, idx) => (
+                                <View key={idx} style={styles.denominationItem}>
+                                  <Text style={styles.denominationItemLabel}>{denom.label}</Text>
+                                  <Text style={styles.denominationItemValue}>×{denom.value}</Text>
+                                </View>
+                              ))}
+                            </View>
+                            {/* RAND Coins */}
+                            <Text style={styles.denominationSectionTitle}>RAND Coins</Text>
+                            <View style={styles.denominationGrid}>
+                              {[
+                                { label: '50c', value: count.denominations.rand['0.50'] },
+                                { label: '20c', value: count.denominations.rand['0.20'] },
+                                { label: '10c', value: count.denominations.rand['0.10'] },
+                                { label: '5c', value: count.denominations.rand['0.05'] },
+                              ].filter(d => d.value > 0).map((denom, idx) => (
+                                <View key={idx} style={styles.denominationItem}>
+                                  <Text style={styles.denominationItemLabel}>{denom.label}</Text>
+                                  <Text style={styles.denominationItemValue}>×{denom.value}</Text>
+                                </View>
+                              ))}
+                            </View>
+                          </View>
+                        )}
+                      </View>
+                    )}
+
+                    {/* Count Timestamp */}
+                    <View style={styles.countTimestampRow}>
+                      <Icon name="access-time" size={14} color="#6b7280" />
+                      <Text style={styles.countTimestampText}>
+                        Counted: {count.counted_at ? new Date(count.counted_at).toLocaleString() : 'Unknown'}
+                      </Text>
+                    </View>
+                    
+                    {/* Notes if any */}
+                    {count.notes && (
+                      <View style={styles.countNotesRow}>
+                        <Icon name="note" size={14} color="#8b5cf6" />
+                        <Text style={styles.countNotesText}>{count.notes}</Text>
                       </View>
                     )}
                     
                     <View style={styles.neuralCashierLine} />
-                  </TouchableOpacity>
+                  </View>
                 );
               })
             )}
           </View>
           
-          {/* Neural Summary Card */}
+          {/* Neural Summary Card - Updated for Completed Counts */}
           <View style={styles.neuralSummaryCard}>
             <View style={styles.neuralSummaryHeader}>
               <Icon name="summarize" size={20} color="#00f5ff" />
@@ -1406,28 +1642,25 @@ const EODProductionScreen = () => {
             </View>
             <View style={styles.neuralSummaryContent}>
               <View style={styles.neuralSummaryItem}>
-                <Text style={styles.neuralSummaryLabel}>CASHIERS VERIFIED</Text>
-                <Text style={styles.neuralSummaryValue}>{verifiedCount}/{totalCashiers}</Text>
+                <Text style={styles.neuralSummaryLabel}>CASHIERS COUNTED</Text>
+                <Text style={styles.neuralSummaryValue}>{completedCashierCounts.length}</Text>
               </View>
               <View style={styles.neuralSummaryDivider} />
               <View style={styles.neuralSummaryItem}>
-                <Text style={styles.neuralSummaryLabel}>TOTAL VERIFIED</Text>
-                <Text style={[styles.neuralSummaryValue, { color: '#00ff88' }]}>${(stats.actual || 0).toFixed(2)}</Text>
+                <Text style={styles.neuralSummaryLabel}>WITH SHORTAGES</Text>
+                <Text style={[styles.neuralSummaryValue, { color: '#ff4444' }]}>
+                  {completedCashierCounts.filter(c => (c.variances?.total || 0) < 0).length}
+                </Text>
               </View>
               <View style={styles.neuralSummaryDivider} />
               <View style={styles.neuralSummaryItem}>
-                <Text style={styles.neuralSummaryLabel}>TRANSFERS</Text>
-                <Text style={[styles.neuralSummaryValue, { color: '#00f5ff' }]}>${(stats.transferTotal || 0).toFixed(2)}</Text>
-              </View>
-              <View style={styles.neuralSummaryDivider} />
-              <View style={styles.neuralSummaryItem}>
-                <Text style={styles.neuralSummaryLabel}>CARD</Text>
-                <Text style={[styles.neuralSummaryValue, { color: '#10b981' }]}>${(stats.totalCard || 0).toFixed(2)}</Text>
-              </View>
-              <View style={styles.neuralSummaryDivider} />
-              <View style={styles.neuralSummaryItem}>
-                <Text style={styles.neuralSummaryLabel}>VARIANCE</Text>
-                <Text style={[styles.neuralSummaryValue, { color: varianceColor }]}>${Math.abs(stats.variance).toFixed(2)}</Text>
+                <Text style={styles.neuralSummaryLabel}>TOTAL SHORTAGE</Text>
+                <Text style={[styles.neuralSummaryValue, { color: '#ff4444' }]}>
+                  ${completedCashierCounts.reduce((sum, c) => {
+                    const variance = c.variances?.total || 0;
+                    return sum + (variance < 0 ? Math.abs(variance) : 0);
+                  }, 0).toFixed(2)}
+                </Text>
               </View>
             </View>
           </View>
@@ -1470,13 +1703,36 @@ const EODProductionScreen = () => {
             <View style={styles.neuralFinalizationStatus}>
               <View style={styles.neuralStatusRow}>
                 <Icon name="verified" size={24} color="#00ff88" style={styles.neuralStatusRowIcon} />
-                <Text style={styles.neuralStatusRowText}>Verification</Text>
-                <Text style={[styles.neuralStatusRowValue, { color: '#00ff88' }]}>{verifiedCount}/{totalCashiers} Complete</Text>
+                <Text style={styles.neuralStatusRowText}>Cashiers Counted</Text>
+                <Text style={[styles.neuralStatusRowValue, { 
+                  color: completedCashierCounts.length === totalCashiers && totalCashiers > 0 ? '#00ff88' : '#ff4444' 
+                }]}>
+                  {completedCashierCounts.length}/{totalCashiers} Complete
+                </Text>
               </View>
+              
+              {/* Show which cashiers haven't counted yet */}
+              {completedCashierCounts.length < totalCashiers && todayDrawers.length > 0 && (
+                <View style={[styles.neuralStatusRow, { backgroundColor: 'rgba(255, 68, 68, 0.2)', borderColor: '#ff4444', borderWidth: 1 }]}>
+                  <Icon name="warning" size={24} color="#ff4444" style={styles.neuralStatusRowIcon} />
+                  <Text style={[styles.neuralStatusRowText, { color: '#ff4444' }]}>
+                    Waiting for: {todayDrawers
+                      .filter(d => !completedCashierCounts.some(c => c.cashier_name === (d.cashier_name || d.cashier)))
+                      .map(d => d.cashier_name || d.cashier)
+                      .join(', ')}
+                  </Text>
+                </View>
+              )}
+              
               <View style={styles.neuralStatusRow}>
                 <Icon name="analytics" size={24} color={varianceColor} style={styles.neuralStatusRowIcon} />
-                <Text style={styles.neuralStatusRowText}>Variance</Text>
-                <Text style={[styles.neuralStatusRowValue, { color: varianceColor }]}>${Math.abs(stats.variance).toFixed(2)}</Text>
+                <Text style={styles.neuralStatusRowText}>Total Shortage</Text>
+                <Text style={[styles.neuralStatusRowValue, { color: '#ff4444' }]}>
+                  ${completedCashierCounts.reduce((sum, c) => {
+                    const variance = c.variances?.total || 0;
+                    return sum + (variance < 0 ? Math.abs(variance) : 0);
+                  }, 0).toFixed(2)}
+                </Text>
               </View>
             </View>
             
@@ -1484,9 +1740,9 @@ const EODProductionScreen = () => {
             <TouchableOpacity
               style={[
                 styles.neuralFinalizeButton,
-                (verifiedCount !== totalCashiers || finalizing || closing) && styles.neuralDisabledButton
+                (completedCashierCounts.length !== totalCashiers || totalCashiers === 0 || finalizing || closing) && styles.neuralDisabledButton
               ]}
-              disabled={verifiedCount !== totalCashiers || finalizing || closing}
+              disabled={completedCashierCounts.length !== totalCashiers || totalCashiers === 0 || finalizing || closing}
               onPress={() => setShowFinalizeModal(true)}
             >
               <View style={styles.neuralButtonGlow} />
@@ -1659,12 +1915,35 @@ const EODProductionScreen = () => {
             <View style={styles.finalizeModalSummary}>
               <Text style={styles.finalizeModalSummaryTitle}>DAY SUMMARY</Text>
               <View style={styles.finalizeModalRow}>
-                <Text style={styles.finalizeModalLabel}>Verified:</Text>
-                <Text style={styles.finalizeModalValue}>{verifiedCount}/{totalCashiers} Cashiers</Text>
+                <Text style={styles.finalizeModalLabel}>Cashiers Counted:</Text>
+                <Text style={[styles.finalizeModalValue, { 
+                  color: completedCashierCounts.length === totalCashiers && totalCashiers > 0 ? '#00ff88' : '#ff4444'
+                }]}>
+                  {completedCashierCounts.length}/{totalCashiers}
+                </Text>
               </View>
+              
+              {/* Show who hasn't counted */}
+              {completedCashierCounts.length < totalCashiers && todayDrawers.length > 0 && (
+                <View style={[styles.finalizeModalRow, { backgroundColor: 'rgba(255, 68, 68, 0.1)' }]}>
+                  <Text style={[styles.finalizeModalLabel, { color: '#ff4444' }]}>Still Waiting:</Text>
+                  <Text style={[styles.finalizeModalValue, { color: '#ff4444', flex: 1, textAlign: 'right' }]}>
+                    {todayDrawers
+                      .filter(d => !completedCashierCounts.some(c => c.cashier_name === (d.cashier_name || d.cashier)))
+                      .map(d => d.cashier_name || d.cashier)
+                      .join(', ')}
+                  </Text>
+                </View>
+              )}
+              
               <View style={styles.finalizeModalRow}>
-                <Text style={styles.finalizeModalLabel}>Variance:</Text>
-                <Text style={[styles.finalizeModalValue, { color: varianceColor }]}>${Math.abs(stats.variance).toFixed(2)}</Text>
+                <Text style={styles.finalizeModalLabel}>Total Shortage:</Text>
+                <Text style={[styles.finalizeModalValue, { color: '#ff4444' }]}>
+                  ${completedCashierCounts.reduce((sum, c) => {
+                    const variance = c.variances?.total || 0;
+                    return sum + (variance < 0 ? Math.abs(variance) : 0);
+                  }, 0).toFixed(2)}
+                </Text>
               </View>
               <View style={styles.finalizeModalRow}>
                 <Text style={styles.finalizeModalLabel}>Transfers:</Text>
@@ -2532,6 +2811,204 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     marginLeft: 12,
     letterSpacing: 2,
+  },
+  
+  // Shortage Breakdown Styles
+  shortageBreakdownCard: {
+    backgroundColor: 'rgba(255, 68, 68, 0.1)',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 68, 68, 0.3)',
+  },
+  shortageBreakdownTitle: {
+    color: '#ff4444',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 12,
+    letterSpacing: 1,
+  },
+  shortageBreakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 68, 68, 0.2)',
+  },
+  shortageBreakdownLabel: {
+    color: '#9ca3af',
+    fontSize: 14,
+  },
+  shortageBreakdownValue: {
+    color: '#ff4444',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  shortageTotalRow: {
+    marginTop: 8,
+    paddingTop: 12,
+    borderTopWidth: 2,
+    borderTopColor: '#ff4444',
+    borderBottomWidth: 0,
+  },
+  shortageTotalLabel: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  shortageTotalValue: {
+    color: '#ff4444',
+    fontSize: 20,
+    fontWeight: '900',
+  },
+  
+  // Count Timestamp Styles
+  countTimestampRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  countTimestampText: {
+    color: '#6b7280',
+    fontSize: 12,
+    marginLeft: 8,
+  },
+  
+  // Count Notes Styles
+  countNotesRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: 8,
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+  },
+  countNotesText: {
+    color: '#8b5cf6',
+    fontSize: 12,
+    marginLeft: 8,
+    flex: 1,
+    lineHeight: 18,
+  },
+
+  // Detailed Count Card Styles
+  detailedCountCard: {
+    backgroundColor: 'rgba(0, 245, 255, 0.05)',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 245, 255, 0.3)',
+  },
+  detailedCountTitle: {
+    color: '#00f5ff',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 12,
+    letterSpacing: 1,
+  },
+  detailedCountGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  detailedCountItem: {
+    width: '30%',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 8,
+    alignItems: 'center',
+  },
+  detailedCountLabel: {
+    color: '#9ca3af',
+    fontSize: 11,
+    marginBottom: 4,
+  },
+  detailedCountValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  detailedCountTotal: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0, 245, 255, 0.3)',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  detailedCountTotalLabel: {
+    color: '#00f5ff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  detailedCountTotalValue: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+
+  // Denominations Breakdown Styles
+  denominationsBreakdownCard: {
+    backgroundColor: 'rgba(255, 170, 0, 0.05)',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 170, 0, 0.3)',
+  },
+  denominationsBreakdownTitle: {
+    color: '#ffaa00',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 12,
+    letterSpacing: 1,
+  },
+  denominationSection: {
+    marginBottom: 12,
+  },
+  denominationSectionTitle: {
+    color: '#9ca3af',
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginBottom: 8,
+    letterSpacing: 1,
+  },
+  denominationGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  denominationItem: {
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 80,
+  },
+  denominationItemLabel: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginRight: 8,
+  },
+  denominationItemValue: {
+    color: '#00ff88',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   
   // Neural Notes Section

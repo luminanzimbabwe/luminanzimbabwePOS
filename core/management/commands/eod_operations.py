@@ -9,6 +9,7 @@ import datetime
 
 from core.models import ShopConfiguration, Cashier, ShopDay
 from core.models_reconciliation import CashierCount, ReconciliationSession
+from core.models_cashier_archive import CashierCountArchive
 
 
 class Command(BaseCommand):
@@ -158,6 +159,11 @@ class Command(BaseCommand):
 
         # Calculate final summary
         session.calculate_session_summary()
+        
+        # ARCHIVE all cashier counts BEFORE completing (permanent history)
+        self.stdout.write('Archiving cashier counts for permanent history...')
+        archived = CashierCountArchive.archive_all_counts_for_date(shop, date)
+        self.stdout.write(self.style.SUCCESS(f'  ✓ Archived {len(archived)} cashier count records'))
         
         # Complete the session
         session.complete_session(cashier)

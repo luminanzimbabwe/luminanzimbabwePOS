@@ -9,6 +9,7 @@ import {
   PanResponder,
   Platform,
   ScrollView,
+  TextInput,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 
@@ -18,6 +19,7 @@ const SIDEBAR_WIDTH = Math.min(width * 0.75, 350); // Cover up to 75% of screen,
 const FeatureSidebar = ({ isVisible, onClose }) => {
   const navigation = useNavigation();
   const [sidebarX] = useState(new Animated.Value(-SIDEBAR_WIDTH));
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Animation for opening/closing sidebar
   React.useEffect(() => {
@@ -155,6 +157,15 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
       icon: '💰',
       screen: 'DrawerManagement',
       color: '#10b981',
+      section: 'sales'
+    },
+    {
+      id: 'cashier-history',
+      title: '📜 Cashier History',
+      description: 'View archived cashier records & past performance',
+      icon: '📜',
+      screen: 'CashierHistory',
+      color: '#06b6d4',
       section: 'sales'
     },
     // Analytics & Reports Section
@@ -310,6 +321,21 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
     },
   ];
 
+  // Filter features based on search query
+  const getFilteredFeatures = () => {
+    if (!searchQuery.trim()) {
+      return features;
+    }
+    const query = searchQuery.toLowerCase();
+    return features.filter(feature =>
+      feature.title.toLowerCase().includes(query) ||
+      feature.description.toLowerCase().includes(query) ||
+      feature.id.toLowerCase().includes(query)
+    );
+  };
+
+  const filteredFeatures = getFilteredFeatures();
+
   const handleFeaturePress = (feature) => {
     onClose(); // Close sidebar first
     
@@ -348,6 +374,9 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
         break;
       case 'DrawerManagement':
         navigation.navigate('Drawers');
+        break;
+      case 'CashierHistory':
+        navigation.navigate('CashierHistory');
         break;
       
 
@@ -468,36 +497,79 @@ const FeatureSidebar = ({ isVisible, onClose }) => {
           </TouchableOpacity>
         </View>
 
-        {/* Features List */}
-        <ScrollView style={styles.featuresList} showsVerticalScrollIndicator={false}>
-          {/* Shop Management Section */}
-          <View style={styles.featuresSection}>
-            <Text style={styles.sectionTitle}>🏢 Shop Management</Text>
-            {features.filter(f => f.section === 'shop-management').map(renderFeatureItem)}
-          </View>
+        {/* Search Bar */}
+        <View style={styles.searchContainer}>
+          <Text style={styles.searchIcon}>🔍</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search features..."
+            placeholderTextColor="#666"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
+              <Text style={styles.clearButtonText}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
-          {/* Sales Command Center Section */}
-          <View style={styles.featuresSection}>
-            <Text style={styles.sectionTitle}>💰 Sales Command Center</Text>
-            {features.filter(f => f.section === 'sales').map(renderFeatureItem)}
-          </View>
+        {/* Features List - Wrapped to capture touch events */}
+        <View
+          style={styles.featuresList}
+          onStartShouldSetResponder={() => true}
+          onMoveShouldSetResponder={() => true}
+        >
+          <ScrollView
+            style={{ flex: 1 }}
+            showsVerticalScrollIndicator={false}
+            scrollEventThrottle={16}
+            nestedScrollEnabled={true}
+          >
+            {filteredFeatures.length === 0 ? (
+              <View style={styles.noResultsContainer}>
+                <Text style={styles.noResultsIcon}>🔍</Text>
+                <Text style={styles.noResultsText}>No features found</Text>
+                <Text style={styles.noResultsSubtext}>Try searching for something else</Text>
+              </View>
+            ) : searchQuery.trim() ? (
+              // Show all filtered results without sections when searching
+              <View style={styles.featuresSection}>
+                <Text style={styles.sectionTitle}>🔍 Search Results ({filteredFeatures.length})</Text>
+                {filteredFeatures.map(renderFeatureItem)}
+              </View>
+            ) : (
+              // Show organized sections when not searching
+              <>
+                {/* Shop Management Section */}
+                <View style={styles.featuresSection}>
+                  <Text style={styles.sectionTitle}>🏢 Shop Management</Text>
+                  {features.filter(f => f.section === 'shop-management').map(renderFeatureItem)}
+                </View>
 
+                {/* Sales Command Center Section */}
+                <View style={styles.featuresSection}>
+                  <Text style={styles.sectionTitle}>💰 Sales Command Center</Text>
+                  {features.filter(f => f.section === 'sales').map(renderFeatureItem)}
+                </View>
 
+                {/* Inventory Management Section */}
+                <View style={styles.featuresSection}>
+                  <Text style={styles.sectionTitle}>📦 Inventory Management</Text>
+                  {features.filter(f => f.section === 'inventory').map(renderFeatureItem)}
+                </View>
 
-          {/* Inventory Management Section */}
-          <View style={styles.featuresSection}>
-            <Text style={styles.sectionTitle}>📦 Inventory Management</Text>
-            {features.filter(f => f.section === 'inventory').map(renderFeatureItem)}
-          </View>
-
-
-
-          {/* Business Tools Section */}
-          <View style={styles.featuresSection}>
-            <Text style={styles.sectionTitle}>🏢 Business Tools</Text>
-            {features.filter(f => f.section === 'business').map(renderFeatureItem)}
-          </View>
-        </ScrollView>
+                {/* Business Tools Section */}
+                <View style={styles.featuresSection}>
+                  <Text style={styles.sectionTitle}>🏢 Business Tools</Text>
+                  {features.filter(f => f.section === 'business').map(renderFeatureItem)}
+                </View>
+              </>
+            )}
+          </ScrollView>
+        </View>
 
         {/* Sidebar Footer */}
         <View style={styles.sidebarFooter}>
@@ -574,6 +646,55 @@ const styles = StyleSheet.create({
   featuresList: {
     flex: 1,
     padding: 16,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#2a2a2a',
+    borderRadius: 12,
+    margin: 16,
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  searchIcon: {
+    fontSize: 16,
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 14,
+    paddingVertical: 4,
+  },
+  clearButton: {
+    padding: 4,
+  },
+  clearButtonText: {
+    color: '#999',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  noResultsContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  noResultsIcon: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  noResultsText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  noResultsSubtext: {
+    color: '#666',
+    fontSize: 12,
   },
   featuresSection: {
     marginBottom: 24,

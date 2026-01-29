@@ -357,33 +357,16 @@ def update_cash_float_on_sale(sender, instance, created, **kwargs):
         # Also call the model's method for additional consistency
         drawer.update_expected_cash()
 
-        # CRITICAL FIX: Account for staff lunch deductions
-        # Staff lunch deductions are taken from the drawer, so we need to subtract them
-        # from the drawer cash to get the actual money remaining
-        today_staff_lunches = StaffLunch.objects.filter(
-            shop=shop,
-            created_at__range=[day_start, day_end],
-            product=None  # Money lunches only (deduct from drawer)
-        )
-        staff_lunch_total = today_staff_lunches.aggregate(total=Sum('total_cost'))['total'] or Decimal('0.00')
-
-        # Subtract staff lunch from drawer cash USD (staff lunch is always in USD)
-        if staff_lunch_total > 0:
-            logger.info(f"Accounting for staff lunch deductions: ${staff_lunch_total}")
-            drawer.current_cash_usd -= staff_lunch_total
-            drawer.current_total_usd -= staff_lunch_total
-            drawer.session_cash_sales_usd -= staff_lunch_total
-            drawer.session_total_sales_usd -= staff_lunch_total
-
-            # Also update expected cash (reduce it by staff lunch amount)
-            drawer.expected_cash_at_eod -= staff_lunch_total
-            drawer.expected_cash_usd -= staff_lunch_total
-
-            # Update legacy fields too
-            drawer.current_cash -= staff_lunch_total
-            drawer.current_total -= staff_lunch_total
-            drawer.session_cash_sales -= staff_lunch_total
-            drawer.session_total_sales -= staff_lunch_total
+        # PERMANENT FIX: Staff lunch is ONLY deducted in CashierCount.update_from_cash_float()
+        # when calculating the expected amount for reconciliation.
+        # We do NOT deduct it from the drawer here because:
+        # 1. The drawer tracks ACTUAL sales (what came into the till)
+        # 2. Staff lunch is a deduction from what the cashier needs to account for
+        # 3. Expected amount = Float + Sales - Staff Lunch
+        # 4. If we deduct lunch from both drawer AND expected, we get double-deduction
+        #
+        # The drawer fields (current_cash, session_cash_sales) show raw sales data.
+        # The expected_cash_at_eod already includes the calculation in update_expected_cash().
 
         # Update last activity
         drawer.last_activity = timezone.now()

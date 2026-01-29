@@ -267,9 +267,13 @@ export const shopAPI = {
   },
   getCashierCount: (cashierId, date, config = {}) => api.get(`/reconciliation/count/?cashier_id=${cashierId}&date=${date}`, config),
   saveCashierCount: (countData, config = {}) => api.post('/reconciliation/count/', countData, config),
+  // DELETE - Clear all cashier counts for a date (called during EOD finalization)
+  clearCashierCounts: (date, config = {}) => api.delete(`/reconciliation/count/?date=${date}`, config),
   getReconciliationSession: (date, config = {}) => api.get(`/reconciliation/session/?date=${date}`, config),
   startReconciliationSession: (data, config = {}) => api.post('/reconciliation/session/', { ...data, action: 'start' }, config),
   completeReconciliationSession: (data, config = {}) => api.post('/reconciliation/session/', { ...data, action: 'complete' }, config),
+  // DELETE - Reset reconciliation session for a date (called during EOD finalization)
+  resetReconciliationSession: (date, config = {}) => api.delete(`/reconciliation/session/?date=${date}`, config),
 
   // Stock Take methods - NO AUTHENTICATION REQUIRED
   createStockTake: (data) => api.post('/stock-takes/', data),
@@ -358,6 +362,18 @@ export const shopAPI = {
   // System Health Monitoring methods
   getSystemHealth: () => api.get('/health/'),
   testConnectivity: () => api.get('/status/'),
+  
+  // Cashier History methods
+  getCashierHistory: (params = {}) => {
+    const queryParams = new URLSearchParams();
+    if (params.cashier_id) queryParams.append('cashier_id', params.cashier_id);
+    if (params.date_from) queryParams.append('date_from', params.date_from);
+    if (params.date_to) queryParams.append('date_to', params.date_to);
+    if (params.status) queryParams.append('status', params.status);
+    const url = queryParams.toString() ? `/cashiers/history/?${queryParams.toString()}` : '/cashiers/history/';
+    return api.get(url);
+  },
+  getCashierPerformance: (days = 30) => api.get(`/cashiers/performance/?days=${days}`),
 };
 
 // Export apiService as alias for shopAPI for backwards compatibility

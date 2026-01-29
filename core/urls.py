@@ -10,6 +10,7 @@ from .waste_batch_views import WasteBatchListView, WasteBatchDetailView
 from .sales_command_center_views import InfiniteSalesFeedView, SaleAuditTrailView, SalesAnalyticsView, SalesExceptionReportView, EODReconciliationView, ShopDayManagementView
 from .cash_float_refund_view import add_drawer_refund
 from .reconciliation_views import CashierCountView, ReconciliationSessionView, EODReconciliationEnhancedView
+from .cashier_history_views import CashierHistoryView, CashierPerformanceView, CashierArchiveStatsView
 from .cashier_refund_view import process_cashier_refund, get_cashier_refunds
 # Import cash float API views
 from .models import cash_float_management, activate_cashier_drawer, update_drawer_sale, settle_drawer_at_eod, get_all_cashiers_drawer_status, reset_all_drawers_at_eod, emergency_reset_all_drawers, check_cashier_drawer_access, update_cashier_drawer_access, get_shop_status, get_cashier_drawer_today, get_cashier_drawer_session, get_all_drawers_session
@@ -88,6 +89,11 @@ urlpatterns = [
     path('reconciliation/enhanced/', EODReconciliationEnhancedView.as_view(), name='eod-reconciliation-enhanced'),
     path('reconciliation/count/', CashierCountView.as_view(), name='cashier-count'),
     path('reconciliation/session/', ReconciliationSessionView.as_view(), name='reconciliation-session'),
+    
+    # Cashier History endpoints
+    path('cashiers/history/', CashierHistoryView.as_view(), name='cashier-history'),
+    path('cashiers/performance/', CashierPerformanceView.as_view(), name='cashier-performance'),
+    path('cashiers/archive-stats/', CashierArchiveStatsView.as_view(), name='cashier-archive-stats'),
     
     # Exchange Rate Management endpoints
     path('exchange-rates/', exchange_rate_api, name='exchange-rate-management'),
