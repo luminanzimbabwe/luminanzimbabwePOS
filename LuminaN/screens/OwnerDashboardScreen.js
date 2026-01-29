@@ -1083,18 +1083,19 @@ const OwnerDashboardScreen = () => {
   }
 
   return (
-    <ScrollView
-      style={styles.container}
-      refreshControl={
-        <RefreshControl
-          refreshing={statusLoading || drawerLoading}
-          onRefresh={() => {
-            loadShopStatus();
-            loadDrawerStatus();
-          }}
-        />
-      }
-    >
+    <View style={styles.container}>
+      <ScrollView
+        style={styles.scrollContainer}
+        refreshControl={
+          <RefreshControl
+            refreshing={statusLoading || drawerLoading}
+            onRefresh={() => {
+              loadShopStatus();
+              loadDrawerStatus();
+            }}
+          />
+        }
+      >
       {/* Futuristic 2080 Owner Command Center Header */}
       <View style={styles.futuristic2080Header} {...panResponder.panHandlers}>
         {/* Holographic Background Elements */}
@@ -2356,22 +2357,24 @@ const OwnerDashboardScreen = () => {
       {/* Bottom Padding */}
       <View style={styles.bottomPadding} />
 
-      {/* Feature Sidebar */}
-      <FeatureSidebar
-        isVisible={sidebarVisible}
-        onClose={() => setSidebarVisible(false)}
-      />
-      
-      {/* License Renewal Prompt */}
-      <LicenseRenewalPrompt
-        visible={showRenewalPrompt}
-        onClose={() => setShowRenewalPrompt(false)}
-        onRenew={handleRenewLicense}
-        daysRemaining={daysRemaining}
-        isExpired={daysRemaining <= 0}
-        licenseType={licenseInfo?.type || 'TRIAL'}
-      />
     </ScrollView>
+
+    {/* Feature Sidebar - Outside ScrollView for independent scrolling */}
+    <FeatureSidebar
+      isVisible={sidebarVisible}
+      onClose={() => setSidebarVisible(false)}
+    />
+    
+    {/* License Renewal Prompt */}
+    <LicenseRenewalPrompt
+      visible={showRenewalPrompt}
+      onClose={() => setShowRenewalPrompt(false)}
+      onRenew={handleRenewLicense}
+      daysRemaining={daysRemaining}
+      isExpired={daysRemaining <= 0}
+      licenseType={licenseInfo?.type || 'TRIAL'}
+    />
+  </View>
   );
 };
 
@@ -2379,6 +2382,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0f0f0f',
+  },
+  scrollContainer: {
+    flex: 1,
   },
   loadingContainer: {
     flex: 1,

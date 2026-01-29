@@ -991,7 +991,7 @@ const StartOfDayScreen = ({ navigation, route }) => {
               onPress={() => setShowStartModal(false)}
               style={styles.closeButton}
             >
-              <Icon name="close" size={24} color="#64748b" />
+              <Icon name="close" size={24} color="#ffffff" />
             </TouchableOpacity>
             <Text style={styles.modalTitle}>Start New Business Day</Text>
             <TouchableOpacity 
@@ -1046,7 +1046,7 @@ const StartOfDayScreen = ({ navigation, route }) => {
               onPress={() => setShowFloatModal(false)}
               style={styles.closeButton}
             >
-              <Icon name="close" size={24} color="#64748b" />
+              <Icon name="close" size={24} color="#ffffff" />
             </TouchableOpacity>
             <Text style={styles.modalTitle}>Set Multi-Currency Cash Float</Text>
             <TouchableOpacity 
@@ -1133,7 +1133,7 @@ const StartOfDayScreen = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1e293b',
+    backgroundColor: '#0f0f0f',
     ...Platform.select({
       web: {
         height: '100vh',
@@ -1147,10 +1147,11 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#0f0f0f',
   },
   loadingText: {
     fontSize: 16,
-    color: '#64748b',
+    color: '#ffffff',
   },
   scrollContentContainer: {
     flexGrow: 1,
@@ -1234,12 +1235,12 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#f8fafc',
+    color: '#ffffff',
     marginBottom: 8,
   },
   sectionSubtitle: {
     fontSize: 14,
-    color: '#94a3b8',
+    color: '#888',
     marginBottom: 12,
     fontStyle: 'italic',
   },
@@ -1352,16 +1353,16 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     flex: 1,
-    backgroundColor: '#f8fafc',
+    backgroundColor: '#0f0f0f',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 16,
-    backgroundColor: '#fff',
+    backgroundColor: '#1a1a1a',
     borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
+    borderBottomColor: '#333',
   },
   closeButton: {
     padding: 4,
@@ -1369,12 +1370,12 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#1e293b',
+    color: '#ffffff',
   },
   saveButton: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    backgroundColor: '#3b82f6',
+    backgroundColor: '#10b981',
     borderRadius: 8,
   },
   saveButtonText: {
@@ -1390,25 +1391,26 @@ const styles = StyleSheet.create({
   formLabel: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1e293b',
+    color: '#ffffff',
     marginBottom: 8,
   },
   notesInput: {
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: '#333',
     borderRadius: 8,
     padding: 12,
     fontSize: 14,
-    color: '#1e293b',
+    color: '#ffffff',
+    backgroundColor: '#1a1a1a',
     minHeight: 100,
   },
   infoCard: {
-    backgroundColor: '#eff6ff',
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
     borderRadius: 8,
     padding: 16,
     flexDirection: 'row',
     borderWidth: 1,
-    borderColor: '#bfdbfe',
+    borderColor: 'rgba(16, 185, 129, 0.3)',
   },
   infoContent: {
     flex: 1,
@@ -1417,12 +1419,12 @@ const styles = StyleSheet.create({
   infoTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#1e293b',
+    color: '#ffffff',
     marginBottom: 8,
   },
   infoText: {
     fontSize: 12,
-    color: '#64748b',
+    color: '#94a3b8',
     marginBottom: 2,
   },
 
@@ -1515,18 +1517,21 @@ const styles = StyleSheet.create({
   cashierNameDisplay: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1e293b',
-    backgroundColor: '#f1f5f9',
+    color: '#ffffff',
+    backgroundColor: '#1a1a1a',
     padding: 12,
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#333',
   },
   floatInput: {
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: '#333',
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
-    color: '#1e293b',
+    color: '#ffffff',
+    backgroundColor: '#1a1a1a',
   },
   disabledButton: {
     opacity: 0.6,
@@ -1534,14 +1539,14 @@ const styles = StyleSheet.create({
 
   // Ultimate Header Styles (from Sales Dashboard)
   headerWithBack: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#0a0a0a',
     padding: 16,
     paddingTop: 40,
     flexDirection: 'row',
     alignItems: 'center',
   },
   ultimateHeader: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#0a0a0a',
     padding: 24,
     paddingTop: 24,
     position: 'relative',
@@ -1555,7 +1560,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+    backgroundColor: 'linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%)',
     opacity: 0.95,
   },
   commandCenterBadge: {
@@ -1714,7 +1719,7 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
   ultimateActionButton: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#1a1a1a',
     borderRadius: 16,
     padding: 20,
     width: '48%',
@@ -1796,7 +1801,7 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
   ultimateCashFlowCard: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#1a1a1a',
     borderRadius: 16,
     padding: 20,
     borderLeftWidth: 6,
@@ -1848,7 +1853,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   cashFlowMetricCard: {
-    backgroundColor: '#374151',
+    backgroundColor: '#2a2a2a',
     borderRadius: 12,
     padding: 16,
     width: '30%',
@@ -1876,7 +1881,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   cashFlowFinancialCard: {
-    backgroundColor: '#374151',
+    backgroundColor: '#2a2a2a',
     borderRadius: 12,
     padding: 16,
     width: '30%',
@@ -1909,7 +1914,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   ultimateDrawerCard: {
-    backgroundColor: '#374151',
+    backgroundColor: '#2a2a2a',
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
@@ -2042,7 +2047,7 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
   ultimateShiftsList: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#1a1a1a',
     borderRadius: 16,
     padding: 16,
     borderLeftWidth: 6,
@@ -2055,7 +2060,7 @@ const styles = StyleSheet.create({
     borderColor: '#334155',
   },
   ultimateShiftItem: {
-    backgroundColor: '#374151',
+    backgroundColor: '#2a2a2a',
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
@@ -2186,7 +2191,7 @@ const styles = StyleSheet.create({
   drawerAccessToggle: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#374151',
+    backgroundColor: '#2a2a2a',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 8,
@@ -2228,7 +2233,7 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
   ultimateSummaryCard: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#1a1a1a',
     borderRadius: 16,
     padding: 20,
     borderLeftWidth: 6,
@@ -2246,7 +2251,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   summaryMetricCard: {
-    backgroundColor: '#374151',
+    backgroundColor: '#2a2a2a',
     borderRadius: 12,
     padding: 16,
     width: '48%',
@@ -2279,7 +2284,7 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   ultimateNotesSection: {
-    backgroundColor: '#374151',
+    backgroundColor: '#2a2a2a',
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
@@ -2366,7 +2371,7 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
   ultimateClosedShopCard: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#1a1a1a',
     borderRadius: 16,
     padding: 24,
     borderLeftWidth: 6,
